@@ -294,17 +294,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'gcal_create_event': {
-          const approved = await notifications.requestApproval(
-            'Create Calendar Event',
-            `Create event "${args?.summary}" at ${args?.start}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Creating Event', `Summary: ${args?.summary}`);
 
           const event = await gcalApi.createEvent({
             summary: args?.summary as string,
@@ -327,17 +317,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'gcal_update_event': {
-          const approved = await notifications.requestApproval(
-            'Update Calendar Event',
-            `Update event ${args?.eventId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Updating Event', `ID: ${args?.eventId}`);
 
           const event = await gcalApi.updateEvent(
             args?.eventId as string,
@@ -362,17 +342,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'gcal_delete_event': {
-          const approved = await notifications.requestApproval(
-            'Delete Calendar Event',
-            `Delete event ${args?.eventId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Deleting Event', `ID: ${args?.eventId}`);
 
           await gcalApi.deleteEvent(
             args?.eventId as string,

@@ -26,6 +26,11 @@
     },
     "clean": {
       "cache": false
+    },
+    "package": {
+      "dependsOn": ["build"],
+      "outputs": ["out/**"],
+      "cache": false
     }
   }
 }

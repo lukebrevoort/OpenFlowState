@@ -12,6 +12,7 @@ import crypto from 'crypto';
 
 const FLOWSTATE_DIR = path.join(os.homedir(), '.flowstate');
 const AUTH_FILE = path.join(FLOWSTATE_DIR, 'auth.json');
+const CREDENTIALS_FILE = path.join(FLOWSTATE_DIR, 'credentials.json');
 const KEY_FILE = path.join(FLOWSTATE_DIR, 'master.key');
 const ALGORITHM = 'aes-256-gcm';
 
@@ -23,9 +24,16 @@ export interface AuthToken {
   scopes: string[];
 }
 
+export interface ClientCredentials {
+  clientId: string;
+  clientSecret: string;
+  redirectUri?: string;
+}
+
 export interface AuthStatus {
   service: string;
   connected: boolean;
+  configured: boolean; // Has Client ID/Secret
   lastRefresh?: Date;
   error?: string;
 }
@@ -161,13 +169,49 @@ export class AuthStore {
     }
   }
 
+  // --- Credentials Management ---
+
+  private async loadCredentials(): Promise<Record<string, ClientCredentials>> {
+    try {
+      const fileContent = await fs.readFile(CREDENTIALS_FILE, 'utf8');
+      const encryptedData: EncryptedData = JSON.parse(fileContent);
+      const jsonStr = this.decrypt(encryptedData);
+      return JSON.parse(jsonStr);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') return {};
+      console.error('[Auth] Error loading credentials:', error.message);
+      return {};
+    }
+  }
+
+  private async saveCredentials(creds: Record<string, ClientCredentials>): Promise<void> {
+    const jsonStr = JSON.stringify(creds);
+    const encryptedData = this.encrypt(jsonStr);
+    await fs.writeFile(CREDENTIALS_FILE, JSON.stringify(encryptedData, null, 2), { mode: 0o600 });
+  }
+
+  async storeClientConfig(service: string, config: ClientCredentials): Promise<void> {
+    await this.initialize();
+    const creds = await this.loadCredentials();
+    creds[service] = config;
+    await this.saveCredentials(creds);
+    console.log(`[Auth] Stored credentials for ${service}`);
+  }
+
+  async getClientConfig(service: string): Promise<ClientCredentials | null> {
+    await this.initialize();
+    const creds = await this.loadCredentials();
+    return creds[service] || null;
+  }
+
   async getStatus(service: string): Promise<AuthStatus> {
     const token = await this.getToken(service);
+    const creds = await this.getClientConfig(service);
     return {
       service,
       connected: !!token,
-      lastRefresh: token?.expiresAt, // This might be expiration, not last refresh.
-      // Refined: usually we want to know when it expires.
+      configured: !!creds,
+      lastRefresh: token?.expiresAt,
     };
   }
 

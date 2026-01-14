@@ -28,6 +28,11 @@ body {
   background-color: var(--fs-background);
   color: var(--fs-text);
   line-height: 1.6;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 /* Layout */

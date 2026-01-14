@@ -14,7 +14,7 @@ export async function getCalendarClient(): Promise<calendar_v3.Calendar> {
 
   const token = await auth.getToken('gcal');
   if (!token) {
-    throw new Error('Google Calendar not connected. Please connect via the FlowState dashboard.');
+    throw new Error('Google Calendar not connected. Please connect at http://localhost:3847/integrations');
   }
 
   const oauth2Client = new google.auth.OAuth2();

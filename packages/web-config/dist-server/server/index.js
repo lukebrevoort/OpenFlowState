@@ -58,6 +58,65 @@ app.post('/api/auth/disconnect', async (req, res) => {
         res.status(500).json({ error: String(error) });
     }
 });
+// --- OAuth Helper Routes ---
+app.post('/api/auth/google/exchange', async (req, res) => {
+    const { code, clientId, clientSecret, redirectUri } = req.body;
+    if (!code || !clientId || !clientSecret || !redirectUri) {
+        res.status(400).json({ error: 'Missing required OAuth parameters' });
+        return;
+    }
+    try {
+        const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                code,
+                client_id: clientId,
+                client_secret: clientSecret,
+                redirect_uri: redirectUri,
+                grant_type: 'authorization_code',
+            }),
+        });
+        const tokens = await tokenResponse.json();
+        if (!tokenResponse.ok) {
+            throw new Error(tokens.error_description || tokens.error || 'Failed to exchange token');
+        }
+        // Determine scopes to save based on what we requested or what was returned
+        const scope = tokens.scope || '';
+        const isGmail = scope.includes('gmail');
+        const isCalendar = scope.includes('calendar');
+        // Store for Gmail if applicable
+        if (isGmail) {
+            await auth.storeToken({
+                service: 'gmail',
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token,
+                expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+                scopes: scope.split(' '),
+            });
+        }
+        // Store for Calendar if applicable
+        if (isCalendar) {
+            await auth.storeToken({
+                service: 'gcal',
+                accessToken: tokens.access_token,
+                refreshToken: tokens.refresh_token,
+                expiresAt: new Date(Date.now() + tokens.expires_in * 1000),
+                scopes: scope.split(' '),
+            });
+        }
+        // Also store the client credentials for future refreshes
+        if (isGmail)
+            await auth.storeClientConfig('gmail', { clientId, clientSecret, redirectUri });
+        if (isCalendar)
+            await auth.storeClientConfig('gcal', { clientId, clientSecret, redirectUri });
+        res.json({ success: true, services: { gmail: isGmail, gcal: isCalendar } });
+    }
+    catch (error) {
+        console.error('OAuth Exchange Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 // --- Preference Routes ---
 app.get('/api/preferences', async (_req, res) => {
     try {
@@ -78,7 +137,7 @@ app.post('/api/preferences', async (req, res) => {
     }
 });
 // Start server
-app.listen(port, () => {
-    console.log(`[API] Server running on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`[API] Server running on http://0.0.0.0:${port}`);
     initCore();
 });

@@ -203,17 +203,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'notion_create_page': {
-          const approved = await notifications.requestApproval(
-            'Create Notion Page',
-            `Create page "${args?.title}" under parent ${args?.parentId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Creating Page', `Title: ${args?.title}`);
 
           const page = await notionApi.createPage(
             args?.parentId as string,
@@ -232,17 +222,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'notion_update_page': {
-          const approved = await notifications.requestApproval(
-            'Update Notion Page',
-            `Update page ${args?.pageId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Updating Page', `ID: ${args?.pageId}`);
 
           const page = await notionApi.updatePage(
             args?.pageId as string,
@@ -260,17 +240,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'notion_create_database_entry': {
-          const approved = await notifications.requestApproval(
-            'Create Database Entry',
-            `Add entry to database ${args?.databaseId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Creating Database Entry', `DB: ${args?.databaseId}`);
 
           const page = await notionApi.createPage(
             args?.databaseId as string,

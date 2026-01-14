@@ -1,0 +1,24 @@
+{
+  "name": "FlowState",
+  "version": "0.1.0",
+  "agents": {
+    "primary": "./agents/flowstate.md",
+    "subagents": {
+      "scheduler": "./agents/subagents/scheduler.md",
+      "organizer": "./agents/subagents/organizer.md",
+      "communicator": "./agents/subagents/communicator.md",
+      "executor": "./agents/subagents/executor.md"
+    }
+  },
+  "preferences": {
+    "defaultProvider": "opencode/zen",
+    "progressiveAutonomy": {
+      "readOperations": "auto",
+      "writeOperations": "approval"
+    },
+    "webDashboard": {
+      "port": 3847,
+      "enabled": true
+    }
+  }
+}

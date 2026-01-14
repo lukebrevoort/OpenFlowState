@@ -278,17 +278,9 @@ export function registerTools(server: Server): void {
         }
 
         case 'gmail_send': {
-          const approved = await notifications.requestApproval(
-            'Send Email',
-            `Send email to ${args?.to} with subject "${args?.subject}"?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          // OpenCode handles approval permissions.
+          // We notify the user that an action is happening.
+          await notifications.notify('Sending Email', `To: ${args?.to}`);
 
           const message = await gmailApi.sendMessage({
             to: args?.to as string,
@@ -309,17 +301,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'gmail_reply': {
-          const approved = await notifications.requestApproval(
-            'Reply to Email',
-            `Reply to thread ${args?.threadId}?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Replying to Email', `Thread: ${args?.threadId}`);
 
           const message = await gmailApi.replyToMessage(
             args?.threadId as string,
@@ -338,17 +320,7 @@ export function registerTools(server: Server): void {
         }
 
         case 'gmail_delete': {
-          const approved = await notifications.requestApproval(
-            'Delete Email',
-            `Move email ${args?.messageId} to trash?`
-          );
-
-          if (!approved) {
-            return {
-              content: [{ type: 'text', text: 'Action denied by user.' }],
-              isError: true,
-            };
-          }
+          await notifications.notify('Deleting Email', `ID: ${args?.messageId}`);
 
           const message = await gmailApi.trashMessage(args?.messageId as string);
           

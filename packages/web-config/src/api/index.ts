@@ -4,7 +4,7 @@
  * Communicates with the FlowState API server.
  */
 
-const API_URL = 'http://localhost:3001/api';
+const API_URL = 'http://127.0.0.1:3001/api';
 
 export interface IntegrationStatus {
   service: string;
@@ -63,6 +63,27 @@ export async function disconnectIntegration(service: string): Promise<void> {
   
   if (!response.ok) {
     throw new Error(`Failed to disconnect ${service}`);
+  }
+}
+
+/**
+ * Exchange Google OAuth code for tokens
+ */
+export async function exchangeGoogleCode(params: {
+  code: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+}): Promise<void> {
+  const response = await fetch(`${API_URL}/auth/google/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to exchange code');
   }
 }
 

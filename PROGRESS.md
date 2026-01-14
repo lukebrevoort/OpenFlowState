@@ -1,14 +1,22 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: January 13, 2026 (19:59 PT)
+> **Last Updated**: January 13, 2026
 
 ---
 
-## Current Status: Phase 1 Complete ✅ - All Packages Building
+## Current Status: ✅ Desktop Phase 1 COMPLETE
 
-Phase 1 Foundation is complete. All package scaffolding created, agents defined, theme configured. 
-**All 6 packages compile and build successfully!** Ready to begin Phase 2: Core MCP Servers implementation.
+**Desktop Phase 1: Foundation is complete!** The Electron + React + TypeScript desktop app shell is fully scaffolded and building successfully.
+
+### What's Working:
+- Electron main process with macOS window management
+- Preload script with secure IPC bridge
+- React renderer with Vite bundler
+- Tailwind CSS with FlowState theme colors
+- Four-mode layout (Chat, Tasks, Workflows, Integrations)
+- Sidebar with recent convos, pinned workflows, running tasks
+- All components building successfully
 
 ---
 
@@ -18,108 +26,140 @@ Phase 1 Foundation is complete. All package scaffolding created, agents defined,
 |------|----------|-----------|--------|
 | Jan 2026 | Build on top of OpenCode (not fork) | Leverage their maintenance, MCP infra, and community | Approved |
 | Jan 2026 | MCP-first architecture | Pluggable integrations, can be used independently | Approved |
-| Jan 2026 | TUI + Web Config hybrid | TUI for power users, Web for easier OAuth/config | Approved |
+| Jan 2026 | ~~TUI + Web Config hybrid~~ | ~~TUI for power users, Web for easier OAuth/config~~ | **Superseded** |
 | Jan 2026 | Progressive autonomy model | Auto-read, approval-write for safety | Approved |
 | Jan 2026 | Local-only auth storage | User privacy, no cloud dependency | Approved |
 | Jan 2026 | TypeScript throughout | Consistency with OpenCode SDK | Approved |
 | Jan 2026 | MIT License | Match OpenCode, give back to community | Approved |
-| Jan 2026 | FlowState 2.0 in new repo | Clean start, this repo becomes "Legacy" | Approved |
 | Jan 2026 | Mac-first for MVP | Simplify scope, add Windows later | Approved |
-| Jan 2026 | Default to OpenCode Zen | Support the platform we build on | Approved |
+| Jan 2026 | Default to OpenCode Zen | Free, zero-friction for new users | Approved |
+| Jan 2026 | **Desktop App (Electron)** | TUI too complex for non-technical users | **New** |
+| Jan 2026 | **Headless OpenCode** | Run OpenCode silently, control via SDK/API | **New** |
+| Jan 2026 | **Four-Mode UI** | Chat, Tasks, Workflows, Integrations | **New** |
+| Jan 2026 | **Workflows as Commands/Skills** | Use OpenCode's .md-based command system | **New** |
+| Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
+| Jan 2026 | **Model Provider Choice** | Ask user in onboarding, default to Zen | **New** |
 
 ---
 
-## Phase Progress
+## Phase Progress (Original TUI Approach)
 
-### Phase 1: Foundation (Weeks 1-2) ✅ COMPLETE
-- [x] Initialize new FlowState 2.0 repository
-- [x] Set up monorepo structure (pnpm + Turborepo)
-- [x] Create FlowState OpenCode theme
-- [x] Configure OpenCode with FlowState branding
-- [x] Create AGENTS.md for the new project
-- [x] Set up development environment documentation
-
-**Notes**: Completed Jan 13, 2026. Full monorepo scaffolding created with:
-- 6 packages (core, mcp-notion, mcp-gmail, mcp-gcal, mcp-system, web-config)
-- FlowState theme with warm earthy color palette
-- All agent definitions (primary + 4 subagents)
-- OpenCode configuration with MCP server wiring
-- README, LICENSE, and all package.json files
+### Phase 1: Foundation ✅ COMPLETE
+### Phase 2: Core MCP Servers ✅ COMPLETE
+### Phase 3: FlowState Core ✅ COMPLETE
+### Phase 4: Web Dashboard ✅ COMPLETE (Now Deprecated)
+### Phase 5: Agent Development ✅ COMPLETE
 
 ---
 
-### Phase 2: Core MCP Servers (Weeks 3-5) ✅ COMPLETE
-- [x] Build `mcp-notion` with OAuth flow (API integrated)
-- [x] Build `mcp-gmail` with OAuth flow (API integrated)
-- [x] Build `mcp-gcal` with OAuth flow (API integrated)
-- [x] Build `mcp-system` (macOS only for MVP)
-- [x] Test all MCPs work with OpenCode (Verified startup)
-- [x] Document MCP tool schemas (Created docs/MCP_TOOLS.md)
+## NEW: Desktop App Development Phases
 
-**Notes**: MCP servers are fully scaffolded, API layers implemented, and verified to start. Logic testing awaits Phase 3 Auth integration.
+### Desktop Phase 1: Foundation ✅ COMPLETE
+- [x] Set up `packages/desktop/` with Electron + React + TypeScript
+- [x] Implement four-mode layout shell (Chat, Tasks, Workflows, Integrations)
+- [x] Port FlowState theme to Tailwind CSS
+- [x] Create sidebar component (recent convos, pinned workflows, running tasks)
+- [x] Set up Electron main/renderer IPC
+- [x] Configure electron-builder for macOS
 
----
-
-### Phase 3: FlowState Core (Weeks 6-7) ✅ COMPLETE
-- [x] Implement encrypted auth storage (AES-256-GCM implemented)
-- [x] Build basic memory system (SQLite) (better-sqlite3 schema implemented)
-- [x] Create daemon process with notification support (node-notifier integration complete)
-- [x] Implement progressive autonomy logic (Implemented in Notion, Gmail, GCal)
-- [ ] Test background task execution (Deferring to Phase 6)
-
-**Notes**: Core systems (Auth, Memory, Notifications, Daemon) are implemented and compiling.
-- `AuthStore` uses local key file + AES-256 encryption.
-- `MemoryStore` initializes SQLite db at `~/.flowstate/memory.db`.
-- `Daemon` initializes all subsystems.
-- `NotificationService` supports approvals.
-- Progressive Autonomy fully integrated into all 3 MCP servers.
-
----
-
-### Phase 4: Web Dashboard (Weeks 8-9) ✅ COMPLETE
-- [x] Set up React + Vite project
-- [x] Build Integrations page with OAuth (UI complete)
-- [x] Build Preferences page
-- [x] **Implement Dashboard API Server (`express` @ 3001)**
-- [x] **Connect API to FlowState Core (Auth/Memory/Daemon)**
-- [x] **Connect Frontend to API (Real HTTP calls)**
-- [x] **Integrations Page with Manual Token Input (Dev Mode)**
-- [x] **Preferences Page with Real Persistence**
-
-**Notes**: Web Dashboard is fully functional and connected to the Core backend.
-- Run `pnpm dev` in `@flowstate/web-config` to start both UI (3847) and API (3001).
-- Users can manually input JSON tokens to simulate OAuth login.
-- Preferences persist to SQLite.
-
----
-
-### Phase 5: Agent Development (Week 10) ✅ COMPLETE
-
-**Notes**: Web dashboard UI scaffolding complete. Pages render but daemon connection not implemented yet.
-
----
-
-### Phase 5: Agent Development (Week 10) ✅ COMPLETE
-- [x] Create `flowstate` primary agent
-- [x] Create `scheduler` subagent
-- [x] Create `organizer` subagent
-- [x] Create `communicator` subagent
-- [x] Create `executor` subagent
-- [ ] Test multi-agent workflows
-
-**Notes**: All agent markdown files created with full prompts, behavior rules, and tool permissions. Testing pending OpenCode integration.
+**Files Created:**
+```
+packages/desktop/
+├── package.json                    # Package configuration with Electron dependencies
+├── tsconfig.json                   # Base TypeScript config
+├── tsconfig.main.json              # Electron main process TypeScript config
+├── tsconfig.preload.json           # Preload script TypeScript config
+├── vite.config.ts                  # Vite bundler configuration
+├── tailwind.config.js              # Tailwind with FlowState theme colors
+├── postcss.config.js               # PostCSS configuration
+├── electron-builder.yml            # macOS packaging configuration
+├── assets/
+│   └── flowstate-main-logo.png     # App icon
+└── src/
+    ├── main/
+    │   └── index.ts                # Electron main process with IPC handlers
+    ├── preload/
+    │   └── index.ts                # Secure IPC bridge via contextBridge
+    └── renderer/
+        ├── index.html              # HTML entry point
+        ├── main.tsx                # React entry point
+        ├── App.tsx                 # Root component with mode switching
+        ├── styles/
+        │   └── globals.css         # Tailwind imports + FlowState components
+        ├── types/
+        │   └── electron.d.ts       # TypeScript types for preload API
+        ├── components/
+        │   ├── index.ts            # Component exports
+        │   ├── TitleBar.tsx        # macOS-style title bar
+        │   ├── TabBar.tsx          # Mode selector tabs
+        │   └── Sidebar.tsx         # Navigation sidebar
+        └── modes/
+            ├── index.ts            # Mode exports
+            ├── ChatMode.tsx        # Natural language chat interface
+            ├── TasksMode.tsx       # Running/completed tasks view
+            ├── WorkflowsMode.tsx   # Workflow browser and editor
+            └── IntegrationsMode.tsx # OAuth connections and MCP status
+```
 
 ---
 
-### Phase 6: Polish & Launch (Weeks 11-12)
+### Desktop Phase 2: OpenCode Integration (Weeks 3-4) 🔜 NEXT
+- [ ] Implement process manager for headless OpenCode
+- [ ] Create SDK bridge in Electron main process
+- [ ] Build Chat mode with real-time message streaming
+- [ ] Connect to existing MCP servers as child processes
+- [ ] Test basic conversation flow end-to-end
+
+### Desktop Phase 3: Integrations & Config (Weeks 5-6)
+- [ ] Implement config store (Claude Desktop-style `config.json`)
+- [ ] Build Integrations mode UI
+- [ ] Implement temporary localhost OAuth server
+- [ ] Port auth manager from `@flowstate/core`
+- [ ] Test OAuth flow for Google services
+
+### Desktop Phase 4: Onboarding & Polish (Weeks 7-8)
+- [ ] Build complete onboarding flow (Welcome → Apps → Connect → Wow)
+- [ ] Implement LLM provider selection
+- [ ] Create suggested prompts for wow moment
+- [ ] Add inline approval flow UI
+- [ ] Implement macOS notifications for approvals
+- [ ] Build Tasks mode (view running/completed tasks)
+
+### Desktop Phase 5: Workflows (Weeks 9-10)
+- [ ] Build Workflows mode UI
+- [ ] Create pre-built workflow templates (SKILL.md format)
+  - [ ] Inbox Review
+  - [ ] Meeting Prep
+  - [ ] Desktop Cleanup
+- [ ] Implement workflow runner
+- [ ] Add "pin to sidebar" functionality
+
+### Desktop Phase 6: Testing & Launch (Weeks 11-12)
 - [ ] End-to-end testing
-- [x] Documentation (README, guides) - Initial README complete
+- [ ] Performance optimization
+- [ ] Create user documentation
+- [ ] Build unsigned DMG for beta distribution
 - [ ] Create demo video
-- [ ] Publish to npm (MCPs)
-- [ ] Announce on OpenCode Discord
 - [ ] GitHub release v0.1.0
 
-**Notes**: Not started
+---
+
+## Code Salvage Status
+
+| Component | Salvage? | Notes |
+|-----------|----------|-------|
+| `@flowstate/mcp-notion` | ✅ Yes | Unchanged, spawn as child process |
+| `@flowstate/mcp-gmail` | ✅ Yes | Unchanged, spawn as child process |
+| `@flowstate/mcp-gcal` | ✅ Yes | Unchanged, spawn as child process |
+| `@flowstate/mcp-system` | ✅ Yes | Unchanged, spawn as child process |
+| `@flowstate/core/auth` | ✅ Yes | Port to Electron main process |
+| `@flowstate/core/memory` | ✅ Yes | Port to Electron main process |
+| `@flowstate/core/notifications` | ⚠️ Partial | Adapt for Electron notifications |
+| `@flowstate/core/daemon` | ❌ No | Electron main process replaces it |
+| `@flowstate/web-config` | ❌ No | Fresh React UI in desktop package |
+| Agent definitions | ✅ Yes | Copy to desktop package |
+| Theme colors | ✅ Yes | Port to Tailwind theme |
+| Logo assets | ✅ Yes | Copy to desktop assets |
 
 ---
 
@@ -127,122 +167,67 @@ Phase 1 Foundation is complete. All package scaffolding created, agents defined,
 
 | Issue | Impact | Proposed Solution | Status |
 |-------|--------|-------------------|--------|
-| OpenCode config may conflict with parent dirs | Medium | Ensure running from flowstate dir | Noted |
-| Need pnpm install before build | Low | Document in getting started | Noted |
+| No Apple Developer account | High | Distribute unsigned DMG with instructions | Noted |
+| Headless OpenCode mode unclear | Medium | Research OpenCode SDK capabilities | To investigate |
+| Electron bundle size (~150MB+) | Low | Acceptable for MVP, optimize later | Noted |
 
 ---
 
 ## Learnings & Insights
 
-*Document technical learnings, gotchas, and insights as development progresses.*
+### Desktop Phase 1 Development
+- Vite + React + TypeScript + Tailwind is a great stack for Electron renderers
+- Separate TypeScript configs needed for main, preload, and renderer
+- The FlowState warm earthy color palette works well in a desktop context
+- lucide-react provides excellent icons that match the design language
 
-### Planning Phase
-- OpenCode's MCP and agent systems are more mature than expected
-- The SDK provides exactly what we need for building on top
-- Theme system should allow distinct FlowState branding
-- Progressive autonomy can be implemented via OpenCode's permission system
-
-### Phase 1 Development
-- Monorepo structure with Turborepo provides good caching and parallel builds
-- MCP SDK (@modelcontextprotocol/sdk) makes tool registration straightforward
-- Need to be careful about opencode.json placement - it affects which config is used
-- Workspace dependencies (`workspace:*`) require pnpm install before anything works
-
----
-
-## Files Created This Session
-
-### Root Configuration
-- `package.json` - Root monorepo package
-- `pnpm-workspace.yaml` - Workspace definition
-- `turbo.json` - Turborepo configuration
-- `opencode.json` - OpenCode MCP and agent config
-- `.gitignore` - Git ignore patterns
-- `README.md` - Project documentation
-- `LICENSE` - MIT license
-- `AGENTS.md` - AI agent instructions
-
-### Themes
-- `themes/flowstate.json` - Warm earthy color theme
-
-### Agents
-- `agents/flowstate.md` - Primary orchestrator agent
-- `agents/README.md` - Agent documentation
-- `agents/subagents/scheduler.md` - Calendar specialist
-- `agents/subagents/organizer.md` - Notion/task specialist
-- `agents/subagents/communicator.md` - Email specialist
-- `agents/subagents/executor.md` - System automation specialist
-
-### Packages
-- `packages/core/` - Daemon, memory, auth, notifications (scaffolding)
-- `packages/mcp-notion/` - Notion MCP server (scaffolding)
-- `packages/mcp-gmail/` - Gmail MCP server (scaffolding)
-- `packages/mcp-gcal/` - Google Calendar MCP server (scaffolding)
-- `packages/mcp-system/` - System MCP server (scaffolding with macOS impl)
-- `packages/web-config/` - React dashboard (scaffolding with UI)
+### Architecture Decisions Validated
+- **Electron**: Successfully reusing TypeScript code and dependencies
+- **Tailwind**: FlowState theme colors integrate seamlessly
+- **Four-mode UI**: Clean separation of concerns, easy to extend
 
 ---
 
 ## Resources
 
 - [OpenCode Documentation](https://opencode.ai/docs/)
+- [OpenCode Commands](https://opencode.ai/docs/commands/)
+- [OpenCode Agent Skills](https://opencode.ai/docs/skills/)
 - [OpenCode SDK Reference](https://opencode.ai/docs/sdk/)
-- [OpenCode MCP Servers Guide](https://opencode.ai/docs/mcp-servers/)
-- [OpenCode Agents Guide](https://opencode.ai/docs/agents/)
-- [OpenCode Themes Guide](https://opencode.ai/docs/themes/)
-- [OpenCode Discord](https://opencode.ai/discord)
+- [Claude Cowork Reference](https://support.claude.com/en/articles/13345190-getting-started-with-cowork)
+- [FlowState 1.0 (Design Reference)](https://github.com/lukebrevoort/flowstate)
+- [Electron Documentation](https://www.electronjs.org/docs)
+- [electron-builder](https://www.electron.build/)
 
 ---
 
 ## Next Session Goals
 
-1. ~~Run `pnpm install` to install all dependencies~~ ✅ DONE
-2. ~~Fix any TypeScript compilation errors~~ ✅ DONE
-3. Begin implementing actual Notion API calls in mcp-notion
-4. Test MCP server with OpenCode
-5. Implement OAuth flow for Notion
+1. [ ] Research OpenCode headless mode / SDK capabilities
+2. [ ] Implement process manager to spawn OpenCode
+3. [ ] Create streaming message handler for Chat mode
+4. [ ] Connect Chat UI to real OpenCode responses
+5. [ ] Test MCP server spawning from Electron
 
 ---
 
-## Tasks Completed (Jan 13, 2026)
+## Tasks Completed (Jan 13, 2026 - Desktop Phase 1)
 
-- ✅ Initialized git repository
-- ✅ Created full monorepo structure with 6 packages
-- ✅ Created FlowState theme with warm earthy colors
-- ✅ Created opencode.json with all MCP configurations
-- ✅ Created AGENTS.md with full documentation
-- ✅ Created primary agent and all 4 subagents
-- ✅ Created web dashboard UI scaffolding
-- ✅ Created README and LICENSE
-- ✅ Ran `pnpm install` - all 268 packages installed
-- ✅ Fixed TypeScript errors in OAuth modules
-- ✅ Successfully built all 6 packages with `pnpm build`
-- ✅ **Updated MCP tools to use real API calls (Notion, Gmail, GCal)**
-- ✅ **Implemented `gmail_reply` with threading support**
-- ✅ **Created comprehensive tool documentation (`docs/MCP_TOOLS.md`)**
-- ✅ **Created and verified MCP server test script (`scripts/test-mcp.js`)**
-- ✅ **Implemented Core AuthStore (AES-256 encryption)**
-- ✅ **Implemented Core MemoryStore (SQLite)**
-- ✅ **Implemented Core NotificationService (node-notifier)**
-- ✅ **Implemented Core Daemon foundation**
-- ✅ **Integrated Progressive Autonomy (Approval Flow) into `mcp-notion`, `mcp-gmail`, `mcp-gcal`**
-
-## In Progress
-
-- 🔄 Connect Web Dashboard to AuthStore
-- 🔄 Test background task execution
-- 🔄 Implement progressive autonomy in remaining MCPs
-
-## Blockers
-
-- None currently
-
-## Next Steps
-
-1. Implement encrypted auth storage in `@flowstate/core`
-2. Test OAuth flow in web dashboard with real credentials
-3. Connect web dashboard to MCP servers
-4. Test end-to-end with OpenCode
+- ✅ Created `packages/desktop/` package structure
+- ✅ Set up Electron + React + TypeScript + Tailwind
+- ✅ Created Electron main process with macOS window management
+- ✅ Created preload script with secure contextBridge API
+- ✅ Created React renderer with Vite bundler
+- ✅ Ported FlowState theme colors to Tailwind config
+- ✅ Created TitleBar component (macOS style)
+- ✅ Created TabBar component (mode selector)
+- ✅ Created Sidebar component (recent convos, pinned workflows, running tasks)
+- ✅ Created ChatMode component (message UI with streaming placeholder)
+- ✅ Created TasksMode component (running/completed tasks view)
+- ✅ Created WorkflowsMode component (workflow browser)
+- ✅ Created IntegrationsMode component (OAuth connections)
+- ✅ Configured electron-builder for macOS packaging
+- ✅ Successfully built all three compilation targets (main, preload, renderer)
 
 ---
 

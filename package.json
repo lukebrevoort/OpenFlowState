@@ -8,6 +8,8 @@
   "license": "MIT",
   "scripts": {
     "dev": "turbo dev",
+    "start": "node scripts/start-all.js",
+    "start:tui": "opencode . --agent flowstate",
     "build": "turbo build",
     "test": "turbo test",
     "test:mcp": "node scripts/test-mcp.js",

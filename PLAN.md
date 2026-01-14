@@ -1,29 +1,45 @@
 # FlowState 2.0 - Project Plan
 
-> **Status**: Planning Phase  
+> **Status**: Architecture Pivot - Desktop App  
 > **Last Updated**: January 2026  
 > **License**: MIT  
-> **Built On**: [OpenCode](https://opencode.ai) SDK
+> **Built On**: [OpenCode](https://opencode.ai) (Headless)
 
 ---
 
 ## Vision
 
-FlowState 2.0 is an open-source productivity orchestration platform that enables users to manage their entire digital life from one place. Unlike traditional productivity tools that silo your data, FlowState connects your apps, learns your preferences, and executes complex cross-platform workflows on your behalf.
+FlowState 2.0 is an open-source productivity orchestration platform that brings agentic AI capabilities to everyone - not just developers. Think **Claude Cowork, but open-source and model-agnostic**.
+
+Unlike terminal-based tools that intimidate non-technical users, FlowState is a native **macOS Desktop App** that feels as natural as any other productivity tool. Connect your apps, describe what you want, and let FlowState handle the rest.
 
 **The Core Promise**: Open FlowState, connect your apps, describe what you want, and let it handle the rest.
 
 ### Philosophy
 
-1. **One Place, All Apps**: Stop bouncing between Notion, Gmail, Calendar, and your desktop. Orchestrate everything from a single interface.
+1. **Accessible to Everyone**: No terminal required. A beautiful desktop app that anyone can use.
 
-2. **Progressive Autonomy**: Safe actions (reading, organizing, drafting) happen automatically. Risky actions (sending, deleting, creating) always require your approval.
+2. **One Place, All Apps**: Stop bouncing between Notion, Gmail, Calendar, and your desktop. Orchestrate everything from a single interface.
 
-3. **User-Controlled**: Your data stays on your machine. Your tokens stay on your machine. No cloud dependency required.
+3. **Progressive Autonomy**: Safe actions (reading, organizing, drafting) happen automatically. Risky actions (sending, deleting, creating) always require your approval.
 
-4. **Extensible by Design**: Power users can add MCP servers, create custom agents, and build workflows. Casual users can connect 2 apps and let it ride.
+4. **Model Agnostic**: Unlike Claude Cowork (Claude-only), FlowState works with any LLM - OpenAI, Anthropic, Google, Ollama, and more. Default to free OpenCode Zen models for zero friction.
 
-5. **Open Source**: Built on MIT-licensed OpenCode, giving back to the community that makes this possible.
+5. **User-Controlled**: Your data stays on your machine. Your tokens stay on your machine. No cloud dependency required.
+
+6. **Open Source**: Built on MIT-licensed OpenCode, giving back to the community that makes this possible.
+
+### Inspiration: Claude Cowork
+
+FlowState takes direct inspiration from [Claude Cowork](https://support.claude.com/en/articles/13345190-getting-started-with-cowork) - Anthropic's agentic productivity feature:
+
+> "Cowork uses the same agentic architecture that powers Claude Code, now accessible within Claude Desktop. Instead of responding to prompts one at a time, Claude can take on complex, multi-step tasks and execute them on your behalf."
+
+**Where FlowState differs:**
+- **Open Source**: Not locked to a $200/month Claude Max plan
+- **Model Agnostic**: Bring your own API keys, use any provider
+- **Extensible**: Add any MCP server, not just Anthropic's curated list
+- **Workflow Templates**: Pre-built automations for common tasks
 
 ---
 
@@ -32,84 +48,113 @@ FlowState 2.0 is an open-source productivity orchestration platform that enables
 | User Type | Description | Primary Use Cases |
 |-----------|-------------|-------------------|
 | **Productivity Enthusiasts** | People who use Notion, calendars, and email heavily | Cross-app task management, inbox organization |
-| **Students** | Managing coursework, deadlines, study schedules | Assignment tracking, study planning (original FlowState vision) |
+| **Students** | Managing coursework, deadlines, study schedules | Assignment tracking, study planning |
 | **Busy Professionals** | 100+ emails/day, back-to-back meetings | Email triage, meeting prep, conflict resolution |
-| **Developers** | Already comfortable with CLI tools | Full power-user features, custom agents, scripting |
-| **Non-Technical Users** | Want the benefits without the complexity | Web config UI, guided setup, sensible defaults |
+| **Non-Technical Users** | Want AI benefits without the complexity | Guided setup, sensible defaults, beautiful UI |
+| **Power Users** | Comfortable adding custom MCPs | Full extensibility, custom workflows |
 
 ---
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         USER INTERFACES                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   ┌─────────────────────┐          ┌─────────────────────────────┐  │
-│   │   FlowState TUI     │          │   Web Config Dashboard      │  │
-│   │   (OpenCode-based)  │◄────────►│   (localhost:3847)          │  │
-│   │                     │          │                             │  │
-│   │ - Distinct theming  │          │ - OAuth flows               │  │
-│   │ - Primary interface │          │ - Integration status        │  │
-│   │ - Full agent access │          │ - Preferences               │  │
-│   └─────────┬───────────┘          └─────────────┬───────────────┘  │
-│             │                                    │                   │
-└─────────────┼────────────────────────────────────┼───────────────────┘
-              │                                    │
-              ▼                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                      OPENCODE SERVER LAYER                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│   ┌──────────────────────────────────────────────────────────────┐  │
-│   │                    OpenCode Server                            │  │
-│   │                                                               │  │
-│   │  - Session Management    - LLM Orchestration                  │  │
-│   │  - Event Streaming       - Tool Execution                     │  │
-│   │  - MCP Protocol          - Agent Routing                      │  │
-│   └──────────────────────────────────────────────────────────────┘  │
-│                                                                      │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         MCP SERVER LAYER                            │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐   │
-│  │   Notion    │ │   Gmail     │ │   GCal      │ │   System    │   │
-│  │   MCP       │ │   MCP       │ │   MCP       │ │   MCP       │   │
-│  ├─────────────┤ ├─────────────┤ ├─────────────┤ ├─────────────┤   │
-│  │ - Pages     │ │ - Read      │ │ - Events    │ │ - Shell     │   │
-│  │ - DBs       │ │ - Send      │ │ - Create    │ │ - Apps      │   │
-│  │ - Blocks    │ │ - Draft     │ │ - Conflicts │ │ - Windows   │   │
-│  │ - Search    │ │ - Labels    │ │ - Free/Busy │ │ - Notify    │   │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘   │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐    │
-│  │                    User's Custom MCPs                        │    │
-│  │         (Slack, Obsidian, Outlook, etc.)                    │    │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                                                                      │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                       FLOWSTATE CORE LAYER                          │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐   │
-│  │     Daemon       │  │     Memory       │  │   Auth Store     │   │
-│  ├──────────────────┤  ├──────────────────┤  ├──────────────────┤   │
-│  │ - Background     │  │ - Context        │  │ - OAuth tokens   │   │
-│  │ - Long tasks     │  │ - Preferences    │  │ - Encrypted      │   │
-│  │ - Monitoring     │  │ - Entity links   │  │ - Local-only     │   │
-│  │ - Notifications  │  │ - SQLite backed  │  │ - JSON file      │   │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘   │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FLOWSTATE DESKTOP APP (Electron)                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                         RENDERER PROCESS (React)                        │ │
+│  │                                                                         │ │
+│  │   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────────┐  │ │
+│  │   │    Chat     │ │    Tasks    │ │  Workflows  │ │  Integrations   │  │ │
+│  │   │    Mode     │ │    Mode     │ │    Mode     │ │     Mode        │  │ │
+│  │   ├─────────────┤ ├─────────────┤ ├─────────────┤ ├─────────────────┤  │ │
+│  │   │ Conversation│ │ Running     │ │ Command/    │ │ OAuth Connect   │  │ │
+│  │   │ Interface   │ │ Tasks List  │ │ Skill Editor│ │ MCP Status      │  │ │
+│  │   │ Streaming   │ │ Progress    │ │ Templates   │ │ Custom MCPs     │  │ │
+│  │   └─────────────┘ └─────────────┘ └─────────────┘ └─────────────────┘  │ │
+│  │                                                                         │ │
+│  │   ┌─────────────────────────────────────────────────────────────────┐  │ │
+│  │   │                         SIDEBAR                                  │  │ │
+│  │   │  • Recent Conversations                                          │  │ │
+│  │   │  • Pinned Workflows (3 max)                                      │  │ │
+│  │   │  • Running Tasks                                                 │  │ │
+│  │   └─────────────────────────────────────────────────────────────────┘  │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                       │
+│                                      │ IPC                                   │
+│                                      ▼                                       │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │                         MAIN PROCESS (Node.js)                          │ │
+│  │                                                                         │ │
+│  │   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐ │ │
+│  │   │  Process Manager │  │   Config Store   │  │    Auth Manager      │ │ │
+│  │   │  (OpenCode +     │  │   (MCP config,   │  │    (Encrypted        │ │ │
+│  │   │   MCP servers)   │  │    preferences)  │  │     tokens)          │ │ │
+│  │   └────────┬─────────┘  └──────────────────┘  └──────────────────────┘ │ │
+│  │            │                                                            │ │
+│  │            │                                                            │ │
+│  │   ┌────────▼─────────┐  ┌──────────────────┐  ┌──────────────────────┐ │ │
+│  │   │  Memory Store    │  │  OAuth Server    │  │   Notification       │ │ │
+│  │   │  (SQLite)        │  │  (temp localhost)│  │   Service            │ │ │
+│  │   └──────────────────┘  └──────────────────┘  └──────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                       │
+└──────────────────────────────────────┼───────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CHILD PROCESSES                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                    OPENCODE (Headless Mode)                           │   │
+│  │                                                                       │   │
+│  │  • Session Management     • LLM Orchestration                         │   │
+│  │  • Event Streaming        • Tool Execution                            │   │
+│  │  • Agent Routing          • MCP Protocol Coordination                 │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐           │
+│  │   Notion    │ │   Gmail     │ │   GCal      │ │   System    │           │
+│  │   MCP       │ │   MCP       │ │   MCP       │ │   MCP       │           │
+│  ├─────────────┤ ├─────────────┤ ├─────────────┤ ├─────────────┤           │
+│  │ • Pages     │ │ • Read      │ │ • Events    │ │ • Shell     │           │
+│  │ • DBs       │ │ • Send      │ │ • Create    │ │ • Apps      │           │
+│  │ • Blocks    │ │ • Draft     │ │ • Conflicts │ │ • Desktop   │           │
+│  │ • Search    │ │ • Labels    │ │ • Free/Busy │ │ • Notify    │           │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘           │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    User's Custom MCPs                                │    │
+│  │         (Slack, Obsidian, Linear, Todoist, etc.)                    │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Decision Log
+
+| Date | Decision | Rationale | Status |
+|------|----------|-----------|--------|
+| Jan 2026 | Build on top of OpenCode (not fork) | Leverage their maintenance, MCP infra, and community | Approved |
+| Jan 2026 | MCP-first architecture | Pluggable integrations, can be used independently | Approved |
+| Jan 2026 | Progressive autonomy model | Auto-read, approval-write for safety | Approved |
+| Jan 2026 | Local-only auth storage | User privacy, no cloud dependency | Approved |
+| Jan 2026 | TypeScript throughout | Consistency with OpenCode SDK | Approved |
+| Jan 2026 | MIT License | Match OpenCode, give back to community | Approved |
+| Jan 2026 | Mac-first for MVP | Simplify scope, add Windows later | Approved |
+| Jan 2026 | Default to OpenCode Zen | Free, zero-friction onboarding | Approved |
+| Jan 2026 | **Desktop App (Electron)** | TUI too complex for non-technical users, Cowork-style UX | **New** |
+| Jan 2026 | **Headless OpenCode** | Run OpenCode silently, control via SDK/API | **New** |
+| Jan 2026 | **Four-Mode UI** | Chat, Tasks, Workflows, Integrations | **New** |
+| Jan 2026 | **Workflows as Commands/Skills** | Use OpenCode's .md-based command system, not JSON | **New** |
+| Jan 2026 | **Claude Desktop-style MCP Config** | Local JSON file for MCP configuration | **New** |
+| Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
+| Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen | **New** |
+| Jan 2026 | **Internet Required for MVP** | Optimize for offline later | **New** |
 
 ---
 
@@ -117,22 +162,24 @@ FlowState 2.0 is an open-source productivity orchestration platform that enables
 
 | Layer | Technology | Rationale |
 |-------|------------|-----------|
-| **TUI Foundation** | OpenCode (themed) | Proven, extensible, MCP-native, MIT licensed |
+| **Desktop Framework** | Electron | Cross-platform, leverages existing TypeScript/Node.js code |
+| **UI Framework** | React + TypeScript | Modern, component-based, great ecosystem |
+| **Styling** | Tailwind CSS | Rapid development, consistent design system |
+| **Engine** | OpenCode (Headless) | Proven agentic orchestration, MCP-native |
 | **SDK** | `@opencode-ai/sdk` (TypeScript) | Type-safe, full server API access |
 | **MCP Servers** | TypeScript/Node.js | Matches SDK, excellent MCP tooling ecosystem |
-| **Daemon** | Node.js (long-running) | Same runtime, good for background async tasks |
-| **Web Config** | React + Vite | Fast, modern, serves on localhost |
-| **Auth Storage** | Encrypted JSON file | User-controlled, local-first, matches OpenCode pattern |
+| **Auth Storage** | Encrypted JSON file | User-controlled, local-first |
 | **Memory/State** | SQLite (local) | Lightweight, queryable, works offline |
 | **Package Manager** | pnpm | Fast, disk-efficient, great monorepo support |
 | **Build System** | Turborepo | Monorepo orchestration, caching |
+| **Electron Builder** | electron-builder | Packaging, distribution, auto-updates |
 
 ### LLM Provider Strategy
 
-- **Default**: OpenCode Zen (supports the platform we build on)
-- **Recommended for Power Users**: Anthropic Claude (best agentic performance)
-- **Supported**: All providers OpenCode supports (OpenAI, Google, Ollama, etc.)
-- **Configuration**: Identical to OpenCode's provider system
+- **Default**: OpenCode Zen (free, zero-friction for new users)
+- **Onboarding**: Ask user which provider they prefer
+- **Supported**: All providers OpenCode supports (Anthropic, OpenAI, Google, Ollama, etc.)
+- **Configuration**: Stored in FlowState config file
 
 ---
 
@@ -141,107 +188,540 @@ FlowState 2.0 is an open-source productivity orchestration platform that enables
 ```
 flowstate/
 ├── packages/
-│   ├── core/                    # FlowState daemon, memory, orchestration
+│   ├── desktop/                     # NEW: Electron Desktop App
 │   │   ├── src/
-│   │   │   ├── daemon/          # Background process management
-│   │   │   ├── memory/          # Context and preference storage
-│   │   │   ├── auth/            # Token encryption/storage
-│   │   │   └── notifications/   # Desktop notification system
+│   │   │   ├── main/                # Electron main process
+│   │   │   │   ├── index.ts         # Entry point
+│   │   │   │   ├── process-manager.ts   # Spawns OpenCode + MCP servers
+│   │   │   │   ├── config-store.ts  # Reads/writes config.json
+│   │   │   │   ├── auth-manager.ts  # Token encryption/storage
+│   │   │   │   ├── memory-store.ts  # SQLite operations
+│   │   │   │   ├── oauth-server.ts  # Temporary localhost OAuth handler
+│   │   │   │   └── notifications.ts # Desktop notifications
+│   │   │   │
+│   │   │   ├── renderer/            # React UI
+│   │   │   │   ├── App.tsx          # Root component
+│   │   │   │   ├── components/      # Shared components
+│   │   │   │   ├── modes/           # Mode-specific views
+│   │   │   │   │   ├── ChatMode.tsx
+│   │   │   │   │   ├── TasksMode.tsx
+│   │   │   │   │   ├── WorkflowsMode.tsx
+│   │   │   │   │   └── IntegrationsMode.tsx
+│   │   │   │   ├── hooks/           # React hooks
+│   │   │   │   ├── stores/          # State management
+│   │   │   │   └── styles/          # Tailwind + theme
+│   │   │   │
+│   │   │   └── preload/             # Electron preload scripts
+│   │   │
+│   │   ├── assets/                  # Icons, images
+│   │   │   └── flowstate-main-logo.png
+│   │   ├── electron-builder.yml     # Build configuration
 │   │   └── package.json
 │   │
-│   ├── mcp-notion/              # Notion MCP server
+│   ├── core/                        # FlowState core systems (EXISTING)
 │   │   ├── src/
-│   │   │   ├── tools/           # MCP tool definitions
-│   │   │   ├── oauth/           # Notion OAuth flow
-│   │   │   └── api/             # Notion API wrapper
+│   │   │   ├── daemon/              # Background process management
+│   │   │   ├── memory/              # Context and preference storage
+│   │   │   ├── auth/                # Token encryption/storage
+│   │   │   └── notifications/       # Notification system
 │   │   └── package.json
 │   │
-│   ├── mcp-gmail/               # Gmail MCP server
-│   │   ├── src/
-│   │   │   ├── tools/           # Read, send, draft, label
-│   │   │   ├── oauth/           # Google OAuth flow
-│   │   │   └── api/             # Gmail API wrapper
-│   │   └── package.json
+│   ├── mcp-notion/                  # Notion MCP server (EXISTING)
+│   ├── mcp-gmail/                   # Gmail MCP server (EXISTING)
+│   ├── mcp-gcal/                    # Google Calendar MCP server (EXISTING)
+│   ├── mcp-system/                  # System MCP server (EXISTING)
 │   │
-│   ├── mcp-gcal/                # Google Calendar MCP server
-│   │   ├── src/
-│   │   │   ├── tools/           # Events, free/busy, conflicts
-│   │   │   ├── oauth/           # Shared with gmail or separate
-│   │   │   └── api/             # Calendar API wrapper
-│   │   └── package.json
-│   │
-│   ├── mcp-system/              # Mac/Windows system MCP server
-│   │   ├── src/
-│   │   │   ├── tools/           # Shell, apps, windows, notify
-│   │   │   ├── macos/           # macOS-specific implementations
-│   │   │   └── windows/         # Windows-specific implementations
-│   │   └── package.json
-│   │
-│   └── web-config/              # Local web dashboard
-│       ├── src/
-│       │   ├── components/      # React components
-│       │   ├── pages/           # Dashboard pages
-│       │   │   ├── Integrations.tsx
-│       │   │   ├── Preferences.tsx
-│       │   │   └── Agents.tsx
-│       │   └── api/             # Local API routes
-│       └── package.json
+│   └── web-config/                  # DEPRECATED: Replaced by desktop app
+│
+├── workflows/                       # Pre-built workflow templates
+│   ├── inbox-review/
+│   │   └── SKILL.md                 # "Review and organize my inbox"
+│   ├── daily-standup/
+│   │   └── SKILL.md                 # "Prepare my standup notes"
+│   └── meeting-prep/
+│       └── SKILL.md                 # "Prepare for my next meeting"
 │
 ├── themes/
-│   └── flowstate.json           # OpenCode theme (FlowState branding)
+│   └── flowstate.json               # FlowState color theme
 │
 ├── agents/
-│   ├── flowstate.md             # Primary orchestrator agent
-│   ├── subagents/
-│   │   ├── scheduler.md         # Calendar-focused subagent
-│   │   ├── organizer.md         # Task/Notion-focused subagent
-│   │   ├── communicator.md      # Email/messaging subagent
-│   │   └── executor.md          # System command subagent
-│   └── README.md
+│   ├── flowstate.md                 # Primary orchestrator agent
+│   └── subagents/
+│       ├── scheduler.md             # Calendar-focused subagent
+│       ├── organizer.md             # Task/Notion-focused subagent
+│       ├── communicator.md          # Email/messaging subagent
+│       └── executor.md              # System command subagent
 │
-├── opencode.json                # OpenCode config (wires everything)
-├── turbo.json                   # Turborepo config
-├── pnpm-workspace.yaml          # pnpm workspace config
-├── package.json                 # Root package
-├── AGENTS.md                    # OpenCode agent instructions
-├── PLAN.md                      # This file
-├── PROGRESS.md                  # Development progress tracking
-└── README.md                    # User-facing documentation
+├── opencode.json                    # OpenCode config
+├── turbo.json                       # Turborepo config
+├── pnpm-workspace.yaml              # pnpm workspace config
+├── package.json                     # Root package
+├── AGENTS.md                        # Agent instructions
+├── PLAN.md                          # This file
+├── PROGRESS.md                      # Development progress tracking
+└── README.md                        # User-facing documentation
 ```
 
 ---
 
-## Core Components (Detailed)
+## Data Storage
 
-### 1. FlowState TUI Theme
+FlowState stores all user data locally on device:
 
-The TUI must be **distinctly FlowState** while leveraging OpenCode's infrastructure.
+```
+~/Library/Application Support/FlowState/
+├── config.json              # MCP servers, preferences, provider settings
+├── memory.db                # SQLite (context, history, preferences)
+├── auth/                    # Encrypted OAuth tokens
+│   ├── notion.enc
+│   ├── gmail.enc
+│   └── gcal.enc
+├── workflows/               # User-created workflows (copied from defaults)
+│   ├── inbox-review/
+│   │   └── SKILL.md
+│   └── custom-workflow/
+│       └── SKILL.md
+└── logs/                    # Debug logs
+    └── flowstate.log
+```
 
-**Design Principles** (from original FlowState):
-- Warm, earthy color palette (browns, creams, terracotta)
-- Clean, approachable typography (Alegreya-inspired)
-- Rounded, soft UI elements
-- Clear visual hierarchy
+### Config File Format
 
-**Theme Configuration** (`themes/flowstate.json`):
+Similar to Claude Desktop's `claude_desktop_config.json`:
+
 ```json
 {
-  "name": "flowstate",
-  "colors": {
-    "primary": "#8B6B59",
-    "secondary": "#665F5D", 
-    "background": "#F6EEE3",
-    "surface": "#E8DFD3",
-    "text": "#1E1E1E",
-    "accent": "#331C16",
-    "success": "#4A7C59",
-    "warning": "#D4A574",
-    "error": "#C45B4A"
+  "$schema": "https://flowstate.app/config.json",
+  "provider": {
+    "default": "zen/claude-sonnet",
+    "apiKeys": {}
+  },
+  "mcpServers": {
+    "flowstate-notion": {
+      "command": ["node", "/path/to/mcp-notion/dist/index.js"],
+      "enabled": true
+    },
+    "flowstate-gmail": {
+      "command": ["node", "/path/to/mcp-gmail/dist/index.js"],
+      "enabled": true
+    },
+    "flowstate-gcal": {
+      "command": ["node", "/path/to/mcp-gcal/dist/index.js"],
+      "enabled": true
+    },
+    "flowstate-system": {
+      "command": ["node", "/path/to/mcp-system/dist/index.js"],
+      "enabled": true
+    }
+  },
+  "preferences": {
+    "timezone": "America/Los_Angeles",
+    "workingHours": { "start": "09:00", "end": "17:00" },
+    "notifications": {
+      "approvals": true,
+      "taskComplete": true
+    }
   }
 }
 ```
 
-### 2. MCP Servers
+---
+
+## User Interface Design
+
+### Design Language
+
+FlowState's visual identity carries forward from [FlowState 1.0](https://github.com/lukebrevoort/flowstate):
+
+**Color Palette** (Warm, earthy tones):
+```json
+{
+  "primary": "#8B6B59",
+  "secondary": "#665F5D",
+  "background": "#F6EEE3",
+  "surface": "#E8DFD3",
+  "text": "#1E1E1E",
+  "accent": "#331C16",
+  "success": "#4A7C59",
+  "warning": "#D4A574",
+  "error": "#C45B4A"
+}
+```
+
+**Design Principles**:
+- Warm, approachable, not clinical
+- Clean visual hierarchy
+- Rounded, soft UI elements
+- Plenty of whitespace
+- Non-intimidating to non-technical users
+
+### App Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  ◉ ◉ ◉  FlowState                                    [Settings] [?] │
+├──────────────┬──────────────────────────────────────────────────────┤
+│              │                                                       │
+│   SIDEBAR    │                    MAIN CONTENT                       │
+│              │                                                       │
+│  ┌────────┐  │  ┌───────┬───────┬───────────┬──────────────────┐   │
+│  │ Recent │  │  │ Chat  │ Tasks │ Workflows │   Integrations   │   │
+│  │ Convos │  │  └───────┴───────┴───────────┴──────────────────┘   │
+│  │  • ...  │  │                                                      │
+│  │  • ...  │  │  ┌──────────────────────────────────────────────┐   │
+│  │  • ...  │  │  │                                               │   │
+│  └────────┘  │  │                                               │   │
+│              │  │           MODE-SPECIFIC CONTENT               │   │
+│  ┌────────┐  │  │                                               │   │
+│  │ Pinned │  │  │                                               │   │
+│  │Workflows│  │  │                                               │   │
+│  │  ⚡ ...  │  │  │                                               │   │
+│  │  ⚡ ...  │  │  │                                               │   │
+│  │  ⚡ ...  │  │  └──────────────────────────────────────────────┘   │
+│  └────────┘  │                                                       │
+│              │  ┌──────────────────────────────────────────────┐   │
+│  ┌────────┐  │  │                                               │   │
+│  │Running │  │  │              INPUT / ACTIONS                  │   │
+│  │ Tasks  │  │  │                                               │   │
+│  │  🔄 ... │  │  └──────────────────────────────────────────────┘   │
+│  └────────┘  │                                                       │
+│              │                                                       │
+└──────────────┴───────────────────────────────────────────────────────┘
+```
+
+### Four Modes
+
+#### 1. Chat Mode
+Primary interface for natural language interaction.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│  FlowState                                     Today 2:34 PM  │
+│  ─────────────────────────────────────────────────────────   │
+│  I found 23 unread emails. Here's a summary:                 │
+│                                                               │
+│  🔴 High Priority (3)                                        │
+│  • Meeting reschedule from Sarah - needs response            │
+│  • Invoice approval from Accounting - due today              │
+│  • Client feedback on proposal                               │
+│                                                               │
+│  📧 Newsletters (12) - can be archived                       │
+│  📢 Notifications (8) - mostly GitHub                        │
+│                                                               │
+│  Would you like me to:                                        │
+│  • Draft replies to the high priority emails?                │
+│  • Archive the newsletters?                                   │
+│  • Create Notion tasks for follow-ups?                       │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│                                                               │
+│  You                                          Just now        │
+│  ─────────────────────────────────────────────────────────   │
+│  Yes, draft replies and create tasks for the follow-ups      │
+│                                                               │
+├──────────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ Type a message...                              [Send]  │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Approval Flow (Inline)**:
+When FlowState wants to do something that requires approval, it shows inline:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  FlowState is requesting approval:                           │
+│                                                               │
+│  📧 Send email to sarah@example.com                          │
+│  Subject: "Re: Meeting Reschedule"                           │
+│  ─────────────────────────────────────────────────────────   │
+│  Hi Sarah,                                                    │
+│  Tuesday at 2pm works great for me. Looking forward to it!  │
+│  Best, Luke                                                   │
+│                                                               │
+│  [Approve]  [Edit]  [Reject]                                 │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 2. Tasks Mode
+View and manage long-running background tasks.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Active Tasks                                                 │
+│                                                               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ 🔄 Organizing Gmail inbox                              │  │
+│  │    Started 5 min ago • Processing 847 emails           │  │
+│  │    ████████████░░░░░░░░ 58%                            │  │
+│  │    Currently: Categorizing newsletters                  │  │
+│  │    [View Details]  [Cancel]                             │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ ⏸ Waiting for approval                                 │  │
+│  │    Desktop organization ready                          │  │
+│  │    Will move 34 files to organized folders             │  │
+│  │    [Review Changes]                                     │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                               │
+│  Completed Today                                              │
+│  ─────────────────────────────────────────────────────────   │
+│  ✅ Morning inbox review • 2 hours ago                       │
+│  ✅ Calendar conflict resolution • 4 hours ago               │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 3. Workflows Mode
+Browse, create, and manage reusable workflows (OpenCode Commands/Skills).
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Workflows                                    [+ New Workflow]│
+│                                                               │
+│  Pre-built                                                    │
+│  ─────────────────────────────────────────────────────────   │
+│  ┌─────────────────────┐ ┌─────────────────────┐             │
+│  │ ⚡ Inbox Review      │ │ ⚡ Meeting Prep      │             │
+│  │ Summarize and       │ │ Prepare notes for   │             │
+│  │ organize unread     │ │ your next meeting   │             │
+│  │ emails              │ │                     │             │
+│  │ [Run]  [Edit]  [Pin]│ │ [Run]  [Edit]  [Pin]│             │
+│  └─────────────────────┘ └─────────────────────┘             │
+│                                                               │
+│  ┌─────────────────────┐ ┌─────────────────────┐             │
+│  │ ⚡ Daily Standup     │ │ ⚡ Desktop Cleanup   │             │
+│  │ Prepare your        │ │ Organize files on   │             │
+│  │ standup notes       │ │ your desktop        │             │
+│  │                     │ │                     │             │
+│  │ [Run]  [Edit]  [Pin]│ │ [Run]  [Edit]  [Pin]│             │
+│  └─────────────────────┘ └─────────────────────┘             │
+│                                                               │
+│  Your Workflows                                               │
+│  ─────────────────────────────────────────────────────────   │
+│  ┌─────────────────────┐                                     │
+│  │ ⚡ Weekly Report     │                                     │
+│  │ Generate weekly     │                                     │
+│  │ progress report     │                                     │
+│  │ [Run]  [Edit]  [Pin]│                                     │
+│  └─────────────────────┘                                     │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Workflow Editor** (SKILL.md format):
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Edit Workflow: Inbox Review                     [Save] [X]   │
+│                                                               │
+│  Name: inbox-review                                           │
+│  Description: Summarize and organize unread emails            │
+│                                                               │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ ---                                                    │  │
+│  │ name: inbox-review                                     │  │
+│  │ description: Summarize and organize unread emails      │  │
+│  │ ---                                                    │  │
+│  │                                                        │  │
+│  │ ## What you do                                         │  │
+│  │ - Read all unread emails in my inbox                   │  │
+│  │ - Categorize by priority (High, Medium, Low)           │  │
+│  │ - Summarize each high-priority email in 1-2 sentences  │  │
+│  │ - Suggest which newsletters can be unsubscribed        │  │
+│  │ - Create Notion tasks for any action items             │  │
+│  │                                                        │  │
+│  │ ## Output format                                       │  │
+│  │ Present a summary with:                                │  │
+│  │ - High priority items that need response               │  │
+│  │ - Action items with suggested Notion tasks             │  │
+│  │ - Newsletters that can be archived                     │  │
+│  └────────────────────────────────────────────────────────┘  │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### 4. Integrations Mode
+Connect and manage external services.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Integrations                                                 │
+│                                                               │
+│  Connected                                                    │
+│  ─────────────────────────────────────────────────────────   │
+│  ┌─────────────────────┐ ┌─────────────────────┐             │
+│  │ 📓 Notion           │ │ 📧 Gmail             │             │
+│  │ ✅ Connected        │ │ ✅ Connected         │             │
+│  │ luke@email.com      │ │ luke@gmail.com       │             │
+│  │ Last sync: 2m ago   │ │ Last sync: 5m ago    │             │
+│  │ [Disconnect]        │ │ [Disconnect]         │             │
+│  └─────────────────────┘ └─────────────────────┘             │
+│                                                               │
+│  ┌─────────────────────┐                                     │
+│  │ 📅 Google Calendar  │                                     │
+│  │ ✅ Connected        │                                     │
+│  │ 3 calendars synced  │                                     │
+│  │ Last sync: 2m ago   │                                     │
+│  │ [Disconnect]        │                                     │
+│  └─────────────────────┘                                     │
+│                                                               │
+│  Available                                                    │
+│  ─────────────────────────────────────────────────────────   │
+│  ┌─────────────────────┐ ┌─────────────────────┐             │
+│  │ 💬 Slack            │ │ 📝 Obsidian          │             │
+│  │ Team communication  │ │ Local notes vault    │             │
+│  │ [Connect]           │ │ [Connect]            │             │
+│  └─────────────────────┘ └─────────────────────┘             │
+│                                                               │
+│  Custom MCPs                                    [+ Add MCP]   │
+│  ─────────────────────────────────────────────────────────   │
+│  ┌─────────────────────┐                                     │
+│  │ 🔧 My Custom API    │                                     │
+│  │ ✅ Active           │                                     │
+│  │ [Configure] [Remove]│                                     │
+│  └─────────────────────┘                                     │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Onboarding Flow
+
+### First Launch Experience
+
+**Step 1: Welcome**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│                    [FlowState Logo]                           │
+│                                                               │
+│              Welcome to FlowState                             │
+│                                                               │
+│     Your AI-powered productivity assistant that              │
+│     connects all your apps and works for you.                │
+│                                                               │
+│                                                               │
+│                     [Get Started]                             │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 2: What Apps Do You Use?**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│              What apps do you use?                            │
+│                                                               │
+│     Select the apps you'd like FlowState to connect          │
+│                                                               │
+│     ┌───────────┐ ┌───────────┐ ┌───────────┐               │
+│     │ ☑ Notion  │ │ ☑ Gmail   │ │ ☑ Calendar│               │
+│     └───────────┘ └───────────┘ └───────────┘               │
+│                                                               │
+│     ┌───────────┐ ┌───────────┐ ┌───────────┐               │
+│     │ ☐ Slack   │ │ ☐ Obsidian│ │ ☐ Linear  │               │
+│     └───────────┘ └───────────┘ └───────────┘               │
+│                                                               │
+│     You can always add more integrations later               │
+│                                                               │
+│                      [Continue]                               │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 3: Connect Integrations**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│              Connect your apps                                │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ 📓 Notion                          [Connect →]   │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ 📧 Gmail                           [Connect →]   │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ 📅 Google Calendar       ✅ Connected            │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│                 [Skip for now]  [Continue]                    │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 4: Choose Your AI Provider**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│              Choose your AI provider                          │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ ⭐ OpenCode Zen (Recommended)                    │     │
+│     │    Free to use, no API key required              │     │
+│     │    ○ Selected                                    │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │    Anthropic Claude                              │     │
+│     │    Requires API key                              │     │
+│     │    ○                                             │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │    OpenAI                                        │     │
+│     │    Requires API key                              │     │
+│     │    ○                                             │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     You can change this anytime in Settings                  │
+│                                                               │
+│                      [Continue]                               │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Step 5: You're Ready! (Wow Moment)**
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                               │
+│              You're all set! 🎉                              │
+│                                                               │
+│     Try one of these to see FlowState in action:             │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ "Summarize my unread emails and add action       │     │
+│     │  items to my Notion inbox"                       │     │
+│     │                                        [Try →]   │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ "Organize my Gmail to get rid of spam and        │     │
+│     │  only see things that are important"             │     │
+│     │                                        [Try →]   │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│     ┌──────────────────────────────────────────────────┐     │
+│     │ "Organize my desktop into folders"               │     │
+│     │                                        [Try →]   │     │
+│     └──────────────────────────────────────────────────┘     │
+│                                                               │
+│               [Skip and go to FlowState]                      │
+│                                                               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## MCP Server Architecture
+
+### Official FlowState MCPs
 
 Each integration is a standalone MCP server that can be:
 - Developed independently
@@ -282,307 +762,116 @@ Each integration is a standalone MCP server that can be:
 | `gcal_update_event` | Modify event | Requires Approval |
 | `gcal_delete_event` | Delete event | Requires Approval |
 
-**System MCP Tools** (Tier 2):
+**System MCP Tools**:
 | Tool | Description | Autonomy |
 |------|-------------|----------|
 | `system_notify` | Send desktop notification | Auto |
 | `system_open_app` | Open application | Auto |
 | `system_open_url` | Open URL in browser | Auto |
 | `system_open_file` | Open file in default app | Auto |
-| `system_clipboard_read` | Read clipboard | Auto |
+| `system_list_files` | List files in directory | Auto |
+| `system_organize_files` | Move/rename files | Requires Approval |
 | `system_shell` | Execute shell command | Requires Approval |
-| `system_window_focus` | Focus window | Auto |
-| `system_window_arrange` | Arrange windows | Auto |
-| `system_dnd` | Toggle Do Not Disturb | Requires Approval |
 
-### 3. MCP Extensibility
+### User Custom MCPs
 
-FlowState embraces **"low floor, high ceiling"** extensibility. Users can connect just the official integrations, or build their entire digital life into custom workflows.
+Users can add any MCP server via the config file, just like Claude Desktop:
 
-#### Three Tiers of MCPs
-
-| Tier | Description | Setup Complexity | Example |
-|------|-------------|------------------|---------|
-| **Official** | FlowState-maintained, pre-configured, one-click OAuth in Web Dashboard | Zero config | Notion, Gmail, GCal, System |
-| **Community** | Published to npm by the community, user adds to config | Add to `opencode.json` | Obsidian, Slack, Linear, Todoist |
-| **Custom** | User builds their own MCP for personal/work tools | Build + configure | Internal company APIs, custom scripts |
-
-#### How Users Add Custom MCPs
-
-Since FlowState builds on OpenCode, users inherit OpenCode's full MCP system. They can add any MCP to their `opencode.json`:
-
-```jsonc
+```json
 {
-  "$schema": "https://opencode.ai/config.json",
-  
-  // FlowState's official MCPs (auto-configured via Web Dashboard)
-  "mcp": {
-    "flowstate-notion": {
-      "type": "local",
-      "command": ["npx", "@flowstate/mcp-notion"],
+  "mcpServers": {
+    "my-custom-mcp": {
+      "command": ["node", "/path/to/my-mcp/index.js"],
       "enabled": true
     },
-    "flowstate-gmail": {
-      "type": "local", 
-      "command": ["npx", "@flowstate/mcp-gmail"],
-      "enabled": true
-    },
-    
-    // User adds their own MCPs here
-    "obsidian": {
-      "type": "local",
-      "command": ["npx", "@anthropic/mcp-obsidian"],
-      "enabled": true
-    },
-    "slack": {
-      "type": "remote",
-      "url": "https://mcp.slack.com/mcp",
-      "oauth": {}
-    },
-    "my-company-api": {
-      "type": "local",
-      "command": ["node", "./my-custom-mcp/index.js"],
-      "enabled": true
+    "remote-mcp": {
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CUSTOM_API_KEY}"
+      }
     }
   }
 }
 ```
 
-#### Web Dashboard MCP Management
-
-The Web Dashboard provides a visual interface for MCP management:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Integrations                                                │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  OFFICIAL INTEGRATIONS                                       │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │   Notion    │ │   Gmail     │ │   GCal      │            │
-│  │  ✓ Connected│ │  ✓ Connected│ │  ○ Connect  │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-│                                                              │
-│  YOUR CUSTOM MCPS                            [+ Add MCP]     │
-│  ┌─────────────┐ ┌─────────────┐                            │
-│  │   Obsidian  │ │   Slack     │                            │
-│  │   ✓ Active  │ │   ✓ Active  │                            │
-│  └─────────────┘ └─────────────┘                            │
-│                                                              │
-│  ─────────────────────────────────────────────────────────  │
-│  [Browse Community MCPs]  [Create Custom MCP Guide]          │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**"+ Add MCP" Flow** (MVP - Manual):
-1. User clicks "+ Add MCP"
-2. Form asks for: Name, Type (local/remote), Command or URL
-3. FlowState writes to `opencode.json`
-4. MCP becomes available immediately
-
-**"+ Add MCP" Flow** (Future - Guided):
-1. User browses curated list of community MCPs
-2. One-click install (runs `npx` or configures remote)
-3. Guided OAuth if required
-4. Auto-configures optimal permissions
-
-#### Why This Matters
-
-1. **No Waiting**: When Anthropic, Vercel, or anyone publishes a new MCP, FlowState users can use it immediately without waiting for official support.
-
-2. **Community Growth**: Contributors can publish `@community/mcp-todoist` and others install with one command.
-
-3. **Enterprise Ready**: Companies can build private MCPs for internal tools without forking FlowState.
-
-4. **Your Use Case Scales**: The SGA email workflow could extend to include a custom university portal MCP or internal SGA tools.
-
-5. **Future-Proof**: The MCP ecosystem is growing rapidly. FlowState rides that wave automatically.
-
 ---
 
-### 4. FlowState Daemon
+## Workflow System
 
-A background Node.js process that:
-- Monitors for scheduled tasks
-- Handles long-running operations
-- Manages notification delivery
-- Maintains MCP server connections
+Workflows use OpenCode's Commands/Skills system, defined as Markdown files:
 
-**Daemon States**:
-```
-IDLE        → Waiting for work, minimal resource usage
-MONITORING  → Watching for triggers (time, events)
-EXECUTING   → Running a background task
-WAITING     → Task paused, awaiting user approval
-```
+### Pre-built Workflows
 
-**MVP Daemon Capabilities**:
-- Start/stop via TUI or web dashboard
-- Execute queued background tasks
-- Send desktop notifications for:
-  - Task completion
-  - Approval requests
-  - Errors/conflicts
-- Persist state across restarts
-
-### 5. Memory System
-
-**Contextual Memory** (MVP):
-- Current session context
-- Recent interactions per integration
-- User's project/workspace mappings
-
-**Preference Memory** (MVP):
-- Working hours
-- Timezone
-- Notification preferences  
-- Per-integration settings
-
-**Entity Linking** (Future):
-- Connect Notion pages to calendar events
-- Link email threads to tasks
-- Build knowledge graph across apps
-
-**Storage**: SQLite database at `~/.flowstate/memory.db`
-
-### 6. Web Config Dashboard
-
-Local React app served on `localhost:3847`
-
-**MVP Pages**:
-
-1. **Integrations** (Priority: 10/10)
-   - OAuth connect/disconnect for official MCPs
-   - Connection status indicators
-   - Last sync timestamps
-   - Quick test buttons
-   - **"+ Add Custom MCP" button** (manual config)
-   - List of user's custom MCPs with enable/disable
-
-2. **Preferences** (Priority: 8/10)
-   - Timezone selection
-   - Working hours definition
-   - Notification preferences
-   - Default LLM provider
-
-3. **MCP Status** (Priority: 8/10)
-   - List of active MCP servers
-   - Health status per server
-   - Tool availability matrix
-   - Quick enable/disable toggles
-
-4. **Agents** (Priority: 8/10)
-   - View configured agents
-   - Simple agent editor (later)
-   - Enable/disable agents
-
-**Future Pages**:
-- Workflows/Recipes (Priority: 6/10)
-- Daemon Settings (Priority: 5/10)
-- Task History (Priority: 5/10)
-- **Community MCP Browser** (Priority: 6/10) - Discover and install community MCPs
-
----
-
-## FlowState Agents
-
-### Primary Agent: `flowstate`
-
-The main orchestrator that routes to specialized subagents.
-
+**`workflows/inbox-review/SKILL.md`**:
 ```markdown
 ---
-description: FlowState - Your productivity orchestrator
-mode: primary
-model: opencode/claude-sonnet (or user-configured)
-temperature: 0.3
+name: inbox-review
+description: Summarize and organize unread emails, create action items
 ---
 
-You are FlowState, a productivity assistant that helps users manage their 
-digital life across multiple applications.
+## What you do
+- Read all unread emails in my inbox using Gmail MCP
+- Categorize by priority (High, Medium, Low) based on sender and content
+- Summarize each high-priority email in 1-2 sentences
+- Identify newsletters that can be archived or unsubscribed
+- Create Notion tasks for any emails requiring follow-up action
 
-## Your Capabilities
-- Notion: Pages, databases, task management
-- Gmail: Email reading, drafting, organizing
-- Google Calendar: Events, scheduling, conflicts
-- System: Applications, files, notifications
+## Output format
+Present a summary with:
+- High priority items that need response today
+- Action items with links to created Notion tasks
+- Newsletters that can be safely archived
 
-## Behavior Rules
-1. ALWAYS use tools to gather information before responding
-2. For READING operations: Execute immediately
-3. For WRITING operations: Describe what you'll do and wait for approval
-4. When tasks span multiple apps, break them into clear steps
-5. Delegate to specialized subagents for complex domain tasks
-
-## Subagents Available
-- @scheduler: Calendar optimization, meeting scheduling, conflict resolution
-- @organizer: Notion organization, task prioritization, project management
-- @communicator: Email drafting, response handling, message composition
-- @executor: System commands, file operations, app automation
+## When to use me
+Use this workflow at the start of your workday or when returning from time away.
 ```
 
-### Subagents
-
-**scheduler.md**:
+**`workflows/meeting-prep/SKILL.md`**:
 ```markdown
 ---
-description: Calendar and scheduling specialist
-mode: subagent
-tools:
-  gcal_*: true
-  notion_read_*: true
-  system_notify: true
+name: meeting-prep
+description: Prepare notes and context for your next meeting
 ---
 
-You optimize schedules, resolve conflicts, and manage time.
-Focus on: availability, conflicts, time blocking, meeting prep.
+## What you do
+- Check Google Calendar for the next upcoming meeting
+- Look up attendees and recent email threads with them
+- Search Notion for any relevant project pages or notes
+- Summarize any outstanding action items related to this meeting
+- Create a brief agenda or talking points
+
+## Output format
+Present:
+- Meeting details (time, attendees, location/link)
+- Context from recent communications
+- Relevant Notion pages
+- Suggested agenda items
+
+## When to use me
+Use this 10-15 minutes before an important meeting.
 ```
 
-**organizer.md**:
+**`workflows/desktop-cleanup/SKILL.md`**:
 ```markdown
 ---
-description: Task and project organization specialist  
-mode: subagent
-tools:
-  notion_*: true
-  gmail_read: true
-  gmail_search: true
+name: desktop-cleanup
+description: Organize files on your desktop into logical folders
 ---
 
-You organize tasks, prioritize work, and manage projects in Notion.
-Focus on: prioritization, categorization, deadline tracking.
-```
+## What you do
+- List all files on the Desktop using System MCP
+- Categorize by file type (Documents, Images, Downloads, etc.)
+- Suggest a folder structure based on content
+- Create folders and move files (with approval)
 
-**communicator.md**:
-```markdown
----
-description: Email and messaging specialist
-mode: subagent
-tools:
-  gmail_*: true
-  gcal_free_busy: true
-  notion_read_*: true
----
+## Output format
+Show proposed changes before executing:
+- New folders to create
+- Files to move and their destinations
+- Files that couldn't be categorized
 
-You draft emails, organize inboxes, and handle communications.
-Focus on: clear writing, appropriate tone, efficient responses.
-```
-
-**executor.md**:
-```markdown
----
-description: System automation specialist
-mode: subagent
-tools:
-  system_*: true
-permission:
-  bash:
-    "*": ask
----
-
-You execute system-level tasks on the user's machine.
-Focus on: safe execution, clear explanations, minimal disruption.
+## When to use me
+Use this when your desktop is cluttered and needs organization.
 ```
 
 ---
@@ -591,161 +880,143 @@ Focus on: safe execution, clear explanations, minimal disruption.
 
 ### Success Criteria
 
-> "I can open FlowState, connect my Notion and Gmail through the TUI or Web dashboard, configure an LLM provider (or use the default), and execute a task like 'organize my inbox based on my Notion projects' with the system handling reads automatically and asking for my approval before making changes."
+> "I can download FlowState.app, connect my Gmail and Notion through a friendly onboarding flow, and immediately run a workflow like 'Summarize my inbox and create Notion tasks' - seeing the agent work in real-time and approving any changes it wants to make."
 
-### MVP Feature Set
+### MVP Feature Set (Desktop App v1.0)
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| OpenCode Integration | FlowState runs on OpenCode server | Planned |
-| FlowState Theme | Distinct visual identity in TUI | Planned |
-| Notion MCP | Full Notion integration via MCP | Planned |
-| Gmail MCP | Email reading, drafting, sending | Planned |
-| GCal MCP | Calendar events and scheduling | Planned |
-| System MCP | Basic system control (Tier 2) | Planned |
-| Web Dashboard | Local config UI on localhost | Planned |
-| OAuth Flows | Connect integrations via OAuth | Planned |
-| Progressive Autonomy | Auto-read, approval-write | Planned |
-| Desktop Notifications | Push notifications for approvals | Planned |
-| Local Auth Storage | Encrypted token storage | Planned |
-| Memory (Basic) | Context + preferences | Planned |
-| **Custom MCP Support** | Users can add their own MCPs | Planned |
+| Feature | Description | Priority |
+|---------|-------------|----------|
+| Electron Shell | Four-mode layout (Chat, Tasks, Workflows, Integrations) | P0 |
+| Headless OpenCode | Engine runs in background, controlled via SDK | P0 |
+| Chat Mode | Natural language conversation with streaming | P0 |
+| Integrations Mode | OAuth connect for Notion, Gmail, GCal | P0 |
+| MCP Config File | Claude Desktop-style local config | P0 |
+| Onboarding Flow | Welcome → Apps → Connect → Wow moment | P0 |
+| Notion MCP | Full Notion integration | P0 |
+| Gmail MCP | Full Gmail integration | P0 |
+| GCal MCP | Full Calendar integration | P0 |
+| System MCP | Desktop/file organization | P1 |
+| Tasks Mode | View running/completed tasks | P1 |
+| Workflows Mode | Browse and run pre-built workflows | P1 |
+| One Pre-built Workflow | "Inbox Review" as example | P1 |
+| Approval Flow | Inline approval with notifications | P1 |
+| Provider Selection | Choose LLM provider in onboarding | P1 |
+| FlowState Theme | Warm earthy color palette | P1 |
+
+### Desktop App v1.1 (Post-MVP)
+
+| Feature | Description |
+|---------|-------------|
+| Workflow Builder UI | Visual editor for creating workflows |
+| Real-time Task Progress | Detailed progress indicators like Cowork |
+| Custom MCP Addition UI | Add MCPs without editing config file |
+| Approval Queue | Batch approve multiple pending actions |
+| Conversation History | Browse and continue past conversations |
+| Keyboard Shortcuts | Power user efficiency |
 
 ### Out of Scope for MVP
 
-- Entity linking / knowledge graph
-- Workflow builder UI
-- Task history / audit log
-- Custom notification channels (Slack, SMS)
 - Windows support (Mac-first)
+- Offline mode
 - Multi-device sync
-- Obsidian integration (community MCP available)
-- Outlook/Office 365 integration (community MCP available)
-- Slack integration (community MCP available)
-- Community MCP browser/marketplace (users can still add MCPs manually)
+- Team/shared workflows
+- Mobile companion app
+- Code signing / notarization (requires Apple Developer account)
 
 ---
 
 ## Development Milestones
 
-### Phase 1: Foundation (Weeks 1-2)
-- [ ] Initialize new FlowState 2.0 repository
-- [ ] Set up monorepo structure (pnpm + Turborepo)
-- [ ] Create FlowState OpenCode theme
-- [ ] Configure OpenCode with FlowState branding
-- [ ] Create AGENTS.md for the new project
-- [ ] Set up development environment documentation
+### Phase 1: Desktop Foundation (Weeks 1-2)
+- [ ] Set up `packages/desktop/` with Electron + React + TypeScript
+- [ ] Implement four-mode layout shell
+- [ ] Port FlowState theme to Tailwind
+- [ ] Create sidebar with placeholder content
+- [ ] Set up Electron main/renderer IPC
 
-### Phase 2: Core MCP Servers (Weeks 3-5)
-- [ ] Build `mcp-notion` with OAuth flow
-- [ ] Build `mcp-gmail` with OAuth flow
-- [ ] Build `mcp-gcal` with OAuth flow
-- [ ] Build `mcp-system` (macOS only for MVP)
-- [ ] Test all MCPs work with OpenCode
-- [ ] Document MCP tool schemas
+### Phase 2: OpenCode Integration (Weeks 3-4)
+- [ ] Implement process manager for headless OpenCode
+- [ ] Create SDK bridge in main process
+- [ ] Build Chat mode with message streaming
+- [ ] Connect to existing MCP servers
+- [ ] Test basic conversation flow
 
-### Phase 3: FlowState Core (Weeks 6-7)
-- [ ] Implement encrypted auth storage
-- [ ] Build basic memory system (SQLite)
-- [ ] Create daemon process with notification support
-- [ ] Implement progressive autonomy logic
-- [ ] Test background task execution
+### Phase 3: Integrations & Config (Weeks 5-6)
+- [ ] Implement config store (read/write `config.json`)
+- [ ] Build Integrations mode UI
+- [ ] Implement OAuth server for Google services
+- [ ] Port auth manager from core package
+- [ ] Test OAuth flow end-to-end
 
-### Phase 4: Web Dashboard (Weeks 8-9)
-- [ ] Set up React + Vite project
-- [ ] Build Integrations page with OAuth
-- [ ] Build Preferences page
-- [ ] Build MCP Status page
-- [ ] Connect dashboard to daemon
+### Phase 4: Onboarding & Polish (Weeks 7-8)
+- [ ] Build complete onboarding flow
+- [ ] Implement provider selection
+- [ ] Create suggested prompts for wow moment
+- [ ] Add approval flow UI (inline + notifications)
+- [ ] Implement Tasks mode (view running tasks)
 
-### Phase 5: Agent Development (Week 10)
-- [ ] Create `flowstate` primary agent
-- [ ] Create `scheduler` subagent
-- [ ] Create `organizer` subagent
-- [ ] Create `communicator` subagent
-- [ ] Create `executor` subagent
-- [ ] Test multi-agent workflows
+### Phase 5: Workflows (Weeks 9-10)
+- [ ] Build Workflows mode UI
+- [ ] Create pre-built workflow templates
+- [ ] Implement workflow runner
+- [ ] Add "pin to sidebar" functionality
+- [ ] Test workflow execution end-to-end
 
-### Phase 6: Polish & Launch (Weeks 11-12)
+### Phase 6: Testing & Launch Prep (Weeks 11-12)
 - [ ] End-to-end testing
-- [ ] Documentation (README, guides)
+- [ ] Performance optimization
+- [ ] Create documentation
+- [ ] Build unsigned DMG for distribution
 - [ ] Create demo video
-- [ ] Publish to npm (MCPs)
-- [ ] Announce on OpenCode Discord
 - [ ] GitHub release v0.1.0
 
 ---
 
-## What We're Salvaging from FlowState Legacy
+## What We're Salvaging from Existing Code
 
 | Component | Salvageable | How We'll Use It |
 |-----------|-------------|------------------|
-| OAuth Patterns (Notion) | Yes | Port to `mcp-notion` package |
-| OAuth Patterns (Google) | Yes | Port to `mcp-gmail` and `mcp-gcal` |
-| Tool Definitions | Partial | Convert LangChain tools to MCP tools |
-| Agent Prompts | Partial | Adapt for OpenCode agent format |
-| Date/Time Utilities | Yes | Copy to `core` package |
-| UI Colors/Branding | Yes | Create OpenCode theme |
-| Supervisor Pattern | Conceptual | Inform primary agent design |
-| Assignment Dataclass | No | Replaced by Notion MCP tools |
-| React Frontend | No | New web dashboard from scratch |
-| FastAPI Backend | No | Replaced by OpenCode server |
-| Supabase Integration | No | Local-only for privacy |
-| LangGraph State | No | OpenCode handles orchestration |
+| `@flowstate/mcp-notion` | ✅ Yes | Spawn as child process, unchanged |
+| `@flowstate/mcp-gmail` | ✅ Yes | Spawn as child process, unchanged |
+| `@flowstate/mcp-gcal` | ✅ Yes | Spawn as child process, unchanged |
+| `@flowstate/mcp-system` | ✅ Yes | Spawn as child process, unchanged |
+| `@flowstate/core/auth` | ✅ Yes | Port to Electron main process |
+| `@flowstate/core/memory` | ✅ Yes | Port to Electron main process |
+| `@flowstate/core/notifications` | ✅ Partial | Adapt for Electron native notifications |
+| `@flowstate/core/daemon` | ❌ No | Electron main process replaces daemon |
+| `@flowstate/web-config` | ❌ No | Fresh React UI in desktop package |
+| Agent definitions | ✅ Yes | Copy to desktop package |
+| Theme colors | ✅ Yes | Port to Tailwind theme |
+| FlowState logo | ✅ Yes | Copy to desktop assets |
+| opencode.json | ✅ Partial | Adapt for desktop config format |
 
 ---
 
 ## Open Questions for Future Discussion
 
-1. **Windows Support Timeline**: When should we prioritize Windows? After Mac MVP is stable?
+1. **Code Signing Timeline**: When will Apple Developer account be available?
 
-2. **Obsidian Integration**: Should this be an official FlowState MCP or community-contributed?
+2. **Auto-Updates**: Implement electron-updater for seamless updates?
 
-3. **Monetization**: Any plans for paid features? Or pure open-source?
+3. **Windows Support**: Timeline after Mac MVP is stable?
 
-4. **Community MCP Registry**: Should FlowState maintain a curated list of recommended community MCPs? Or point to a broader MCP registry?
+4. **Community Workflows**: Should FlowState host a gallery of user-contributed workflows?
 
-5. **MCP Verification**: Should we have a "verified" badge for community MCPs that meet quality/security standards?
+5. **Telemetry**: Any anonymous usage analytics for improvement?
 
-6. **Mobile Companion**: Any interest in a mobile app for approvals when away from computer?
-
-7. **Team Features**: Should FlowState ever support team/shared workflows?
+6. **Menubar Mode**: Should FlowState also have a menubar presence for quick access?
 
 ---
 
-## Appendix: Original FlowState Vision (Preserved)
+## Resources
 
-The original FlowState was built for **students managing academic workloads**:
-
-> "FlowState is designed to simplify and optimize task management by providing users with tailored study plans, schedules, and task breakdowns."
-
-FlowState 2.0 expands this vision to **everyone managing their digital life**:
-
-> "FlowState 2.0 enables anyone to orchestrate their productivity tools from one place, whether you're a student, professional, or power user."
-
-The core philosophy remains: **Flow State** - that optimal mental state where you're fully immersed in productive work, undistracted by tool-switching and manual coordination.
-
----
-
-## Getting Started (For Contributors)
-
-```bash
-# Clone the repository (once created)
-git clone https://github.com/YOUR_USERNAME/flowstate.git
-cd flowstate
-
-# Install dependencies
-pnpm install
-
-# Start development
-pnpm dev
-
-# Run tests
-pnpm test
-
-# Build all packages
-pnpm build
-```
+- [OpenCode Documentation](https://opencode.ai/docs/)
+- [OpenCode Commands](https://opencode.ai/docs/commands/)
+- [OpenCode Agent Skills](https://opencode.ai/docs/skills/)
+- [OpenCode SDK Reference](https://opencode.ai/docs/sdk/)
+- [Claude Cowork](https://support.claude.com/en/articles/13345190-getting-started-with-cowork)
+- [FlowState 1.0 (Design Reference)](https://github.com/lukebrevoort/flowstate)
+- [Electron Documentation](https://www.electronjs.org/docs)
 
 ---
 

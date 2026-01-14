@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* FlowState base layer */
+@layer base {
+  body {
+    @apply bg-flowstate-background text-flowstate-text antialiased;
+  }
+
+  /* macOS title bar drag region */
+  .titlebar-drag {
+    -webkit-app-region: drag;
+  }
+
+  .titlebar-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+/* FlowState component layer */
+@layer components {
+  /* Card component */
+  .fs-card {
+    @apply bg-flowstate-surface rounded-flowstate shadow-flowstate p-4;
+  }
+
+  /* Button variants */
+  .fs-button {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  }
+
+  .fs-button-primary {
+    @apply fs-button bg-flowstate-primary text-white hover:bg-flowstate-accent;
+  }
+
+  .fs-button-secondary {
+    @apply fs-button bg-flowstate-surface text-flowstate-text border border-flowstate-border hover:bg-flowstate-highlight;
+  }
+
+  .fs-button-ghost {
+    @apply fs-button bg-transparent text-flowstate-text-muted hover:bg-flowstate-surface;
+  }
+
+  /* Input field */
+  .fs-input {
+    @apply w-full px-4 py-2 bg-white border border-flowstate-border rounded-lg 
+           focus:outline-none focus:ring-2 focus:ring-flowstate-primary focus:border-transparent
+           placeholder:text-flowstate-text-muted;
+  }
+
+  /* Tab styles */
+  .fs-tab {
+    @apply px-4 py-2 text-sm font-medium transition-colors duration-200 
+           text-flowstate-text-muted hover:text-flowstate-text;
+  }
+
+  .fs-tab-active {
+    @apply fs-tab text-flowstate-primary border-b-2 border-flowstate-primary;
+  }
+
+  /* Sidebar item */
+  .fs-sidebar-item {
+    @apply flex items-center gap-2 px-3 py-2 rounded-lg text-sm
+           text-flowstate-text-muted hover:bg-flowstate-surface hover:text-flowstate-text
+           transition-colors duration-200 cursor-pointer;
+  }
+
+  .fs-sidebar-item-active {
+    @apply fs-sidebar-item bg-flowstate-surface text-flowstate-text;
+  }
+
+  /* Badge styles */
+  .fs-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .fs-badge-success {
+    @apply fs-badge bg-semantic-approval/10 text-semantic-approval;
+  }
+
+  .fs-badge-warning {
+    @apply fs-badge bg-semantic-pending/10 text-semantic-pending;
+  }
+
+  .fs-badge-error {
+    @apply fs-badge bg-semantic-denied/10 text-semantic-denied;
+  }
+}
+
+/* FlowState utilities layer */
+@layer utilities {
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Animation utilities */
+  .animate-fade-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Scrollbar hide utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}

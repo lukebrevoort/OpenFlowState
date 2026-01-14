@@ -14,7 +14,7 @@ export async function getNotionClient(): Promise<Client> {
 
   const token = await auth.getToken('notion');
   if (!token) {
-    throw new Error('Notion not connected. Please connect via the FlowState dashboard.');
+    throw new Error('Notion not connected. Please connect at http://localhost:3847/integrations');
   }
 
   notionClient = new Client({

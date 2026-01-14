@@ -14,7 +14,7 @@ export async function getGmailClient(): Promise<gmail_v1.Gmail> {
 
   const token = await auth.getToken('gmail');
   if (!token) {
-    throw new Error('Gmail not connected. Please connect via the FlowState dashboard.');
+    throw new Error('Gmail not connected. Please connect at http://localhost:3847/integrations');
   }
 
   const oauth2Client = new google.auth.OAuth2();
