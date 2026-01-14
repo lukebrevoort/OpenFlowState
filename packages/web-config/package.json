@@ -1,0 +1,40 @@
+{
+  "name": "@flowstate/web-config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FlowState web dashboard for OAuth and configuration",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"npm run server:dev\"",
+    "server:dev": "tsc -p tsconfig.server.json && node dist-server/server/index.js",
+    "server": "node dist-server/server/index.js",
+    "build": "tsc && vite build && tsc -p tsconfig.server.json",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@flowstate/core": "workspace:*",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^9.2.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "vite": "^5.1.0",
+    "vitest": "^2.0.0"
+  },
+  "license": "MIT"
+}

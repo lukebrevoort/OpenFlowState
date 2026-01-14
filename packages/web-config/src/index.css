@@ -1,0 +1,188 @@
+/* FlowState Dashboard Styles */
+/* Based on FlowState theme: warm, earthy colors */
+
+:root {
+  --fs-primary: #8B6B59;
+  --fs-secondary: #665F5D;
+  --fs-background: #F6EEE3;
+  --fs-surface: #E8DFD3;
+  --fs-text: #1E1E1E;
+  --fs-text-muted: #5A5A5A;
+  --fs-accent: #331C16;
+  --fs-success: #4A7C59;
+  --fs-warning: #D4A574;
+  --fs-error: #C45B4A;
+  --fs-border: #D4C9BD;
+  --fs-selection: #C9B8A8;
+  --fs-highlight: #DED4C7;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: var(--fs-background);
+  color: var(--fs-text);
+  line-height: 1.6;
+}
+
+/* Layout */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 240px;
+  background-color: var(--fs-surface);
+  border-right: 1px solid var(--fs-border);
+  padding: 1.5rem;
+}
+
+.sidebar h1 {
+  color: var(--fs-primary);
+  font-size: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.75rem 1rem;
+  color: var(--fs-text);
+  text-decoration: none;
+  border-radius: 8px;
+  margin-bottom: 0.25rem;
+  transition: background-color 0.2s;
+}
+
+.nav-link:hover {
+  background-color: var(--fs-highlight);
+}
+
+.nav-link.active {
+  background-color: var(--fs-primary);
+  color: white;
+}
+
+.main-content {
+  flex: 1;
+  padding: 2rem;
+  max-width: 960px;
+}
+
+/* Cards */
+.card {
+  background-color: var(--fs-surface);
+  border: 1px solid var(--fs-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.card h2 {
+  color: var(--fs-primary);
+  margin-bottom: 1rem;
+}
+
+/* Integration Cards */
+.integration-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.integration-card {
+  background-color: white;
+  border: 1px solid var(--fs-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.integration-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.integration-card h3 {
+  margin-bottom: 0.5rem;
+}
+
+.status-connected {
+  color: var(--fs-success);
+}
+
+.status-disconnected {
+  color: var(--fs-text-muted);
+}
+
+/* Buttons */
+.btn {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-primary {
+  background-color: var(--fs-primary);
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: var(--fs-accent);
+}
+
+.btn-secondary {
+  background-color: var(--fs-surface);
+  color: var(--fs-text);
+  border: 1px solid var(--fs-border);
+}
+
+.btn-secondary:hover {
+  background-color: var(--fs-highlight);
+}
+
+/* Forms */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--fs-border);
+  border-radius: 8px;
+  font-size: 1rem;
+  background-color: white;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: var(--fs-primary);
+}
+
+/* OAuth Callback */
+.oauth-callback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+}

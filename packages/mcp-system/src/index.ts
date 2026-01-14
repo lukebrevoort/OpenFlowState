@@ -1,0 +1,36 @@
+/**
+ * @flowstate/mcp-system
+ * 
+ * System MCP server for FlowState productivity orchestration.
+ * Provides tools for notifications, apps, and automation.
+ * 
+ * Currently macOS-only for MVP.
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { registerTools } from './tools/index.js';
+
+const server = new Server(
+  {
+    name: '@flowstate/mcp-system',
+    version: '0.1.0',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// Register all System tools
+registerTools(server);
+
+// Start the server
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('[mcp-system] Server started');
+}
+
+main().catch(console.error);

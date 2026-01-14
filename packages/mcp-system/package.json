@@ -1,0 +1,45 @@
+{
+  "name": "@flowstate/mcp-system",
+  "version": "0.1.0",
+  "description": "System MCP server for FlowState - notifications, apps, and automation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "mcp-system": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "node-notifier": "^10.0.1",
+    "@flowstate/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "keywords": [
+    "mcp",
+    "system",
+    "macos",
+    "automation",
+    "flowstate",
+    "productivity"
+  ],
+  "license": "MIT"
+}

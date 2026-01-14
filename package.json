@@ -1,0 +1,27 @@
+{
+  "name": "flowstate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FlowState 2.0 - Open-source productivity orchestration platform built on OpenCode",
+  "author": "Luke Brevoort",
+  "license": "MIT",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:mcp": "node scripts/test-mcp.js",
+    "lint": "turbo lint",
+    "clean": "turbo clean && rm -rf node_modules",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "name": "FlowState",
+  "version": "0.1.0",
+  "theme": "./themes/flowstate.json",
+  
+  "mcp": {
+    "flowstate-notion": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-notion", "start"],
+      "enabled": false,
+      "description": "Notion integration for pages, databases, and task management"
+    },
+    "flowstate-gmail": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-gmail", "start"],
+      "enabled": false,
+      "description": "Gmail integration for email reading, drafting, and sending"
+    },
+    "flowstate-gcal": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-gcal", "start"],
+      "enabled": false,
+      "description": "Google Calendar integration for events and scheduling"
+    },
+    "flowstate-system": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-system", "start"],
+      "enabled": false,
+      "description": "System integration for notifications, apps, and automation"
+    }
+  },
+
+  "agents": {
+    "primary": "./agents/flowstate.md",
+    "subagents": {
+      "scheduler": "./agents/subagents/scheduler.md",
+      "organizer": "./agents/subagents/organizer.md",
+      "communicator": "./agents/subagents/communicator.md",
+      "executor": "./agents/subagents/executor.md"
+    }
+  },
+
+  "preferences": {
+    "defaultProvider": "opencode/zen",
+    "progressiveAutonomy": {
+      "readOperations": "auto",
+      "writeOperations": "approval"
+    },
+    "webDashboard": {
+      "port": 3847,
+      "enabled": true
+    }
+  }
+}
