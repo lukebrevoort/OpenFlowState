@@ -27,8 +27,19 @@ registerTools(server);
 // Start the server
 async function main() {
   const transport = new StdioServerTransport();
+
+  transport.onmessage = (message) => {
+    console.error('[mcp-gmail] Incoming message:', JSON.stringify(message));
+  };
+
+  transport.onerror = (error) => {
+    console.error('[mcp-gmail] Transport error:', error);
+  };
+
   await server.connect(transport);
   console.error('[mcp-gmail] Server started');
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error('[mcp-gmail] Fatal error:', error);
+});

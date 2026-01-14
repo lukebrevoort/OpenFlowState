@@ -1,73 +1,38 @@
-import { useState } from 'react';
-import { Send, Sparkles } from 'lucide-react';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-}
+import { useState, useRef, useEffect } from 'react';
+import { Send, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
+import { useChatStore } from '../stores/chatStore';
+import { useOpenCode } from '../hooks/useOpenCode';
 
 /**
- * ChatMode - Primary chat interface for natural language interaction
+ * ChatMode - Primary chat interface for natural language interaction with OpenCode
  */
 function ChatMode() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: `Welcome to FlowState! 👋
-
-I'm your AI-powered productivity assistant. I can help you:
-
-• **Organize your inbox** - Summarize emails, draft replies, create tasks
-• **Manage your calendar** - Find conflicts, schedule meetings, prep for events  
-• **Work with Notion** - Search pages, create tasks, update databases
-• **Automate your desktop** - Organize files, open apps, run workflows
-
-Try asking me something like:
-- "Summarize my unread emails"
-- "What's on my calendar today?"
-- "Organize my desktop"`,
-      timestamp: new Date(),
-    },
-  ]);
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Get state from store
+  const { messages, isLoading, status, error } = useChatStore();
+  
+  // Get actions from hook
+  const { sendMessage, checkStatus } = useOpenCode();
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Check status on mount
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
+    const message = input.trim();
     setInput('');
-    setIsLoading(true);
-
-    // TODO: Connect to OpenCode
-    // Simulated response for now
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `I received your message: "${userMessage.content}"
-
-This is a placeholder response. Once connected to OpenCode, I'll be able to:
-- Execute tools across your connected apps
-- Stream responses in real-time
-- Request approval for sensitive actions
-
-The OpenCode integration is coming in Phase 2!`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      setIsLoading(false);
-    }, 1000);
+    
+    await sendMessage(message);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -77,8 +42,76 @@ The OpenCode integration is coming in Phase 2!`,
     }
   };
 
+  const handleRetry = () => {
+    checkStatus();
+  };
+
+  // Format message content with basic markdown-like styling
+  const formatContent = (content: string) => {
+    // Split by code blocks first
+    const parts = content.split(/(```[\s\S]*?```)/g);
+    
+    return parts.map((part, index) => {
+      if (part.startsWith('```')) {
+        // Code block
+        const code = part.replace(/```\w*\n?/g, '').replace(/```$/g, '');
+        return (
+          <pre key={index} className="bg-flowstate-accent/10 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono">
+            <code>{code}</code>
+          </pre>
+        );
+      }
+      
+      // Regular text - handle bold and bullet points
+      return (
+        <span key={index}>
+          {part.split('\n').map((line, lineIndex) => {
+            // Handle bullet points
+            if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
+              return (
+                <div key={lineIndex} className="flex gap-2 my-1">
+                  <span className="text-flowstate-primary">•</span>
+                  <span dangerouslySetInnerHTML={{ 
+                    __html: line.replace(/^[•-]\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                  }} />
+                </div>
+              );
+            }
+            
+            // Regular line with bold support
+            return (
+              <span key={lineIndex}>
+                <span dangerouslySetInnerHTML={{ 
+                  __html: line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                }} />
+                {lineIndex < part.split('\n').length - 1 && <br />}
+              </span>
+            );
+          })}
+        </span>
+      );
+    });
+  };
+
   return (
     <div className="flex flex-col h-full">
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-flowstate-error/10 border border-flowstate-error/20 rounded-lg p-3 mb-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-flowstate-error flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-flowstate-error font-medium">Connection Error</p>
+            <p className="text-xs text-flowstate-text-muted">{error}</p>
+          </div>
+          <button
+            onClick={handleRetry}
+            className="p-2 hover:bg-flowstate-error/10 rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-4 h-4 text-flowstate-error" />
+          </button>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-4 pb-4">
         {messages.map((message) => (
@@ -99,32 +132,53 @@ The OpenCode integration is coming in Phase 2!`,
                   <span className="text-sm font-medium text-flowstate-primary">FlowState</span>
                 </div>
               )}
-              <div className="text-sm whitespace-pre-wrap">
-                {message.content}
+              <div className="text-sm">
+                {message.role === 'user' ? (
+                  <span className="whitespace-pre-wrap">{message.content}</span>
+                ) : (
+                  formatContent(message.content)
+                )}
               </div>
-              <div className={`text-xs mt-2 ${
-                message.role === 'user' ? 'text-white/70' : 'text-flowstate-text-muted'
-              }`}>
+              <div
+                className={`text-xs mt-2 ${
+                  message.role === 'user' ? 'text-white/70' : 'text-flowstate-text-muted'
+                }`}
+              >
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
           </div>
         ))}
-        
+
+        {/* Loading indicator */}
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-flowstate-surface rounded-2xl px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <div
+                    className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce"
+                    style={{ animationDelay: '0ms' }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce"
+                    style={{ animationDelay: '150ms' }}
+                  />
+                  <div
+                    className="w-2 h-2 bg-flowstate-primary rounded-full animate-bounce"
+                    style={{ animationDelay: '300ms' }}
+                  />
                 </div>
-                <span className="text-sm text-flowstate-text-muted">Thinking...</span>
+                <span className="text-sm text-flowstate-text-muted">
+                  {status === 'thinking' ? 'Thinking...' : 'Processing...'}
+                </span>
               </div>
             </div>
           </div>
         )}
+
+        {/* Scroll anchor */}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Area */}
@@ -137,7 +191,8 @@ The OpenCode integration is coming in Phase 2!`,
               onKeyDown={handleKeyDown}
               placeholder="Type a message..."
               rows={1}
-              className="fs-input resize-none pr-12 min-h-[44px] max-h-32"
+              disabled={isLoading}
+              className="fs-input resize-none pr-12 min-h-[44px] max-h-32 disabled:opacity-50"
               style={{ height: 'auto' }}
             />
           </div>

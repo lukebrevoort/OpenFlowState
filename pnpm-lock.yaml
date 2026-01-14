@@ -48,6 +48,9 @@ importers:
       '@flowstate/core':
         specifier: workspace:*
         version: link:../core
+      '@opencode-ai/sdk':
+        specifier: ^1.1.20
+        version: 1.1.20
     devDependencies:
       '@types/node':
         specifier: ^20.11.0
@@ -573,6 +576,9 @@ packages:
   '@notionhq/client@2.3.0':
     resolution: {integrity: sha512-l7WqTCpQqC+HibkB9chghONQTYcxNQT0/rOJemBfmuKQRTu2vuV8B3yA395iKaUdDo7HI+0KvQaz9687Xskzkw==}
     engines: {node: '>=12'}
+
+  '@opencode-ai/sdk@1.1.20':
+    resolution: {integrity: sha512-OYzRFqf13y09TSiaQynsInpvJ2benk63NX+4HM7PbV85vYluGxRIB4j7CLCQUGojFmUz8+gOwiJ8+DDnv1h7lQ==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -3213,6 +3219,8 @@ snapshots:
       node-fetch: 2.7.0
     transitivePeerDependencies:
       - encoding
+
+  '@opencode-ai/sdk@1.1.20': {}
 
   '@pkgjs/parseargs@0.11.0':
     optional: true

@@ -12,6 +12,7 @@ export default {
           secondary: '#665F5D',
           background: '#F6EEE3',
           surface: '#E8DFD3',
+          card: '#FFFFFF',
           text: '#1E1E1E',
           'text-muted': '#5A5A5A',
           accent: '#331C16',
@@ -21,6 +22,7 @@ export default {
           border: '#D4C9BD',
           selection: '#C9B8A8',
           highlight: '#DED4C7',
+          overlay: 'rgba(30, 30, 30, 0.75)',
         },
         // Semantic colors
         semantic: {

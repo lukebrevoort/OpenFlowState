@@ -2,33 +2,61 @@
  * Notion API Wrapper
  * 
  * Wraps @notionhq/client with FlowState-specific functionality.
+ * 
+ * Tokens can be provided via:
+ * 1. Environment variable (NOTION_ACCESS_TOKEN) - preferred for desktop app
+ * 2. @flowstate/core auth module - fallback for standalone usage
  */
 
 import { Client } from '@notionhq/client';
-import { auth } from '@flowstate/core';
 
 let notionClient: Client | null = null;
+
+/**
+ * Get access token from environment variables or @flowstate/core
+ */
+async function getAccessToken(): Promise<string> {
+  // First, check environment variable (set by desktop app)
+  const envToken = process.env.NOTION_ACCESS_TOKEN;
+  
+  if (envToken) {
+    console.error('[mcp-notion] Using token from environment variable');
+    return envToken;
+  }
+  
+  // Fallback to @flowstate/core auth (for standalone usage)
+  try {
+    const { auth } = await import('@flowstate/core');
+    const token = await auth.getToken('notion');
+    if (token) {
+      console.error('[mcp-notion] Using token from @flowstate/core');
+      return token.accessToken;
+    }
+  } catch (error) {
+    // @flowstate/core not available or no token
+    console.error('[mcp-notion] @flowstate/core auth not available:', error);
+  }
+  
+  throw new Error('Notion not connected. Please connect via FlowState Integrations or set NOTION_ACCESS_TOKEN environment variable.');
+}
 
 export async function getNotionClient(): Promise<Client> {
   if (notionClient) return notionClient;
 
-  const token = await auth.getToken('notion');
-  if (!token) {
-    throw new Error('Notion not connected. Please connect at http://localhost:3847/integrations');
-  }
+  const accessToken = await getAccessToken();
 
   notionClient = new Client({
-    auth: token.accessToken,
+    auth: accessToken,
   });
 
   return notionClient;
 }
 
-export async function searchPages(query: string, filter?: 'page' | 'database') {
+export async function searchPages(query?: string, filter?: 'page' | 'database') {
   const client = await getNotionClient();
   
   const response = await client.search({
-    query,
+    query: query && query.trim() !== '' ? query : undefined,
     filter: filter ? { property: 'object', value: filter } : undefined,
   });
 

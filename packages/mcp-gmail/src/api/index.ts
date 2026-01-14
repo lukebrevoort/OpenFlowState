@@ -2,25 +2,73 @@
  * Gmail API Wrapper
  * 
  * Wraps googleapis Gmail client with FlowState-specific functionality.
+ * 
+ * Tokens can be provided via:
+ * 1. Environment variables (GMAIL_ACCESS_TOKEN, GMAIL_REFRESH_TOKEN) - preferred for desktop app
+ * 2. @flowstate/core auth module - fallback for standalone usage
  */
 
 import { google, gmail_v1 } from 'googleapis';
-import { auth } from '@flowstate/core';
 
 let gmailClient: gmail_v1.Gmail | null = null;
+
+/**
+ * Get OAuth tokens and credentials from environment variables or @flowstate/core
+ */
+async function getTokens(): Promise<{ 
+  accessToken: string; 
+  refreshToken?: string;
+  clientId?: string;
+  clientSecret?: string;
+}> {
+  // First, check environment variables (set by desktop app)
+  const envAccessToken = process.env.GMAIL_ACCESS_TOKEN;
+  const envRefreshToken = process.env.GMAIL_REFRESH_TOKEN;
+  const envClientId = process.env.GOOGLE_CLIENT_ID;
+  const envClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  
+  if (envAccessToken) {
+    console.error('[mcp-gmail] Using tokens from environment variables');
+    return {
+      accessToken: envAccessToken,
+      refreshToken: envRefreshToken,
+      clientId: envClientId,
+      clientSecret: envClientSecret,
+    };
+  }
+  
+  // Fallback to @flowstate/core auth (for standalone usage)
+  try {
+    const { auth } = await import('@flowstate/core');
+    const token = await auth.getToken('gmail');
+    if (token) {
+      console.error('[mcp-gmail] Using tokens from @flowstate/core');
+      return {
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+      };
+    }
+  } catch (error) {
+    // @flowstate/core not available or no token
+    console.error('[mcp-gmail] @flowstate/core auth not available:', error);
+  }
+  
+  throw new Error('Gmail not connected. Please connect via FlowState Integrations or set GMAIL_ACCESS_TOKEN environment variable.');
+}
 
 export async function getGmailClient(): Promise<gmail_v1.Gmail> {
   if (gmailClient) return gmailClient;
 
-  const token = await auth.getToken('gmail');
-  if (!token) {
-    throw new Error('Gmail not connected. Please connect at http://localhost:3847/integrations');
-  }
+  const tokens = await getTokens();
 
-  const oauth2Client = new google.auth.OAuth2();
+  const oauth2Client = new google.auth.OAuth2(
+    tokens.clientId,
+    tokens.clientSecret
+  );
+  
   oauth2Client.setCredentials({
-    access_token: token.accessToken,
-    refresh_token: token.refreshToken,
+    access_token: tokens.accessToken,
+    refresh_token: tokens.refreshToken,
   });
 
   gmailClient = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -34,12 +82,21 @@ export async function listMessages(options: {
 }) {
   const client = await getGmailClient();
   
-  const response = await client.users.messages.list({
+  // Clean up parameters to avoid "invalid_request"
+  const params: gmail_v1.Params$Resource$Users$Messages$List = {
     userId: 'me',
     maxResults: options.maxResults || 10,
-    labelIds: options.labelIds,
-    q: options.query,
-  });
+  };
+
+  if (options.labelIds && options.labelIds.length > 0) {
+    params.labelIds = options.labelIds;
+  }
+
+  if (options.query && options.query.trim() !== '') {
+    params.q = options.query;
+  }
+
+  const response = await client.users.messages.list(params);
 
   return response.data.messages || [];
 }

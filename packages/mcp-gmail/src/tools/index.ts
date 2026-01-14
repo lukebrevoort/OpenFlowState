@@ -12,6 +12,18 @@ import {
 import { notifications } from '@flowstate/core';
 import * as gmailApi from '../api/index.js';
 
+const formatToolError = (error: unknown): string => {
+  if (error instanceof Error) {
+    const responseData = (error as { response?: { data?: unknown; status?: number } }).response;
+    if (responseData?.data) {
+      return `${error.message} (status: ${responseData.status ?? 'unknown'})\n${JSON.stringify(responseData.data, null, 2)}`;
+    }
+    return error.message;
+  }
+
+  return String(error);
+};
+
 // Tool definitions with autonomy levels
 const GMAIL_TOOLS = [
   {
@@ -208,6 +220,8 @@ export function registerTools(server: Server): void {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
+    console.error('[mcp-gmail] Tool call:', name, JSON.stringify(args));
+
     try {
       switch (name) {
         case 'gmail_list':
@@ -338,7 +352,8 @@ export function registerTools(server: Server): void {
           throw new Error(`Unknown tool: ${name}`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = formatToolError(error);
+      console.error('[mcp-gmail] Tool error:', errorMessage);
       return {
         content: [
           {

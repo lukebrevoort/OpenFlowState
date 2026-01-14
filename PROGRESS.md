@@ -1,22 +1,31 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: January 13, 2026
+> **Last Updated**: January 14, 2026 (Phase 3 Session 3 - MCP Debugging)
 
 ---
 
-## Current Status: ✅ Desktop Phase 1 COMPLETE
+## Current Status: 🔄 Desktop Phase 3 IN PROGRESS
 
-**Desktop Phase 1: Foundation is complete!** The Electron + React + TypeScript desktop app shell is fully scaffolded and building successfully.
+**Desktop Phase 3: Integrations & Config is underway!** MCP server configuration and debugging improved.
 
 ### What's Working:
 - Electron main process with macOS window management
-- Preload script with secure IPC bridge
+- Preload script with secure IPC bridge (CommonJS for Electron compatibility)
 - React renderer with Vite bundler
 - Tailwind CSS with FlowState theme colors
 - Four-mode layout (Chat, Tasks, Workflows, Integrations)
 - Sidebar with recent convos, pinned workflows, running tasks
-- All components building successfully
+- **OpenCode SDK integration with `opencode/grok-code` model**
+- **Real-time chat with AI responses**
+- **Code block formatting in responses**
+- **Zustand state management for chat and config**
+- **Custom React hooks for OpenCode and config**
+- **IPC handlers wired to ProcessManager and ConfigStore**
+- **OAuth flow for Google services (Gmail, Calendar)**
+- **API token auth for Notion Internal Integration**
+- **Encrypted token storage (AES-256-GCM)**
+- **MCP server configuration with environment variables**
 
 ---
 
@@ -39,6 +48,7 @@
 | Jan 2026 | **Workflows as Commands/Skills** | Use OpenCode's .md-based command system | **New** |
 | Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
 | Jan 2026 | **Model Provider Choice** | Ask user in onboarding, default to Zen | **New** |
+| Jan 2026 | **opencode/grok-code as default** | Fast, capable model for initial testing | **New** |
 
 ---
 
@@ -62,60 +72,51 @@
 - [x] Set up Electron main/renderer IPC
 - [x] Configure electron-builder for macOS
 
-**Files Created:**
+### Desktop Phase 2: OpenCode Integration ✅ COMPLETE
+- [x] Implement process manager for headless OpenCode
+- [x] Create SDK bridge in Electron main process
+- [x] Build Chat mode with real-time message streaming
+- [x] Wire IPC handlers to ConfigStore and ProcessManager
+- [x] Create Zustand stores (chatStore, configStore)
+- [x] Create custom hooks (useOpenCode, useConfig)
+- [x] Test basic conversation flow end-to-end
+
+**Files Created/Modified:**
 ```
-packages/desktop/
-├── package.json                    # Package configuration with Electron dependencies
-├── tsconfig.json                   # Base TypeScript config
-├── tsconfig.main.json              # Electron main process TypeScript config
-├── tsconfig.preload.json           # Preload script TypeScript config
-├── vite.config.ts                  # Vite bundler configuration
-├── tailwind.config.js              # Tailwind with FlowState theme colors
-├── postcss.config.js               # PostCSS configuration
-├── electron-builder.yml            # macOS packaging configuration
-├── assets/
-│   └── flowstate-main-logo.png     # App icon
-└── src/
-    ├── main/
-    │   └── index.ts                # Electron main process with IPC handlers
-    ├── preload/
-    │   └── index.ts                # Secure IPC bridge via contextBridge
-    └── renderer/
-        ├── index.html              # HTML entry point
-        ├── main.tsx                # React entry point
-        ├── App.tsx                 # Root component with mode switching
-        ├── styles/
-        │   └── globals.css         # Tailwind imports + FlowState components
-        ├── types/
-        │   └── electron.d.ts       # TypeScript types for preload API
-        ├── components/
-        │   ├── index.ts            # Component exports
-        │   ├── TitleBar.tsx        # macOS-style title bar
-        │   ├── TabBar.tsx          # Mode selector tabs
-        │   └── Sidebar.tsx         # Navigation sidebar
-        └── modes/
-            ├── index.ts            # Mode exports
-            ├── ChatMode.tsx        # Natural language chat interface
-            ├── TasksMode.tsx       # Running/completed tasks view
-            ├── WorkflowsMode.tsx   # Workflow browser and editor
-            └── IntegrationsMode.tsx # OAuth connections and MCP status
+packages/desktop/src/
+├── main/
+│   ├── index.ts                    # Updated with full IPC handler wiring
+│   ├── process-manager.ts          # OpenCode SDK integration (createOpencode)
+│   └── config-store.ts             # Configuration management
+├── preload/
+│   └── index.ts                    # Updated with new IPC methods (CommonJS)
+└── renderer/
+    ├── stores/
+    │   ├── index.ts                # Store exports
+    │   ├── chatStore.ts            # Zustand store for chat state
+    │   └── configStore.ts          # Zustand store for config state
+    ├── hooks/
+    │   ├── index.ts                # Hook exports
+    │   ├── useOpenCode.ts          # OpenCode communication hook
+    │   └── useConfig.ts            # Configuration hook
+    ├── types/
+    │   └── electron.d.ts           # Updated with new types
+    └── modes/
+        └── ChatMode.tsx            # Updated with real OpenCode integration
 ```
 
 ---
 
-### Desktop Phase 2: OpenCode Integration (Weeks 3-4) 🔜 NEXT
-- [ ] Implement process manager for headless OpenCode
-- [ ] Create SDK bridge in Electron main process
-- [ ] Build Chat mode with real-time message streaming
+### Desktop Phase 3: Integrations & Config (Weeks 5-6) 🔄 IN PROGRESS
+- [x] Implement config store (Claude Desktop-style `config.json`)
+- [x] Build Integrations mode UI with real connection status
+- [x] Implement temporary localhost OAuth server (port 3847)
+- [x] Port auth manager from `@flowstate/core` (AES-256-GCM encryption)
+- [x] Create IPC handlers for auth and OAuth
+- [x] Create useIntegrations hook with event listeners
+- [x] Create credentials modal for OAuth client setup
+- [ ] Test OAuth flow for Google services (needs real credentials)
 - [ ] Connect to existing MCP servers as child processes
-- [ ] Test basic conversation flow end-to-end
-
-### Desktop Phase 3: Integrations & Config (Weeks 5-6)
-- [ ] Implement config store (Claude Desktop-style `config.json`)
-- [ ] Build Integrations mode UI
-- [ ] Implement temporary localhost OAuth server
-- [ ] Port auth manager from `@flowstate/core`
-- [ ] Test OAuth flow for Google services
 
 ### Desktop Phase 4: Onboarding & Polish (Weeks 7-8)
 - [ ] Build complete onboarding flow (Welcome → Apps → Connect → Wow)
@@ -168,8 +169,9 @@ packages/desktop/
 | Issue | Impact | Proposed Solution | Status |
 |-------|--------|-------------------|--------|
 | No Apple Developer account | High | Distribute unsigned DMG with instructions | Noted |
-| Headless OpenCode mode unclear | Medium | Research OpenCode SDK capabilities | To investigate |
+| ~~Headless OpenCode mode unclear~~ | ~~Medium~~ | ~~Research OpenCode SDK capabilities~~ | ✅ Resolved |
 | Electron bundle size (~150MB+) | Low | Acceptable for MVP, optimize later | Noted |
+| Preload script module format | Low | Use CommonJS for Electron compatibility | ✅ Resolved |
 
 ---
 
@@ -181,10 +183,32 @@ packages/desktop/
 - The FlowState warm earthy color palette works well in a desktop context
 - lucide-react provides excellent icons that match the design language
 
+### Desktop Phase 2 Development
+- **OpenCode SDK** (`@opencode-ai/sdk@1.1.20`) provides excellent TypeScript support
+- `createOpencode()` spawns both server and client, returns typed client
+- Preload scripts MUST use CommonJS (`module: "CommonJS"` in tsconfig)
+- Event streaming via `client.event.subscribe()` returns an AsyncGenerator
+- Session management is straightforward: `session.create()`, `session.prompt()`
+- Zustand works great for React state management in Electron renderers
+- IPC communication pattern: main process handles all SDK calls, renderer uses hooks
+
+### Desktop Phase 3 Development
+- **OAuth Flow**: Localhost server on port 3847 handles callbacks cleanly
+- **Token Storage**: AES-256-GCM encryption with per-app master key works well
+- **Credentials Modal**: Users need to provide their own OAuth client credentials
+- **Event-driven OAuth**: Success/error events from main process to renderer
+- **Google OAuth**: Requires Google Cloud Console setup with Desktop App type
+- **Notion Auth**: Two paths - Internal Integration (simple token) or Public OAuth
+- **Node.js Crypto**: Must use `require('crypto').randomBytes()` not Web Crypto API in Electron main
+- **Modal Visibility**: Electron needs solid backdrop colors, not just opacity - use `backdrop-filter: blur()`
+
 ### Architecture Decisions Validated
 - **Electron**: Successfully reusing TypeScript code and dependencies
 - **Tailwind**: FlowState theme colors integrate seamlessly
 - **Four-mode UI**: Clean separation of concerns, easy to extend
+- **OpenCode SDK**: Headless mode works perfectly for desktop integration
+- **Zustand**: Lightweight, simple state management for React
+- **Encrypted Storage**: Node.js crypto module works well in Electron main process
 
 ---
 
@@ -198,16 +222,145 @@ packages/desktop/
 - [FlowState 1.0 (Design Reference)](https://github.com/lukebrevoort/flowstate)
 - [Electron Documentation](https://www.electronjs.org/docs)
 - [electron-builder](https://www.electron.build/)
+- [Zustand Documentation](https://zustand-demo.pmnd.rs/)
 
 ---
 
 ## Next Session Goals
 
-1. [ ] Research OpenCode headless mode / SDK capabilities
-2. [ ] Implement process manager to spawn OpenCode
-3. [ ] Create streaming message handler for Chat mode
-4. [ ] Connect Chat UI to real OpenCode responses
-5. [ ] Test MCP server spawning from Electron
+1. [ ] Test OAuth flow end-to-end with real Google credentials
+2. [ ] Verify MCP servers connect successfully (check console logs)
+3. [ ] Test Gmail tool calls through AI chat
+4. [ ] Add MCP status display to Integrations UI
+5. [ ] Handle MCP server failures gracefully
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 3 - MCP Debugging)
+
+- ✅ Added comprehensive logging to `process-manager.ts` for MCP debugging
+- ✅ Improved MCP path resolution with `getMcpPackagesDir()` method
+- ✅ Fixed dev path when running from `dist/main`
+- ✅ Added `verifyMcpServer()` to check if MCP server scripts exist before config
+- ✅ Added `logMcpStatus()` to check MCP server status after OpenCode starts
+- ✅ Added `getMcpStatus()` to expose MCP status via IPC
+- ✅ Updated `reloadMcpConfig()` to use `mcp.add()` API for dynamic server management
+- ✅ Added `mcp:status` IPC handler in `main/index.ts`
+- ✅ Added `mcp` namespace to preload script with `reload()` and `status()` methods
+- ✅ Added `McpServerStatus` type to `electron.d.ts`
+- ✅ Verified Gmail MCP server starts correctly with environment variables
+- ✅ **Fixed `invalid_request` errors in Gmail/GCal by cleaning up empty parameters**
+- ✅ **Added `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` to MCP environment for token refresh**
+- ✅ **Added MCP transport logging to capture raw JSON-RPC traffic**
+- ✅ **Added tool error formatting to surface Google API errors**
+- ✅ All MCP servers rebuilt (gmail, gcal, notion, system)
+- ✅ All desktop builds passing (main, preload, renderer)
+
+**Key Changes:**
+- MCP servers now log raw inbound JSON-RPC messages for debugging
+- Tool calls log their arguments before execution
+- Tool errors include HTTP status and response body when available
+- MCP servers now receive tokens AND client credentials via environment variables
+- API calls now filter out empty query strings and empty arrays to prevent API errors
+- Process manager handles `dist/main` paths when running built main
+- MCP status is checked 2 seconds after OpenCode starts
+- Failed MCP servers are logged with their error messages
+- `mcp.add()` API is used for dynamic MCP server management after OAuth completion
+
+**Files Modified:**
+```
+packages/desktop/src/
+├── main/
+│   ├── index.ts                    # Added mcp:status IPC handler
+│   └── process-manager.ts          # Complete MCP debugging overhaul
+├── preload/
+│   └── index.ts                    # Added mcp namespace
+└── renderer/
+    └── types/
+        └── electron.d.ts           # Added McpServerStatus, mcp API types
+
+packages/mcp-gmail/src/
+├── index.ts                        # Added transport logging for MCP traffic
+└── tools/index.ts                  # Added tool call logging + error formatting
+
+packages/mcp-gcal/src/
+├── index.ts                        # Added transport logging for MCP traffic
+└── tools/index.ts                  # Added tool call logging + error formatting
+```
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 2)
+
+- ✅ Fixed modal transparency issue - added `fs-modal-overlay` CSS class with solid backdrop
+- ✅ Fixed `crypto is not defined` error - use Node.js `crypto.randomBytes()` instead of Web Crypto API
+- ✅ Redesigned Notion auth to support both Internal Integration (API token) and Public OAuth
+- ✅ Added `AuthMethod` type (`'oauth' | 'api_token'`) throughout the system
+- ✅ Created `AuthMethodSelector` component for choosing connection method
+- ✅ Created separate `OAuthForm` and `ApiTokenForm` components
+- ✅ Added `storeApiToken` IPC handler for direct token storage
+- ✅ Updated `integrationsStore` with `authOptions` array per integration
+- ✅ Added `flowstate-card` and `flowstate-overlay` colors to Tailwind config
+- ✅ All builds passing (main, preload, renderer)
+
+**Key Changes:**
+- Notion now shows two options: "Internal Integration" (simple token) or "Public OAuth"
+- Google services (Gmail, Calendar) only show OAuth option
+- Modal is now properly visible with solid backdrop and blur effect
+- Each integration tracks which auth method was used (`activeAuthMethod`)
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 1)
+
+- ✅ Created `auth-manager.ts` with AES-256-GCM encrypted token storage
+- ✅ Created `oauth-server.ts` with localhost callback server (port 3847)
+- ✅ Created `integrationsStore.ts` Zustand store for integration state
+- ✅ Updated `electron.d.ts` with expanded auth/OAuth types
+- ✅ Updated `preload/index.ts` with new IPC methods for auth/OAuth
+- ✅ Wired IPC handlers in `main/index.ts` for auth-manager and oauth-server
+- ✅ Updated `IntegrationsMode.tsx` with real store data and credentials modal
+- ✅ Added setup instructions for Google Cloud Console and Notion
+
+**Files Created/Modified:**
+```
+packages/desktop/src/
+├── main/
+│   ├── index.ts                    # Added auth/OAuth IPC handlers
+│   ├── auth-manager.ts             # Encrypted token storage (with authMethod)
+│   └── oauth-server.ts             # OAuth callback server (fixed crypto)
+├── preload/
+│   └── index.ts                    # Added auth/OAuth + API token IPC methods
+└── renderer/
+    ├── stores/
+    │   └── integrationsStore.ts    # Integration state with authOptions
+    ├── styles/
+    │   └── globals.css             # Added fs-modal-overlay, fs-modal classes
+    ├── types/
+    │   └── electron.d.ts           # Added AuthMethod, ApiTokenCredentials types
+    └── modes/
+        └── IntegrationsMode.tsx    # Complete rewrite with auth method selection
+```
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 2)
+
+- ✅ Updated `@opencode-ai/sdk` to version 1.1.20
+- ✅ Rewrote `process-manager.ts` with correct SDK API usage
+- ✅ Fixed preload script to use CommonJS module format
+- ✅ Wired all IPC handlers to ConfigStore and ProcessManager
+- ✅ Created `chatStore.ts` Zustand store for chat state
+- ✅ Created `configStore.ts` Zustand store for config state
+- ✅ Created `useOpenCode.ts` hook for OpenCode communication
+- ✅ Created `useConfig.ts` hook for configuration management
+- ✅ Updated `ChatMode.tsx` with real OpenCode integration
+- ✅ Added code block formatting for AI responses
+- ✅ Updated TypeScript types in `electron.d.ts`
+- ✅ Tested end-to-end chat flow with Electron MCP
+- ✅ Verified AI responses work (jokes, code generation)
+- ✅ OpenCode server starts automatically on app launch
+- ✅ Event streaming from main to renderer working
 
 ---
 

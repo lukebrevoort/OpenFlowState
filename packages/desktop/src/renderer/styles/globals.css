@@ -93,6 +93,31 @@ html, body, #root {
   .fs-badge-error {
     @apply fs-badge bg-semantic-denied/10 text-semantic-denied;
   }
+
+  /* Modal overlay - solid enough to be visible in Electron */
+  .fs-modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center;
+    background-color: rgba(30, 30, 30, 0.8);
+    backdrop-filter: blur(4px);
+  }
+
+  /* Modal card */
+  .fs-modal {
+    @apply bg-white rounded-xl shadow-flowstate-lg max-w-lg w-full mx-4 overflow-hidden;
+    border: 1px solid theme('colors.flowstate.border');
+  }
+
+  .fs-modal-header {
+    @apply px-6 py-4 border-b border-flowstate-border;
+  }
+
+  .fs-modal-body {
+    @apply px-6 py-4;
+  }
+
+  .fs-modal-footer {
+    @apply px-6 py-4 border-t border-flowstate-border flex justify-end gap-3;
+  }
 }
 
 /* FlowState utilities layer */

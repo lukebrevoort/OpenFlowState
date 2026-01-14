@@ -3,14 +3,104 @@
  * This is exposed to the renderer process via contextBridge
  */
 
+export interface AppInfo {
+  name: string;
+  version: string;
+  platform: string;
+  isDev: boolean;
+}
+
+export interface OpenCodeStatus {
+  running: boolean;
+  sessionId: string | null;
+  healthy: boolean;
+  version?: string;
+}
+
+export interface OpenCodeMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  parts?: Array<{ type: string; text?: string }>;
+}
+
+export interface OpenCodeProgress {
+  status: 'idle' | 'thinking' | 'error';
+  sessionId?: string;
+}
+
+export interface OpenCodeError {
+  error: string;
+}
+
+export interface OpenCodeEvent {
+  type: string;
+  data: unknown;
+}
+
+export interface Session {
+  id: string;
+  title: string;
+}
+
+// ============================================================================
+// Auth Types
+// ============================================================================
+
+export type AuthMethod = 'oauth' | 'api_token';
+
+export interface AuthToken {
+  service: string;
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: string;
+  scopes: string[];
+  email?: string;
+  authMethod: AuthMethod;
+}
+
+export interface AuthStatus {
+  service: string;
+  connected: boolean;
+  configured: boolean;
+  email?: string;
+  lastRefresh?: string;
+  error?: string;
+  authMethod?: AuthMethod;
+}
+
+export interface ClientCredentials {
+  clientId: string;
+  clientSecret: string;
+  redirectUri?: string;
+}
+
+export interface ApiTokenCredentials {
+  apiToken: string;
+}
+
+export interface OAuthSuccessEvent {
+  service: string;
+}
+
+export interface OAuthErrorEvent {
+  service: string;
+  error: string;
+}
+
+export interface ApiTokenSuccessEvent {
+  service: string;
+}
+
+export interface McpServerStatus {
+  status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
+  error?: string;
+}
+
 export interface FlowstateAPI {
   app: {
-    getInfo: () => Promise<{
-      name: string;
-      version: string;
-      platform: string;
-      isDev: boolean;
-    }>;
+    getInfo: () => Promise<AppInfo>;
     getTheme: () => Promise<'light' | 'dark'>;
     openExternal: (url: string) => Promise<void>;
   };
@@ -23,27 +113,76 @@ export interface FlowstateAPI {
 
   config: {
     get: () => Promise<FlowstateConfig>;
-    set: (config: Partial<FlowstateConfig>) => Promise<void>;
+    set: (config: Partial<FlowstateConfig>) => Promise<FlowstateConfig>;
   };
 
   auth: {
-    getToken: (service: string) => Promise<unknown | null>;
-    setToken: (service: string, token: unknown) => Promise<void>;
+    // Token management
+    getToken: (service: string) => Promise<AuthToken | null>;
+    getStatus: (service: string) => Promise<AuthStatus>;
+    getAllStatuses: () => Promise<AuthStatus[]>;
+    removeToken: (service: string) => Promise<void>;
+
+    // Client credentials management
+    setCredentials: (service: string, credentials: ClientCredentials) => Promise<void>;
+    getCredentials: (service: string) => Promise<ClientCredentials | null>;
+    removeCredentials: (service: string) => Promise<void>;
+
+    // API token (for Notion Internal Integration, etc.)
+    storeApiToken: (service: string, apiToken: string) => Promise<{ success: boolean }>;
+    onApiTokenSuccess: (callback: (event: ApiTokenSuccessEvent) => void) => () => void;
   };
 
   oauth: {
-    start: (service: string) => Promise<void>;
+    // Start OAuth flow (opens browser)
+    start: (service: string, clientId: string, clientSecret: string) => Promise<AuthToken>;
+    
+    // Refresh an existing token
+    refresh: (service: string) => Promise<AuthToken | null>;
+    
+    // Disconnect a service
+    disconnect: (service: string) => Promise<void>;
+
+    // Event listeners
+    onSuccess: (callback: (event: OAuthSuccessEvent) => void) => () => void;
+    onError: (callback: (event: OAuthErrorEvent) => void) => () => void;
+    removeAllListeners: () => void;
   };
 
   opencode: {
-    send: (message: string) => Promise<{ response: string }>;
-    onMessage: (callback: (message: unknown) => void) => void;
-    onProgress: (callback: (progress: unknown) => void) => void;
+    // Send a message (triggers streaming response via events)
+    send: (message: string) => Promise<{ success?: boolean; error?: string; content?: string }>;
+
+    // Get status
+    status: () => Promise<OpenCodeStatus>;
+
+    // Session management
+    newSession: (title?: string) => Promise<{ sessionId: string }>;
+    listSessions: () => Promise<Session[]>;
+    switchSession: (sessionId: string) => Promise<{ sessionId: string }>;
+    getMessages: () => Promise<OpenCodeMessage[]>;
+
+    // Event listeners (return cleanup functions)
+    onMessage: (callback: (message: OpenCodeMessage) => void) => () => void;
+    onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
+    onError: (callback: (error: OpenCodeError) => void) => () => void;
+    onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
+
+    // Cleanup
     removeAllListeners: () => void;
+  };
+
+  mcp: {
+    // Reload MCP configuration (after connecting new integrations)
+    reload: () => Promise<{ success: boolean }>;
+
+    // Get MCP server status
+    status: () => Promise<Record<string, McpServerStatus> | null>;
   };
 }
 
 export interface FlowstateConfig {
+  $schema?: string;
   provider: {
     default: string;
     apiKeys: Record<string, string>;
@@ -60,6 +199,7 @@ export interface FlowstateConfig {
       taskComplete: boolean;
     };
   };
+  onboardingComplete?: boolean;
 }
 
 export interface MCPServerConfig {
@@ -67,6 +207,7 @@ export interface MCPServerConfig {
   url?: string;
   enabled: boolean;
   headers?: Record<string, string>;
+  env?: Record<string, string>;
 }
 
 declare global {
