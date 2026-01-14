@@ -384,4 +384,114 @@ packages/desktop/src/
 
 ---
 
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 4 - Chat UX Polish)
+**Timestamp**: Jan 14, 2026 21:35
+**TASKS COMPLETED**
+- ✅ Added FlowState Pulse and Live Activity panels so the chat surface now exposes OpenCode status, MCP health, and recent events while the assistant thinks.
+- ✅ Hooked ChatMode into config + MCP APIs and OpenCode events so activity hints, MCP badges, and event summaries surface more context for Google MCPs.
+- ✅ Enriched assistant message cards and loading placeholders with parts badges, dynamic hint text, and richer copy to show more of the reasoning journey.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Begin Desktop Phase 4 onboarding and polish work (welcome flow, provider selection, inline approvals) while watching the refreshed chat UX.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 5 - Chat Overflow Fixes)
+**Timestamp**: Jan 14, 2026 22:10
+**TASKS COMPLETED**
+- ✅ Filtered MCP status chips to FlowState servers and capped lists so the FlowState Pulse + Live Activity panels no longer overflow with global MCP entries.
+- ✅ Added "+ more" summary badges for MCP lists to keep the chat header compact without losing context.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-check the chat layout after any new MCP additions and continue Phase 4 onboarding work.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 6 - Chat Welcome Cleanup)
+**Timestamp**: Jan 14, 2026 22:25
+**TASKS COMPLETED**
+- ✅ Removed the initial FlowState welcome message so the chat history starts clean after onboarding and no longer overflows into the composer.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Verify the chat input area stays clear across empty-state scenarios and continue Phase 4 onboarding work.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 7 - Empty Message Guard)
+**Timestamp**: Jan 14, 2026 22:35
+**TASKS COMPLETED**
+- ✅ Filtered empty assistant messages (no content or parts) so blank chat bubbles no longer render after onboarding.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Verify chat history remains clean after session switches and continue Phase 4 onboarding work.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 8 - Desktop Dev Shortcut)
+**Timestamp**: Jan 14, 2026 22:45
+**TASKS COMPLETED**
+- ✅ Added a root-level `dev:desktop` script to start the desktop main watcher, renderer dev server, and Electron in one command.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to validate the single-command startup and continue Phase 4 onboarding work.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 9 - Chat Store Hotfix)
+**Timestamp**: Jan 14, 2026 22:55
+**TASKS COMPLETED**
+- ✅ Fixed chat store initialization to remove the orphaned `welcomeMessage` reference so the app renders without a runtime crash.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Restart the renderer and confirm the chat view loads cleanly.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 10 - Thinking Carousel)
+**Timestamp**: Jan 14, 2026 23:20
+**TASKS COMPLETED**
+- ✅ Added a centralized Activity Carousel that appears only while OpenCode is thinking and fades away once the response is ready.
+- ✅ Implemented an OpenCode event translator to convert raw events into human-readable phases/tool steps and suppress JSON payloads.
+- ✅ Removed the old Live Activity feed to avoid dumping raw event blobs into the UI.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run the desktop app and confirm the carousel cycles through steps during tool calls.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 11 - Streaming Message Animation)
+**Timestamp**: Jan 14, 2026 23:45
+**TASKS COMPLETED**
+- ✅ Added a streaming-style animation for assistant responses so messages reveal progressively and feel real-time like Claude.
+- ✅ Ensured formatted content and tool part badges appear after the animation completes.
+**IN PROGRESS**
+- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run another chat prompt to confirm the streaming effect feels smooth and readable.
+
+---
+
 *Update this document after each development session.*

@@ -9,7 +9,7 @@
  */
 
 import { create } from 'zustand';
-import type { OpenCodeMessage, OpenCodeProgress, Session } from '../types/electron';
+import type { OpenCodeMessage, Session } from '../types/electron';
 
 export interface Message {
   id: string;
@@ -47,29 +47,10 @@ interface ChatState {
   loadMessages: (messages: OpenCodeMessage[]) => void;
 }
 
-// Welcome message shown on first load
-const welcomeMessage: Message = {
-  id: 'welcome',
-  role: 'assistant',
-  content: `Welcome to FlowState! 👋
 
-I'm your AI-powered productivity assistant. I can help you:
-
-• **Organize your inbox** - Summarize emails, draft replies, create tasks
-• **Manage your calendar** - Find conflicts, schedule meetings, prep for events  
-• **Work with Notion** - Search pages, create tasks, update databases
-• **Automate your desktop** - Organize files, open apps, run workflows
-
-Try asking me something like:
-- "What can you help me with?"
-- "Tell me a joke"
-- "Help me write a Python function"`,
-  timestamp: new Date(),
-};
-
-export const useChatStore = create<ChatState>((set, get) => ({
+export const useChatStore = create<ChatState>((set) => ({
   // Initial state
-  messages: [welcomeMessage],
+  messages: [],
   isLoading: false,
   status: 'idle',
   currentSessionId: null,
@@ -99,6 +80,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addAssistantMessage: (openCodeMessage) => {
+    const hasContent = openCodeMessage.content?.trim();
+    const hasParts = openCodeMessage.parts && openCodeMessage.parts.length > 0;
+
+    if (!hasContent && !hasParts) {
+      set({
+        isLoading: false,
+        status: 'idle',
+      });
+      return;
+    }
+
     const message: Message = {
       id: openCodeMessage.id || `assistant-${Date.now()}`,
       role: 'assistant',
@@ -133,11 +125,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearMessages: () => {
-    set({ 
-      messages: [welcomeMessage],
+    set({
+      messages: [],
       error: null,
     });
   },
+
 
   setCurrentSessionId: (sessionId) => {
     set({ currentSessionId: sessionId });
@@ -148,20 +141,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadMessages: (openCodeMessages) => {
-    const messages: Message[] = openCodeMessages.map((msg) => ({
-      id: msg.id,
-      role: msg.role,
-      content: msg.content,
-      timestamp: new Date(msg.timestamp),
-      parts: msg.parts,
-    }));
-    
-    // Keep welcome message if no messages loaded
-    if (messages.length === 0) {
-      set({ messages: [welcomeMessage] });
-    } else {
-      set({ messages });
-    }
+    const messages: Message[] = openCodeMessages
+      .filter((msg) => msg.content?.trim() || (msg.parts && msg.parts.length > 0))
+      .map((msg) => ({
+        id: msg.id,
+        role: msg.role,
+        content: msg.content,
+        timestamp: new Date(msg.timestamp),
+        parts: msg.parts,
+      }));
+
+    set({ messages });
   },
 }));
 

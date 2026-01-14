@@ -203,11 +203,9 @@ function OAuthForm({
  * API Token Form (for Notion Internal Integration)
  */
 function ApiTokenForm({
-  service,
   onSubmit,
   isLoading,
 }: {
-  service: string;
   onSubmit: (apiToken: string) => void;
   isLoading: boolean;
 }) {
@@ -340,13 +338,13 @@ function ConnectionModal({
             />
           )}
 
-          {selectedMethod === 'api_token' && (
-            <ApiTokenForm
-              service={integration.id}
-              onSubmit={onApiTokenSubmit}
-              isLoading={isLoading}
-            />
-          )}
+            {selectedMethod === 'api_token' && (
+              <ApiTokenForm
+                onSubmit={onApiTokenSubmit}
+                isLoading={isLoading}
+              />
+            )}
+
         </div>
 
         {/* Footer */}
@@ -376,7 +374,6 @@ function IntegrationsMode() {
     loadIntegrations,
     updateIntegration,
     setConnecting,
-    setLoading,
   } = useIntegrationsStore();
 
   const [showModal, setShowModal] = useState(false);

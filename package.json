@@ -8,6 +8,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "turbo dev",
+    "dev:desktop": "pnpm --filter @flowstate/desktop exec concurrently \"pnpm --filter @flowstate/desktop dev\" \"pnpm --filter @flowstate/desktop exec electron dist/main/index.js\"",
     "start": "node scripts/start-all.js",
     "start:tui": "opencode . --agent flowstate",
     "build": "turbo build",

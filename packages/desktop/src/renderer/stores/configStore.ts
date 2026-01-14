@@ -9,7 +9,7 @@
  */
 
 import { create } from 'zustand';
-import type { FlowstateConfig, MCPServerConfig, OpenCodeStatus } from '../types/electron';
+import type { FlowstateConfig, OpenCodeStatus } from '../types/electron';
 
 interface ConfigState {
   // Config
@@ -27,7 +27,7 @@ interface ConfigState {
   refreshStatus: () => Promise<void>;
 }
 
-export const useConfigStore = create<ConfigState>((set, get) => ({
+export const useConfigStore = create<ConfigState>((set) => ({
   // Initial state
   config: null,
   isLoaded: false,
