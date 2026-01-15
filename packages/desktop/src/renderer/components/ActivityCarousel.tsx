@@ -38,16 +38,16 @@ const ActivityCarousel = ({ steps, isVisible }: ActivityCarouselProps) => {
   }
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 transition-opacity duration-300">
-      <div className="min-w-[260px] max-w-[420px] rounded-2xl border border-flowstate-border bg-flowstate-surface/95 px-6 py-4 text-center shadow-flowstate-lg backdrop-blur-sm">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-flowstate-text-muted">
+    <div className="pointer-events-none absolute left-1/2 top-4 z-20 -translate-x-1/2 transition-opacity duration-300 ease-in-out">
+      <div className="min-w-[260px] max-w-[420px] rounded-2xl border border-border bg-card/95 px-6 py-4 text-center shadow-flowstate-lg backdrop-blur-sm">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-muted-foreground">
           FlowState
         </p>
-        <p className="mt-1 text-sm font-semibold text-flowstate-text">
+        <p className="mt-1 text-sm font-semibold text-foreground">
           {activeStep.title}
         </p>
         {activeStep.detail && (
-          <p className="mt-1 text-xs text-flowstate-text-muted">
+          <p className="mt-1 text-xs text-muted-foreground">
             {activeStep.detail}
           </p>
         )}
@@ -58,8 +58,8 @@ const ActivityCarousel = ({ steps, isVisible }: ActivityCarouselProps) => {
                 key={`dot-${index}`}
                 className={`h-1.5 w-1.5 rounded-full transition-colors ${
                   index === activeIndex % dots
-                    ? 'bg-flowstate-primary'
-                    : 'bg-flowstate-border'
+                    ? 'bg-primary'
+                    : 'bg-border'
                 }`}
               />
             ))}

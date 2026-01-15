@@ -1,192 +1,205 @@
-import { Loader2, CheckCircle, Clock, XCircle, Eye } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
+import { ApprovalCard } from '../components/ApprovalCard';
 
-interface Task {
-  id: string;
-  name: string;
-  status: 'running' | 'waiting' | 'completed' | 'failed';
-  progress?: number;
-  description?: string;
-  startedAt: Date;
-  completedAt?: Date;
+interface RunningTask {
+  id: number;
+  title: string;
+  description: string;
+  progress: number;
+  status: 'analyzing' | 'processing' | 'finalizing';
 }
 
-/**
- * TasksMode - View and manage long-running background tasks
- */
-function TasksMode() {
-  // Mock data - will be replaced with real state
-  const activeTasks: Task[] = [
-    {
-      id: '1',
-      name: 'Organizing Gmail inbox',
-      status: 'running',
-      progress: 58,
-      description: 'Processing 847 emails • Currently: Categorizing newsletters',
-      startedAt: new Date(Date.now() - 5 * 60 * 1000),
-    },
-    {
-      id: '2',
-      name: 'Desktop organization ready',
-      status: 'waiting',
-      description: 'Will move 34 files to organized folders',
-      startedAt: new Date(Date.now() - 10 * 60 * 1000),
-    },
-  ];
+interface CompletedTask {
+  id: number;
+  title: string;
+  description: string;
+  completedAt: Date;
+}
 
-  const completedTasks: Task[] = [
-    {
-      id: '3',
-      name: 'Morning inbox review',
-      status: 'completed',
-      startedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      completedAt: new Date(Date.now() - 2 * 60 * 60 * 1000 + 5 * 60 * 1000),
-    },
-    {
-      id: '4',
-      name: 'Calendar conflict resolution',
-      status: 'completed',
-      startedAt: new Date(Date.now() - 4 * 60 * 60 * 1000),
-      completedAt: new Date(Date.now() - 4 * 60 * 60 * 1000 + 2 * 60 * 1000),
-    },
-  ];
-
-  const getStatusIcon = (status: Task['status']) => {
-    switch (status) {
-      case 'running':
-        return <Loader2 className="w-5 h-5 text-flowstate-primary animate-spin" />;
-      case 'waiting':
-        return <Clock className="w-5 h-5 text-semantic-pending" />;
-      case 'completed':
-        return <CheckCircle className="w-5 h-5 text-semantic-approval" />;
-      case 'failed':
-        return <XCircle className="w-5 h-5 text-semantic-denied" />;
-    }
-  };
-
-  const getStatusBadge = (status: Task['status']) => {
-    switch (status) {
-      case 'running':
-        return <span className="fs-badge bg-flowstate-primary/10 text-flowstate-primary">Running</span>;
-      case 'waiting':
-        return <span className="fs-badge-warning">Waiting for approval</span>;
-      case 'completed':
-        return <span className="fs-badge-success">Completed</span>;
-      case 'failed':
-        return <span className="fs-badge-error">Failed</span>;
-    }
-  };
-
-  const formatTime = (date: Date) => {
-    const diff = Date.now() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    if (minutes > 0) return `${minutes} min ago`;
-    return 'Just now';
+function RunningTaskCard({ task }: { task: RunningTask }) {
+  const statusText = {
+    analyzing: 'Analyzing...',
+    processing: 'Processing...',
+    finalizing: 'Finalizing...',
   };
 
   return (
-    <div className="space-y-8">
-      {/* Active Tasks */}
-      <section>
-        <h2 className="text-lg font-semibold text-flowstate-text mb-4">
-          Active Tasks
-        </h2>
-        
-        {activeTasks.length === 0 ? (
-          <div className="fs-card text-center py-8">
-            <p className="text-flowstate-text-muted">No active tasks</p>
-            <p className="text-sm text-flowstate-text-muted mt-1">
-              Start a conversation to create tasks
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {activeTasks.map((task) => (
-              <div key={task.id} className="fs-card">
-                <div className="flex items-start gap-4">
-                  {getStatusIcon(task.status)}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-medium text-flowstate-text truncate">
-                        {task.name}
-                      </h3>
-                      {getStatusBadge(task.status)}
-                    </div>
-                    
-                    {task.description && (
-                      <p className="text-sm text-flowstate-text-muted mt-1">
-                        {task.description}
-                      </p>
-                    )}
-                    
-                    {task.progress !== undefined && (
-                      <div className="mt-3">
-                        <div className="flex items-center justify-between text-xs text-flowstate-text-muted mb-1">
-                          <span>Progress</span>
-                          <span>{task.progress}%</span>
-                        </div>
-                        <div className="h-2 bg-flowstate-border rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-flowstate-primary rounded-full transition-all duration-300"
-                            style={{ width: `${task.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div className="flex items-center gap-4 mt-3">
-                      <span className="text-xs text-flowstate-text-muted">
-                        Started {formatTime(task.startedAt)}
-                      </span>
-                      {task.status === 'waiting' && (
-                        <button className="fs-button-primary text-xs py-1 px-3">
-                          <Eye className="w-3 h-3 mr-1 inline" />
-                          Review Changes
-                        </button>
-                      )}
-                      {task.status === 'running' && (
-                        <button className="fs-button-secondary text-xs py-1 px-3">
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+    <div className="bg-card/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-300 ease-in-out">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <h3 className="text-base text-foreground mb-1">{task.title}</h3>
+          <p className="text-sm text-muted-foreground">{task.description}</p>
+        </div>
+        <Loader2 className="w-5 h-5 text-[#A5B574] animate-spin flex-shrink-0 ml-3" />
+      </div>
 
-      {/* Completed Tasks */}
-      <section>
-        <h2 className="text-lg font-semibold text-flowstate-text mb-4">
-          Completed Today
-        </h2>
-        
-        {completedTasks.length === 0 ? (
-          <div className="fs-card text-center py-8">
-            <p className="text-flowstate-text-muted">No completed tasks today</p>
+      <div className="mb-2">
+        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-[#A5B574] to-[#C87137] rounded-full transition-all duration-300 ease-in-out"
+            style={{ width: `${task.progress}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{statusText[task.status]}</span>
+        <span className="text-xs text-foreground">{task.progress}%</span>
+      </div>
+    </div>
+  );
+}
+
+function CompletedTaskItem({ task }: { task: CompletedTask }) {
+  const timeAgo = (date: Date) => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return 'Just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return date.toLocaleDateString();
+  };
+
+  return (
+    <div className="flex items-start gap-4 pb-4 relative">
+      <div className="absolute left-[11px] top-8 bottom-0 w-0.5 bg-border" />
+
+      <div className="flex-shrink-0 mt-0.5 relative z-10">
+        <div className="w-6 h-6 rounded-full bg-[#A5B574] flex items-center justify-center shadow-sm">
+          <CheckCircle2 className="w-4 h-4 text-white" />
+        </div>
+      </div>
+
+      <div className="flex-1 pt-0.5">
+        <h4 className="text-sm text-foreground mb-0.5">{task.title}</h4>
+        <p className="text-xs text-muted-foreground mb-1">{task.description}</p>
+        <span className="text-xs text-muted-foreground/80">{timeAgo(task.completedAt)}</span>
+      </div>
+    </div>
+  );
+}
+
+function TasksMode() {
+  const runningTasks: RunningTask[] = [
+    {
+      id: 1,
+      title: 'Market Research Analysis',
+      description: 'Analyzing competitor trends and market positioning',
+      progress: 67,
+      status: 'processing',
+    },
+    {
+      id: 2,
+      title: 'Content Generation',
+      description: 'Creating blog post outline and key points',
+      progress: 34,
+      status: 'analyzing',
+    },
+    {
+      id: 3,
+      title: 'Data Aggregation',
+      description: 'Compiling weekly metrics and performance data',
+      progress: 89,
+      status: 'finalizing',
+    },
+  ];
+
+  const pendingApprovals = [
+    {
+      id: 'approval-1',
+      title: 'Send email to sarah@example.com',
+      summary: 'Subject: Re: Meeting Reschedule',
+      body: 'Hi Sarah,\n\nTuesday at 2pm works great for me. Looking forward to it!\n\nBest,\nLuke',
+    },
+  ];
+
+  const completedTasks: CompletedTask[] = [
+    {
+      id: 1,
+      title: 'Email Campaign Optimization',
+      description: 'Improved subject lines and call-to-action buttons',
+      completedAt: new Date(Date.now() - 600000),
+    },
+    {
+      id: 2,
+      title: 'Customer Feedback Summary',
+      description: 'Summarized 47 customer reviews into key insights',
+      completedAt: new Date(Date.now() - 3600000),
+    },
+    {
+      id: 3,
+      title: 'Social Media Post Scheduling',
+      description: 'Scheduled 15 posts across platforms for next week',
+      completedAt: new Date(Date.now() - 7200000),
+    },
+    {
+      id: 4,
+      title: 'Meeting Notes Transcription',
+      description: 'Transcribed and organized key takeaways from team meeting',
+      completedAt: new Date(Date.now() - 86400000),
+    },
+    {
+      id: 5,
+      title: 'Invoice Processing',
+      description: 'Processed and categorized 23 invoices',
+      completedAt: new Date(Date.now() - 172800000),
+    },
+  ];
+
+  return (
+    <div className="h-full overflow-y-auto px-6 py-8">
+      <div className="max-w-5xl mx-auto">
+        <div className="mb-12">
+          <div className="mb-6">
+            <h2 className="text-2xl text-foreground mb-1">Running Tasks</h2>
+            <p className="text-sm text-muted-foreground">Currently active processes</p>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {completedTasks.map((task) => (
-              <div
-                key={task.id}
-                className="flex items-center gap-3 px-4 py-3 bg-flowstate-surface/50 rounded-lg"
-              >
-                {getStatusIcon(task.status)}
-                <span className="flex-1 text-flowstate-text">{task.name}</span>
-                <span className="text-sm text-flowstate-text-muted">
-                  {formatTime(task.completedAt || task.startedAt)}
-                </span>
+
+          <div className="grid gap-4">
+            {runningTasks.map((task) => (
+              <RunningTaskCard key={task.id} task={task} />
+            ))}
+          </div>
+        </div>
+
+        {pendingApprovals.length > 0 && (
+          <div className="mb-12">
+            <div className="mb-6">
+              <h2 className="text-2xl text-foreground mb-1">Waiting for Approval</h2>
+              <p className="text-sm text-muted-foreground">Review and approve pending actions</p>
+            </div>
+
+            <div className="grid gap-4">
+              {pendingApprovals.map((approval) => (
+                <ApprovalCard
+                  key={approval.id}
+                  title={approval.title}
+                  summary={approval.summary}
+                  body={approval.body}
+                  onApprove={() => console.log('Approved', approval.id)}
+                  onAlwaysApprove={() => console.log('Always approve', approval.id)}
+                  onDeny={() => console.log('Denied', approval.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="mb-6">
+            <h2 className="text-2xl text-foreground mb-1">Completed Tasks</h2>
+            <p className="text-sm text-muted-foreground">Recent accomplishments</p>
+          </div>
+
+          <div className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-6">
+            {completedTasks.map((task, index) => (
+              <div key={task.id} className={index < completedTasks.length - 1 ? 'mb-2' : ''}>
+                <CompletedTaskItem task={task} />
               </div>
             ))}
           </div>
-        )}
-      </section>
+        </div>
+      </div>
     </div>
   );
 }

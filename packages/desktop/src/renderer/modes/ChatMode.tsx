@@ -1,36 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
-import { Send, Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
-import { useChatStore } from '../stores/chatStore';
-import type { Message } from '../stores/chatStore';
-import { useOpenCode } from '../hooks/useOpenCode';
-import { useConfigStore } from '../stores/configStore';
-import type { McpServerStatus } from '../types/electron';
-import ActivityCarousel from '../components/ActivityCarousel';
+import { useEffect, useRef, useState } from "react";
+import { Send, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
+import { useChatStore } from "../stores/chatStore";
+import type { Message } from "../stores/chatStore";
+import { useOpenCode } from "../hooks/useOpenCode";
+import { useConfigStore } from "../stores/configStore";
+import type { McpServerStatus } from "../types/electron";
+import { TaskHandoffCard } from "../components/TaskHandoffCard";
 import {
-  completionActivityStep,
   errorActivityStep,
   initialActivitySteps,
   mergeActivityStep,
   stepFromOpenCodeEvent,
-} from '../lib/opencodeActivity';
+} from "../lib/opencodeActivity";
 
-const thinkingHighlights = [
-  'Gathering Gmail & Calendar context',
-  'Summarizing Notion notes and tasks',
-  'Mapping workflows and desktop automations',
-  'Checking MCP tool readiness and health',
-];
-
-const statusDescriptions: Record<'idle' | 'thinking' | 'error', string> = {
-  idle: 'FlowState is ready for your next question.',
-  thinking: 'Collecting context from Gmail, Calendar, Notion, and your system.',
-  error: 'Something interrupted the connection; try refreshing or checking your tokens.',
+const statusLabels: Record<"idle" | "thinking" | "error", string> = {
+  idle: "Ready",
+  thinking: "Thinking",
+  error: "Needs attention",
 };
 
 const formatMcpName = (name: string) =>
   name
-    .replace(/mcp[-_]?/i, '')
-    .replace(/[-_]/g, ' ')
+    .replace(/mcp[-_]?/i, "")
+    .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase())
     .trim() || name;
 
@@ -44,22 +36,23 @@ const getTypingStepSize = (contentLength: number) => {
  * ChatMode - Primary chat interface for natural language interaction with OpenCode
  */
 function ChatMode() {
-  const [input, setInput] = useState('');
-  const [highlightIndex, setHighlightIndex] = useState(0);
-  const [mcpStatus, setMcpStatus] = useState<Record<string, McpServerStatus> | null>(null);
+  const [input, setInput] = useState("");
+  const [mcpStatus, setMcpStatus] = useState<Record<
+    string,
+    McpServerStatus
+  > | null>(null);
   const [activitySteps, setActivitySteps] = useState(initialActivitySteps());
-  const [showCarousel, setShowCarousel] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const previousStatusRef = useRef<'idle' | 'thinking' | 'error'>('idle');
-  const fadeTimeoutRef = useRef<number | null>(null);
+  const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
   const animatedMessagesRef = useRef(new Set<string>());
 
-  const { messages, isLoading, status, error, currentSessionId } = useChatStore();
+  const { messages, isLoading, status, error, currentSessionId, handoffTask } =
+    useChatStore();
   const { sendMessage, checkStatus } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
@@ -83,7 +76,7 @@ function ChatMode() {
           setMcpStatus(status);
         }
       } catch (err) {
-        console.error('Failed to fetch MCP status', err);
+        console.error("Failed to fetch MCP status", err);
         if (active) setMcpStatus(null);
       }
     };
@@ -108,73 +101,34 @@ function ChatMode() {
   }, []);
 
   useEffect(() => {
-    if (!isLoading) {
-      setHighlightIndex(0);
-      return undefined;
-    }
-
-    const interval = window.setInterval(() => {
-      setHighlightIndex((prev) => (prev + 1) % thinkingHighlights.length);
-    }, 2400);
-
-    return () => window.clearInterval(interval);
-  }, [isLoading]);
-
-  useEffect(() => {
     const previousStatus = previousStatusRef.current;
 
-    if (fadeTimeoutRef.current) {
-      window.clearTimeout(fadeTimeoutRef.current);
-      fadeTimeoutRef.current = null;
+    if (status === "thinking" && previousStatus !== "thinking") {
+      setActivitySteps(initialActivitySteps());
     }
 
-    if (status === 'thinking') {
-      if (previousStatus !== 'thinking') {
-        setActivitySteps(initialActivitySteps());
-      }
-      setShowCarousel(true);
-    }
-
-    if (previousStatus === 'thinking' && status === 'idle') {
-      setActivitySteps((prev) => mergeActivityStep(prev, completionActivityStep()));
-      fadeTimeoutRef.current = window.setTimeout(() => {
-        setShowCarousel(false);
-      }, 700);
-    }
-
-    if (status === 'error') {
+    if (status === "error") {
       setActivitySteps([errorActivityStep()]);
-      setShowCarousel(true);
-      fadeTimeoutRef.current = window.setTimeout(() => {
-        setShowCarousel(false);
-      }, 900);
     }
 
-    if (status === 'idle' && !showCarousel) {
+    if (status === "idle" && previousStatus === "thinking") {
       setActivitySteps([]);
     }
 
     previousStatusRef.current = status;
-
-    return () => {
-      if (fadeTimeoutRef.current) {
-        window.clearTimeout(fadeTimeoutRef.current);
-        fadeTimeoutRef.current = null;
-      }
-    };
-  }, [status, showCarousel]);
+  }, [status]);
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
     const message = input.trim();
-    setInput('');
+    setInput("");
 
     await sendMessage(message);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -184,29 +138,48 @@ function ChatMode() {
     checkStatus();
   };
 
-  const activityHint = thinkingHighlights[highlightIndex] ?? thinkingHighlights[0];
-  const statusLabel = statusDescriptions[status] ?? statusDescriptions.idle;
+  const statusLabel = statusLabels[status] ?? statusLabels.idle;
   const statusDotClass =
-    status === 'error'
-      ? 'bg-flowstate-error'
-      : status === 'thinking'
-      ? 'bg-flowstate-primary'
-      : 'bg-flowstate-success';
+    status === "error"
+      ? "bg-destructive"
+      : status === "thinking"
+        ? "bg-[#C87137]"
+        : "bg-[#A5B574]";
 
-  const openCodeLabel = openCodeStatus?.running ? 'OpenCode is running' : 'OpenCode is offline';
-  const sessionLabel = currentSessionId ? `Session ${currentSessionId}` : 'Session pending';
-  const providerLabel = config ? `Provider: ${config.provider.default}` : 'Loading config...';
+  const openCodeLabel = openCodeStatus?.running
+    ? "OpenCode running"
+    : "OpenCode offline";
+  const sessionLabel = currentSessionId
+    ? `Session ${currentSessionId}`
+    : "Session pending";
+  const providerLabel = config
+    ? `Provider: ${config.provider.default}`
+    : "Loading config...";
+
+  const currentActivity = activitySteps[activitySteps.length - 1];
+  const activityTitle =
+    currentActivity?.title ??
+    (status === "thinking"
+      ? "Working through your request"
+      : "Ready for your next prompt");
+  const activityDetail = currentActivity?.detail;
 
   const mcpEntries = mcpStatus ? Object.entries(mcpStatus) : [];
-  const flowstateEntries = mcpEntries.filter(([name]) => name.startsWith('flowstate-'));
-  const displayEntries = flowstateEntries.length > 0 ? flowstateEntries : mcpEntries;
+  const flowstateEntries = mcpEntries.filter(([name]) =>
+    name.startsWith("flowstate-"),
+  );
+  const displayEntries =
+    flowstateEntries.length > 0 ? flowstateEntries : mcpEntries;
   const connectedServices = displayEntries
-    .filter(([, value]) => value.status === 'connected')
+    .filter(([, value]) => value.status === "connected")
     .map(([name]) => formatMcpName(name));
   const connectedPreview = connectedServices.slice(0, 4);
-  const additionalConnectedCount = Math.max(connectedServices.length - connectedPreview.length, 0);
+  const additionalConnectedCount = Math.max(
+    connectedServices.length - connectedPreview.length,
+    0,
+  );
 
-  const renderMessageParts = (parts?: Message['parts']) => {
+  const renderMessageParts = (parts?: Message["parts"]) => {
     if (!parts || parts.length === 0) return null;
 
     return (
@@ -214,14 +187,16 @@ function ChatMode() {
         {parts.map((part, index) => (
           <span
             key={`${part.type}-${index}`}
-            className="flex items-center gap-1 rounded-full border border-flowstate-border bg-flowstate-highlight/60 px-3 py-1 text-[11px] font-medium text-flowstate-secondary"
+            className="flex items-center gap-1 rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
           >
-            <span className="uppercase tracking-wide text-[10px] text-flowstate-text-muted">
-              {part.type.replace(/_/g, ' ')}
+            <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
+              {part.type.replace(/_/g, " ")}
             </span>
             {part.text && (
               <span className="text-[11px] opacity-80">
-                {part.text.length > 40 ? `${part.text.slice(0, 40)}…` : part.text}
+                {part.text.length > 40
+                  ? `${part.text.slice(0, 40)}…`
+                  : part.text}
               </span>
             )}
           </span>
@@ -232,7 +207,9 @@ function ChatMode() {
 
   const AssistantMessageContent = ({ message }: { message: Message }) => {
     const shouldAnimate = !animatedMessagesRef.current.has(message.id);
-    const [visibleText, setVisibleText] = useState(shouldAnimate ? '' : message.content);
+    const [visibleText, setVisibleText] = useState(
+      shouldAnimate ? "" : message.content,
+    );
     const [isComplete, setIsComplete] = useState(!shouldAnimate);
 
     useEffect(() => {
@@ -271,7 +248,7 @@ function ChatMode() {
       return (
         <span className="whitespace-pre-wrap">
           {visibleText}
-          <span className="inline-block w-2 animate-pulse text-flowstate-primary">▍</span>
+          <span className="inline-block w-2 animate-pulse text-primary">▍</span>
         </span>
       );
     }
@@ -288,31 +265,33 @@ function ChatMode() {
     const parts = content.split(/(```[\s\S]*?```)/g);
 
     return parts.map((part, index) => {
-      if (part.startsWith('```')) {
-        const code = part.replace(/```\w*\n?/g, '').replace(/```$/g, '');
+      if (part.startsWith("```")) {
+        const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
         return (
           <pre
             key={index}
-            className="bg-flowstate-accent/10 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
+            className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
           >
             <code>{code}</code>
           </pre>
         );
       }
 
-      const lines = part.split('\n');
+      const lines = part.split("\n");
 
       return (
         <span key={index}>
           {lines.map((line, lineIndex) => {
-            if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
+            if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
               return (
                 <div key={lineIndex} className="flex gap-2 my-1">
-                  <span className="text-flowstate-primary">•</span>
+                  <span className="text-primary">•</span>
                   <span
-                    className="text-flowstate-text"
+                    className="text-foreground"
                     dangerouslySetInnerHTML={{
-                      __html: line.replace(/^[•-]\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'),
+                      __html: line
+                        .replace(/^[•-]\s*/, "")
+                        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
                     }}
                   />
                 </div>
@@ -322,9 +301,12 @@ function ChatMode() {
             return (
               <span key={lineIndex}>
                 <span
-                  className="text-flowstate-text"
+                  className="text-foreground"
                   dangerouslySetInnerHTML={{
-                    __html: line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'),
+                    __html: line.replace(
+                      /\*\*(.*?)\*\*/g,
+                      "<strong>$1</strong>",
+                    ),
                   }}
                 />
                 {lineIndex < lines.length - 1 && <br />}
@@ -337,160 +319,185 @@ function ChatMode() {
   };
 
   return (
-    <div className="relative flex flex-col h-full">
-      <ActivityCarousel steps={activitySteps} isVisible={showCarousel} />
-      <div className="space-y-3 mb-4">
-        <div className="bg-flowstate-surface/80 border border-flowstate-border rounded-2xl p-4 shadow-flowstate">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-flowstate-text">FlowState Pulse</p>
-              <p className="text-xs text-flowstate-text-muted mt-1 max-w-xl">{statusLabel}</p>
-            </div>
-            <div className="flex flex-col items-end text-xs">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${statusDotClass}`} />
-                <span
-                  className={`font-semibold uppercase tracking-widest ${
-                    status === 'error' ? 'text-flowstate-error' : 'text-flowstate-text-muted'
-                  }`}
-                >
-                  {status === 'thinking' ? 'Thinking' : status === 'idle' ? 'Ready' : 'Error'}
-                </span>
+    <div className="h-full flex flex-col">
+      <div className="flex-shrink-0 px-6 pt-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full bg-[#A5B574]/25 pulse-ring" />
+                  <div className="absolute inset-[-8px] rounded-full bg-[#A5B574]/15 pulse-ring" />
+                  <div
+                    className={`relative h-10 w-10 rounded-full bg-gradient-to-br from-[#A5B574] to-[#C87137] shadow-lg flex items-center justify-center ${status === "thinking" ? "animate-pulse-gentle" : ""}`}
+                  >
+                    <Sparkles className="w-5 h-5 text-white" />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {statusLabel}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {activityTitle}
+                  </p>
+                </div>
               </div>
-              <span className="text-[11px] text-flowstate-text-muted mt-1">{activityHint}</span>
+              <div className="text-xs text-muted-foreground text-right">
+                <p>{openCodeLabel}</p>
+                <p>{providerLabel}</p>
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-            <span className="rounded-full border border-flowstate-border px-3 py-1 text-flowstate-text-muted">
-              {openCodeLabel}
-            </span>
-            <span className="rounded-full border border-flowstate-border px-3 py-1 text-flowstate-text-muted">
-              {sessionLabel}
-            </span>
-            {openCodeStatus?.version && (
-              <span className="rounded-full border border-flowstate-border px-3 py-1 text-flowstate-text-muted">
-                v{openCodeStatus.version}
-              </span>
+            {activityDetail && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {activityDetail}
+              </p>
             )}
-            <span className="rounded-full border border-flowstate-border px-3 py-1 text-flowstate-text-muted">
-              {providerLabel}
-            </span>
-          </div>
-          <div className="mt-3">
-            <p className="text-xs text-flowstate-text-muted">Connected MCPs</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {connectedServices.length > 0 ? (
-                <>
-                  {connectedPreview.map((service) => (
-                    <span
-                      key={service}
-                      className="rounded-full border border-flowstate-border bg-flowstate-highlight/60 px-3 py-1 text-[11px] font-medium text-flowstate-secondary"
-                    >
-                      {service}
-                    </span>
-                  ))}
-                  {additionalConnectedCount > 0 && (
-                    <span className="rounded-full border border-flowstate-border px-3 py-1 text-[11px] text-flowstate-text-muted">
-                      +{additionalConnectedCount} more
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span className="text-[11px] text-flowstate-text-muted">
-                  Checking MCP health...
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+              <span className="rounded-full border border-border px-3 py-1 text-muted-foreground">
+                {sessionLabel}
+              </span>
+              {openCodeStatus?.version && (
+                <span className="rounded-full border border-border px-3 py-1 text-muted-foreground">
+                  v{openCodeStatus.version}
+                </span>
+              )}
+              {connectedServices.length > 0 && (
+                <span className="rounded-full border border-border px-3 py-1 text-muted-foreground">
+                  {connectedServices.length} MCPs connected
                 </span>
               )}
             </div>
+            {connectedServices.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {connectedPreview.map((service) => (
+                  <span
+                    key={service}
+                    className="rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
+                  >
+                    {service}
+                  </span>
+                ))}
+                {additionalConnectedCount > 0 && (
+                  <span className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground">
+                    +{additionalConnectedCount} more
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="bg-flowstate-error/10 border border-flowstate-error/20 rounded-lg p-3 mb-4 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-flowstate-error flex-shrink-0" />
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mx-6 mt-4 flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm text-flowstate-error font-medium">Connection Error</p>
-            <p className="text-xs text-flowstate-text-muted">{error}</p>
+            <p className="text-sm text-destructive font-medium">
+              Connection Error
+            </p>
+            <p className="text-xs text-muted-foreground">{error}</p>
           </div>
           <button
             onClick={handleRetry}
-            className="p-2 hover:bg-flowstate-error/10 rounded-lg transition-colors"
+            className="p-2 hover:bg-destructive/10 rounded-lg transition-colors"
           >
-            <RefreshCw className="w-4 h-4 text-flowstate-error" />
+            <RefreshCw className="w-4 h-4 text-destructive" />
           </button>
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pb-4 scrollbar-hide">
+      <div className="flex-1 min-h-0 px-6 py-4">
+        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-4 scrollbar-hide">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                  message.role === 'user'
-                    ? 'bg-flowstate-primary text-white'
-                    : 'bg-flowstate-surface'
+                className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                  message.role === "user"
+                    ? "bg-card border border-border text-primary-foreground shadow-sm"
+                    : "bg-card border border-border text-foreground backdrop-blur-xl"
                 }`}
               >
-                {message.role === 'assistant' && (
-                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-flowstate-border">
-                    <Sparkles className="w-4 h-4 text-flowstate-primary" />
-                    <span className="text-sm font-medium text-flowstate-primary">FlowState</span>
+                {message.role === "assistant" && (
+                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium text-primary">
+                      FlowState
+                    </span>
                   </div>
                 )}
-                <div className="text-sm">
-                  {message.role === 'user' ? (
-                    <span className="whitespace-pre-wrap">{message.content}</span>
+                <div className="text-sm leading-relaxed">
+                  {message.role === "user" ? (
+                    <span className="whitespace-pre-wrap">
+                      {message.content}
+                    </span>
                   ) : (
                     <AssistantMessageContent message={message} />
                   )}
                 </div>
                 <div
                   className={`text-xs mt-2 ${
-                    message.role === 'user'
-                      ? 'text-white/70'
-                      : 'text-flowstate-text-muted'
+                    message.role === "user"
+                      ? "text-primary-foreground/70"
+                      : "text-muted-foreground"
                   }`}
                 >
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {message.timestamp.toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
                 </div>
               </div>
             </div>
           ))}
 
-
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      <div className="border-t border-flowstate-border pt-4">
-        <div className="flex items-end gap-3">
-          <div className="flex-1 relative">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              rows={1}
-              disabled={isLoading}
-              className="fs-input resize-none pr-12 min-h-[44px] max-h-32 disabled:opacity-50"
-              style={{ height: 'auto' }}
+      {handoffTask && (
+        <div className="px-6 pb-4">
+          <div className="max-w-4xl mx-auto">
+            <TaskHandoffCard
+              title={handoffTask.title}
+              description={handoffTask.description}
+              onViewTask={() => console.log("View task", handoffTask.id)}
+              onKeepInChat={() => console.log("Keep in chat", handoffTask.id)}
             />
           </div>
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="fs-button-primary h-11 w-11 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-4 h-4" />
-          </button>
         </div>
-        <p className="text-xs text-flowstate-text-muted mt-2 text-center">
-          Press Enter to send, Shift+Enter for new line
-        </p>
+      )}
+
+      <div className="flex-shrink-0 px-6 pb-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
+            <div className="flex items-center gap-3">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type your message..."
+                rows={1}
+                disabled={isLoading}
+                className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 disabled:opacity-50"
+                style={{ minHeight: "24px" }}
+              />
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() || isLoading}
+                className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:opacity-50 flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+              >
+                <Send className="w-5 h-5 text-primary-foreground" />
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            Press Enter to send, Shift+Enter for new line
+          </p>
+        </div>
       </div>
     </div>
   );

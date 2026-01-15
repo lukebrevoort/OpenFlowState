@@ -1,12 +1,14 @@
+import type { ElementType } from 'react';
 import { MessageSquare, ListTodo, Workflow, Plug } from 'lucide-react';
-import type { AppMode } from '../App';
+
+type TabMode = 'chat' | 'tasks' | 'workflows' | 'integrations';
 
 interface TabBarProps {
-  activeMode: AppMode;
-  onModeChange: (mode: AppMode) => void;
+  activeMode: TabMode;
+  onModeChange: (mode: TabMode) => void;
 }
 
-const tabs: { id: AppMode; label: string; icon: React.ElementType }[] = [
+const tabs: { id: TabMode; label: string; icon: ElementType }[] = [
   { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'tasks', label: 'Tasks', icon: ListTodo },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
@@ -18,7 +20,7 @@ const tabs: { id: AppMode; label: string; icon: React.ElementType }[] = [
  */
 function TabBar({ activeMode, onModeChange }: TabBarProps) {
   return (
-    <div className="flex items-center border-b border-flowstate-border bg-flowstate-surface/50">
+    <div className="flex items-center border-b border-border bg-card/50">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeMode === tab.id;
@@ -28,11 +30,11 @@ function TabBar({ activeMode, onModeChange }: TabBarProps) {
             key={tab.id}
             onClick={() => onModeChange(tab.id)}
             className={`
-              flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors duration-200
+              flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors duration-300 ease-in-out
               border-b-2 -mb-px
               ${isActive
-                ? 'text-flowstate-primary border-flowstate-primary'
-                : 'text-flowstate-text-muted border-transparent hover:text-flowstate-text hover:border-flowstate-border'
+                ? 'text-primary border-primary'
+                : 'text-foreground/70 border-transparent hover:text-foreground hover:border-border'
               }
             `}
           >

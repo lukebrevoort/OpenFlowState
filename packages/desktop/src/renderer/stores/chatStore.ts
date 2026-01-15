@@ -22,18 +22,21 @@ export interface Message {
 interface ChatState {
   // Messages
   messages: Message[];
-  
+
   // Loading state
   isLoading: boolean;
   status: 'idle' | 'thinking' | 'error';
-  
+
   // Session
   currentSessionId: string | null;
   sessions: Session[];
-  
+
+  // Handoff
+  handoffTask: { id: string; title: string; description: string } | null;
+
   // Error
   error: string | null;
-  
+
   // Actions
   addMessage: (message: Message) => void;
   addUserMessage: (content: string) => void;
@@ -44,6 +47,7 @@ interface ChatState {
   clearMessages: () => void;
   setCurrentSessionId: (sessionId: string | null) => void;
   setSessions: (sessions: Session[]) => void;
+  setHandoffTask: (task: { id: string; title: string; description: string } | null) => void;
   loadMessages: (messages: OpenCodeMessage[]) => void;
 }
 
@@ -55,6 +59,7 @@ export const useChatStore = create<ChatState>((set) => ({
   status: 'idle',
   currentSessionId: null,
   sessions: [],
+  handoffTask: null,
   error: null,
 
   // Actions
@@ -138,6 +143,10 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setSessions: (sessions) => {
     set({ sessions });
+  },
+
+  setHandoffTask: (task) => {
+    set({ handoffTask: task });
   },
 
   loadMessages: (openCodeMessages) => {

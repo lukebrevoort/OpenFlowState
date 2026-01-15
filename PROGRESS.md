@@ -494,4 +494,244 @@ packages/desktop/src/
 
 ---
 
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 1 - Mockup Parity UI)
+**Timestamp**: Jan 14, 2026 23:59
+**TASKS COMPLETED**
+- ✅ Rebuilt the desktop renderer shell to match the `appmockup/` navigation flow (home-first, toggleable sidebar, page pills, zen background).
+- ✅ Ported mockup theme tokens and zen garden animations into the renderer styles, with reduced-motion support.
+- ✅ Re-skinned Chat, Tasks, and Workflows screens to match the mockup layout while keeping OpenCode chat logic intact.
+- ✅ Added new UI primitives for approval cards and task handoff messaging to support upcoming long-running task UX.
+- ✅ Added a conversation sidebar with title search and recent thread switching tied to OpenCode sessions.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Validate the new UI in the desktop app and start wiring approval/task UI into real state sources.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 2 - Build Fixes)
+**Timestamp**: Jan 15, 2026 00:20
+**TASKS COMPLETED**
+- ✅ Fixed Tailwind `@apply` errors by removing unsupported opacity utilities from shared component styles.
+- ✅ Verified desktop build succeeds (`pnpm -C packages/desktop run build`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run the desktop UI to spot any layout regressions from the Tailwind token changes.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 3 - Tailwind Base Fix)
+**Timestamp**: Jan 15, 2026 00:28
+**TASKS COMPLETED**
+- ✅ Removed `@apply border-border` from the base layer and set `border-color` directly to avoid Tailwind class resolution errors.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-run `pnpm dev:desktop` to confirm the runtime UI loads without Tailwind CSS errors.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 4 - Tailwind Token Fix)
+**Timestamp**: Jan 15, 2026 00:36
+**TASKS COMPLETED**
+- ✅ Removed `bg-background`/`text-foreground` `@apply` usage and replaced with explicit CSS variables in the base layer.
+- ✅ Replaced semantic badge opacity utilities with fixed RGBA backgrounds to keep Tailwind `@apply` happy.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-run `pnpm dev:desktop` and confirm Vite no longer reports missing utility classes.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 5 - Tailwind Apply Cleanup)
+**Timestamp**: Jan 15, 2026 00:44
+**TASKS COMPLETED**
+- ✅ Removed custom-token `@apply` usage for `bg-card`, `border-border`, `text-muted-foreground`, and related utilities in shared component styles.
+- ✅ Replaced component color styling with explicit CSS variable assignments to avoid missing Tailwind utility errors.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-run `pnpm dev:desktop` and confirm Vite no longer reports missing utility classes.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 6 - UI Polish Pass)
+**Timestamp**: Jan 15, 2026 01:05
+**TASKS COMPLETED**
+- ✅ Replaced the header and sidebar logos with the FlowState mark and adjusted titlebar padding to clear macOS window controls.
+- ✅ Added ambient gradient drift + slowed zen garden animations for a calmer moving background.
+- ✅ Smoothed hover/transition timings across navigation, sidebar, tasks, and workflows.
+- ✅ Added proper padding + max-width layout to the Integrations page.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to validate the refined UI motion and spacing.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 7 - Motion & Navigation Polish)
+**Timestamp**: Jan 15, 2026 01:32
+**TASKS COMPLETED**
+- ✅ Lowered the titlebar controls to clear macOS window buttons and added the FlowState logo asset in the header + sidebar.
+- ✅ Softened sidebar presentation with floating panel styling and eased transitions.
+- ✅ Added ambient background drift and pulse-ring treatment for the status widget.
+- ✅ Slowed hover/transition timings across navigation pills, cards, and buttons for smoother motion.
+- ✅ Added extra padding and narrower max-width to the Integrations page.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-run `pnpm dev:desktop` and check the updated navigation + pulse feel against the mockup.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 8 - Figma Motion Pass)
+**Timestamp**: Jan 15, 2026 01:53
+**TASKS COMPLETED**
+- ✅ Dropped the titlebar controls further and shifted main content when the sidebar opens for a softer reveal.
+- ✅ Refined navigation pills and sidebar hover behavior with longer easing.
+- ✅ Added ambient background drift and pulse-ring animation to deepen background motion.
+- ✅ Increased spacing for the Integrations page layout.
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to confirm the updated motion matches the mockup feel.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 9 - Theme & Motion Alignment)
+**Timestamp**: Jan 15, 2026 02:10
+**TASKS COMPLETED**
+- ✅ Synced desktop theme tokens with the `appmockup` palette, including corrected secondary color and brand variables.
+- ✅ Slowed interaction transitions across app surfaces with smoother easing for a less snappy feel.
+- ✅ Updated the navigation pill colors to match the mockup (active indicator + hover styling).
+- ✅ Verified renderer build succeeds (`pnpm -C packages/desktop run build:renderer`).
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and compare navigation/pulse colors against the mockup.
+
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 10 - Remove Reduced Motion Toggle)
+**Timestamp**: Jan 14, 2026 19:40
+**TASKS COMPLETED**
+- ✅ Removed the reduced motion toggle UI and state from desktop settings to keep animations active.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Re-run `pnpm dev:desktop` and verify animations now play without reduced-motion gating.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 11 - Tailwind Motion Cleanup)
+**Timestamp**: Jan 14, 2026 20:05
+**TASKS COMPLETED**
+- ✅ Replaced nonstandard `duration-800`/`duration-900` classes with valid `duration-700` utilities across the renderer.
+- ✅ Removed custom cubic-bezier easing utilities in favor of `ease-in-out` for consistent motion.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm motion feels smoother without invalid utilities.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 12 - Screen Fade-Up Transition)
+**Timestamp**: Jan 14, 2026 20:22
+**TASKS COMPLETED**
+- ✅ Added a reusable page fade-up animation utility for screen transitions.
+- ✅ Applied the fade-up animation when switching between primary screens.
+- ✅ Tuned the page transition to a slower, opacity-only fade for better alignment across layouts.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and validate screen transitions feel smooth.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 13 - Chat Scroll Fix)
+**Timestamp**: Jan 14, 2026 20:34
+**TASKS COMPLETED**
+- ✅ Ensured the chat message list fills available height so scroll works correctly.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm chat history scrolls as expected.
+
+---
+
+## Tasks Completed (Jan 14, 2026 - Desktop Phase 3.5 Session 14 - Chat Status Center)
+**Timestamp**: Jan 14, 2026 20:52
+**TASKS COMPLETED**
+- ✅ Enlarged and centered the chat status avatar inside the floating info card.
+- ✅ Surface the current status label and activity detail beneath the avatar for better readability.
+- ✅ Shifted the OpenCode/provider info into a centered stack beneath the avatar for balance.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm the updated chat header feels cohesive.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 15 - Chat Header Layout)
+**Timestamp**: Jan 15, 2026 01:02
+**TASKS COMPLETED**
+- ✅ Positioned the OpenCode/provider callouts as an absolute badge in the top-right of the chat info card to keep the central avatar undistracted.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and ensure the floating info card still feels balanced with the new badge.
+
+---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 3.5 Session 16 - Chat Header Centering)
+**Timestamp**: Jan 15, 2026 01:12
+**TASKS COMPLETED**
+- ✅ Reapplied the absolute OpenCode/provider badge and centered the larger avatar/status block to align with the floating area layout after the rollback.
+**IN PROGRESS**
+- [ ] Phase 3.5 follow-through: wire approval/task UI to real task state and begin adding real handoff events.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm the chat header layers look stable again.
+
+---
+
 *Update this document after each development session.*

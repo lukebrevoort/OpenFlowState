@@ -8,10 +8,12 @@
  * - Status monitoring
  */
 
-import { useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { useConfigStore } from '../stores/configStore';
 import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError } from '../types/electron';
+
+let listenersInitialized = false;
 
 export function useOpenCode() {
   const {
@@ -31,15 +33,12 @@ export function useOpenCode() {
 
   const { setOpenCodeStatus, refreshStatus } = useConfigStore();
 
-  // Track if we've set up listeners
-  const listenersSetup = useRef(false);
-
   /**
    * Set up event listeners for OpenCode responses
    */
   useEffect(() => {
-    if (listenersSetup.current) return;
-    listenersSetup.current = true;
+    if (listenersInitialized) return;
+    listenersInitialized = true;
 
     console.log('Setting up OpenCode event listeners');
 
@@ -79,7 +78,7 @@ export function useOpenCode() {
       removeProgressListener();
       removeErrorListener();
       removeEventListener();
-      listenersSetup.current = false;
+      listenersInitialized = false;
     };
   }, [addAssistantMessage, setStatus, setError, setCurrentSessionId, refreshStatus]);
 

@@ -389,6 +389,32 @@ FlowState's visual identity carries forward from [FlowState 1.0](https://github.
 └──────────────┴───────────────────────────────────────────────────────┘
 ```
 
+### Mockup Behavior Decisions (Jan 2026)
+
+These are product decisions derived from the current `appmockup/` and Luke's clarifications. Treat these as the default behavior unless later phases intentionally change them.
+
+- **Home-first UX**: App opens to Home so users can choose between Chat / Tasks / Workflows / Integrations instead of defaulting into Chat.
+- **Sidebar is optional**: Sidebar is toggleable (Notion-style) to keep the “zen garden” workspace clutter-free.
+- **Dual navigation**: Main navigation is via the center/page navigation; sidebar is primarily for recents/pins/running items.
+- **Zen status indicator**: Replace the current “FlowState pulse” with a minimal status indicator (e.g., green=ready, yellow=thinking) while keeping a separate live activity bar.
+- **Multi-thread chat**: Support multiple conversations (OpenCode sessions). Show the most recent 3 in the sidebar, plus search for older conversations.
+  - Search is **title-only** for MVP; titles must be intentionally unique.
+  - Default retention target: **90 days** (future: user-configurable).
+- **Approvals**: Inline approval cards support `Approve`, `Always Approve`, and `Deny`.
+  - `Always Approve` applies to the current **task run / session only** (MVP).
+  - Workflows can be explicitly configured as **Always Approve** (opt-in) after the user has validated behavior.
+    - Semantics: if the workflow is set to auto-approve, FlowState intercepts approval-gated tool requests associated with that workflow task run (including follow-up approvals like retries/delayed steps) and approves them automatically (the user never sees the approval prompt).
+  - Tasks is the primary place to review/approve long-running actions.
+- **Chat vs task routing**: Quick actions stay in Chat; anything expected to run longer than ~1 minute becomes a Task and auto-navigates to Tasks.
+  - Users may override promotion to keep execution in Chat (no “run in background” override in MVP).
+  - If promoted, Chat shows a handoff card linking to Task details.
+- **Workflow execution**: Running a workflow always creates a Task and switches the UI to Tasks.
+- **Integrations focus**: Optimize for easy setup of custom MCPs (local + remote) with “Easy” + “Advanced” paths; store secrets in **macOS Keychain** (MVP).
+  - Use OAuth for specific providers (e.g., Google, Notion, Office 365).
+- **Reliability policy**: If an integration drops mid-task, notify the user, auto-retry up to 5 times, then fail the task.
+- **Privacy**: No telemetry/usage-data collection.
+- **Accessibility**: Include “Reduce motion” support (ZenGarden can be user-toggleable).
+
 ### Four Modes
 
 #### 1. Chat Mode
@@ -441,7 +467,7 @@ When FlowState wants to do something that requires approval, it shows inline:
 │  Tuesday at 2pm works great for me. Looking forward to it!  │
 │  Best, Luke                                                   │
 │                                                               │
-│  [Approve]  [Edit]  [Reject]                                 │
+│  [Approve]  [Always Approve]  [Deny]                         │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -948,6 +974,21 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Port auth manager from core package
 - [ ] Test OAuth flow end-to-end
 
+### Phase 3.5: Mockup Parity & UI Wiring (Week 6-7)
+- [ ] Port `appmockup/` theme + layout to `packages/desktop/renderer`
+- [ ] Implement app shell: header, toggleable sidebar, zen background
+- [ ] Implement navigation state (Home, Settings, 4 main modes)
+- [ ] Add conversation list + open thread (recent 3 + title-search)
+- [ ] Enforce/generated unique conversation titles; apply 90-day retention policy
+- [ ] Implement zen status indicator + live activity bar (combined, minimal signal)
+- [ ] Define typed IPC contracts for UI ↔ main (chat, tasks, workflows, integrations, settings)
+- [ ] Add inline approval card component (`Approve` / `Always Approve` / `Deny`)
+- [ ] Implement approval policy storage: per task run/session + per workflow opt-in (workflow runs can auto-approve tool requests)
+- [ ] Implement task promotion + Chat handoff card (with “keep in chat” override)
+- [ ] Introduce renderer stores for mockup screens (empty/loading/error states)
+- [ ] Replace mock data with real adapters incrementally (leave stubs where backend isn’t ready)
+- [ ] Add baseline UX polish: focus states, keyboard nav, window resizing, reduced motion
+
 ### Phase 4: Onboarding & Polish (Weeks 7-8)
 - [ ] Build complete onboarding flow
 - [ ] Implement provider selection
@@ -960,6 +1001,7 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Create pre-built workflow templates
 - [ ] Implement workflow runner
 - [ ] Add "pin to sidebar" functionality
+- [ ] Add per-workflow "Always Approve" toggle (on the workflow card)
 - [ ] Test workflow execution end-to-end
 
 ### Phase 6: Testing & Launch Prep (Weeks 11-12)

@@ -5,28 +5,23 @@ import { Settings, HelpCircle } from 'lucide-react';
  */
 function TitleBar() {
   return (
-    <div className="titlebar-drag h-12 bg-flowstate-surface border-b border-flowstate-border flex items-center justify-between px-4">
-      {/* Left side - Space for traffic lights on macOS */}
+    <div className="titlebar-drag h-12 bg-card border-b border-border flex items-center justify-between px-4">
       <div className="w-20" />
-      
-      {/* Center - App title */}
-      <h1 className="text-sm font-semibold text-flowstate-text">
-        FlowState
-      </h1>
-      
-      {/* Right side - Actions */}
+
+      <h1 className="text-sm font-semibold text-foreground">FlowState</h1>
+
       <div className="titlebar-no-drag flex items-center gap-2">
         <button
-          className="p-2 rounded-lg hover:bg-flowstate-highlight transition-colors"
+          className="p-2 rounded-lg hover:bg-secondary transition-colors"
           title="Settings"
         >
-          <Settings className="w-4 h-4 text-flowstate-text-muted" />
+          <Settings className="w-4 h-4 text-muted-foreground" />
         </button>
         <button
-          className="p-2 rounded-lg hover:bg-flowstate-highlight transition-colors"
+          className="p-2 rounded-lg hover:bg-secondary transition-colors"
           title="Help"
         >
-          <HelpCircle className="w-4 h-4 text-flowstate-text-muted" />
+          <HelpCircle className="w-4 h-4 text-muted-foreground" />
         </button>
       </div>
     </div>
