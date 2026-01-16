@@ -9,8 +9,11 @@
  */
 
 import { google, gmail_v1 } from 'googleapis';
+import { LruCache } from '../cache.js';
 
 let gmailClient: gmail_v1.Gmail | null = null;
+const messageCache = new LruCache<gmail_v1.Schema$Message>(100);
+const threadCache = new LruCache<gmail_v1.Schema$Thread>(50);
 
 /**
  * Get OAuth tokens and credentials from environment variables or @flowstate/core
@@ -79,13 +82,14 @@ export async function listMessages(options: {
   maxResults?: number;
   labelIds?: string[];
   query?: string;
+  fields?: string;
 }) {
   const client = await getGmailClient();
-  
+
   // Clean up parameters to avoid "invalid_request"
   const params: gmail_v1.Params$Resource$Users$Messages$List = {
     userId: 'me',
-    maxResults: options.maxResults || 10,
+    maxResults: Math.min(options.maxResults || 10, 50),
   };
 
   if (options.labelIds && options.labelIds.length > 0) {
@@ -96,21 +100,86 @@ export async function listMessages(options: {
     params.q = options.query;
   }
 
+  if (options.fields) {
+    params.fields = options.fields as unknown as gmail_v1.Params$Resource$Users$Messages$List['fields'];
+  }
+
   const response = await client.users.messages.list(params);
 
   return response.data.messages || [];
 }
 
-export async function getMessage(messageId: string) {
+export type GmailMessageDetailLevel = 'ids' | 'metadata' | 'full';
+
+export async function getMessage(messageId: string, options?: {
+  detailLevel?: GmailMessageDetailLevel;
+  includeHeaders?: boolean;
+  fields?: string;
+  format?: 'metadata' | 'full';
+}) {
+  const cached = messageCache.get(messageId);
+  if (cached && options?.detailLevel !== 'full') {
+    return cached;
+  }
+
   const client = await getGmailClient();
-  
+  const detailLevel = options?.detailLevel ?? 'metadata';
+  const format = options?.format ?? (detailLevel === 'full' ? 'full' : 'metadata');
+
   const response = await client.users.messages.get({
     userId: 'me',
     id: messageId,
-    format: 'full',
+    format,
+    metadataHeaders: options?.includeHeaders === false
+      ? undefined
+      : ['From', 'To', 'Subject', 'Date'],
+    fields: options?.fields as unknown as gmail_v1.Params$Resource$Users$Messages$Get['fields'],
   });
 
+  if (response.data) {
+    messageCache.set(messageId, response.data);
+  }
+
   return response.data;
+}
+
+export async function getThread(threadId: string, options?: {
+  maxMessages?: number;
+  detailLevel?: GmailMessageDetailLevel;
+  includeHeaders?: boolean;
+  fields?: string;
+}) {
+  const cached = threadCache.get(threadId);
+  if (cached && options?.detailLevel !== 'full') {
+    return cached;
+  }
+
+  const client = await getGmailClient();
+  const detailLevel = options?.detailLevel ?? 'metadata';
+  const format = detailLevel === 'full' ? 'full' : 'metadata';
+
+  const response = await client.users.threads.get({
+    userId: 'me',
+    id: threadId,
+    format,
+    metadataHeaders: options?.includeHeaders === false
+      ? undefined
+      : ['From', 'To', 'Subject', 'Date'],
+    fields: options?.fields as unknown as gmail_v1.Params$Resource$Users$Threads$Get['fields'],
+  });
+
+  if (response.data) {
+    threadCache.set(threadId, response.data);
+  }
+
+  if (!options?.maxMessages) {
+    return response.data;
+  }
+
+  return {
+    ...response.data,
+    messages: response.data.messages?.slice(0, options.maxMessages),
+  };
 }
 
 export async function createDraft(email: {
@@ -157,7 +226,8 @@ export async function replyToMessage(
   const thread = await client.users.threads.get({
     userId: 'me',
     id: threadId,
-    format: 'full', // We need headers
+    format: 'metadata',
+    metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Message-ID', 'References'],
   });
 
   const messages = thread.data.messages;

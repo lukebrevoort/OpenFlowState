@@ -16,6 +16,7 @@ const flowstateAPI = {
     getInfo: () => ipcRenderer.invoke('app:getInfo'),
     getTheme: () => ipcRenderer.invoke('app:getTheme'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+    openTerminal: (command: string) => ipcRenderer.invoke('app:openTerminal', command),
   },
 
   // Window controls (for custom title bar)
@@ -96,6 +97,8 @@ const flowstateAPI = {
     // Get OpenCode status
     status: () => ipcRenderer.invoke('opencode:status'),
 
+    restart: () => ipcRenderer.invoke('opencode:restart'),
+
     // Session management
     newSession: (title?: string) => ipcRenderer.invoke('opencode:newSession', title),
     listSessions: () => ipcRenderer.invoke('opencode:listSessions'),
@@ -127,13 +130,27 @@ const flowstateAPI = {
       return () => ipcRenderer.removeListener('opencode:event', handler);
     },
 
+    onTimelineEvent: (callback: (event: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: unknown) => callback(event);
+      ipcRenderer.on('timeline:event', handler);
+      return () => ipcRenderer.removeListener('timeline:event', handler);
+    },
+
     // Remove all listeners (for cleanup)
     removeAllListeners: () => {
       ipcRenderer.removeAllListeners('opencode:message');
       ipcRenderer.removeAllListeners('opencode:progress');
       ipcRenderer.removeAllListeners('opencode:error');
       ipcRenderer.removeAllListeners('opencode:event');
+      ipcRenderer.removeAllListeners('timeline:event');
     },
+  },
+
+  timeline: {
+    list: (sessionId: string, limit?: number, offset?: number) =>
+      ipcRenderer.invoke('timeline:list', sessionId, limit, offset),
+    resolvePayload: (payloadRef: string) =>
+      ipcRenderer.invoke('timeline:payload', payloadRef),
   },
 
   // MCP server management

@@ -106,13 +106,15 @@ body,
 
   .fs-button-secondary {
     @apply fs-button border;
-    background-color: var(#404040);
-    color: var(--foreground);
-    border-color: var(--border);
+    background-color: transparent;
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 55%, transparent);
   }
 
   .fs-button-secondary:hover {
-    opacity: 0.9;
+    background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    border-color: var(--primary);
+    opacity: 1;
   }
 
   .fs-button-ghost {
@@ -122,8 +124,8 @@ body,
   }
 
   .fs-button-ghost:hover {
-    background-color: var(--secondary);
-    color: var(--foreground);
+    background-color: var(--muted);
+    color: var(--primary);
   }
 
   /* Input field */
@@ -166,8 +168,8 @@ body,
   }
 
   .fs-sidebar-item:hover {
-    background-color: var(--secondary);
-    color: var(--foreground);
+    background-color: var(--primary);
+    color: var(--primary-foreground);
   }
 
   .fs-sidebar-item-active {

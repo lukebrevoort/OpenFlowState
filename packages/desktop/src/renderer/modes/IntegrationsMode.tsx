@@ -11,17 +11,14 @@ import {
   Key,
   Shield,
 } from "lucide-react";
+import { useIntegrations } from "../hooks";
 import {
   useIntegrationsStore,
   Integration,
   AuthMethod,
   AuthOption,
 } from "../stores/integrationsStore";
-import type {
-  OAuthSuccessEvent,
-  OAuthErrorEvent,
-  ApiTokenSuccessEvent,
-} from "../types/electron";
+import type { AuthStatus } from "../types/electron";
 
 /**
  * Auth Method Selector - Choose between OAuth and API Token
@@ -362,13 +359,22 @@ function ConnectionModal({
           {selectedMethod === "oauth" && (
             <OAuthForm
               service={integration.id}
-              onSubmit={onOAuthSubmit}
+              onSubmit={(clientId, clientSecret) => {
+                onOAuthSubmit(integration.id, clientId, clientSecret);
+                onClose();
+              }}
               isLoading={isLoading}
             />
           )}
 
           {selectedMethod === "api_token" && (
-            <ApiTokenForm onSubmit={onApiTokenSubmit} isLoading={isLoading} />
+            <ApiTokenForm
+              onSubmit={(apiToken) => {
+                onApiTokenSubmit(integration.id, apiToken);
+                onClose();
+              }}
+              isLoading={isLoading}
+            />
           )}
         </div>
 
@@ -396,60 +402,42 @@ function IntegrationsMode() {
     integrations,
     isLoading,
     connectingService,
-    loadIntegrations,
-    updateIntegration,
-    setConnecting,
+    onboardingConnectId,
+    setOnboardingConnect,
   } = useIntegrationsStore();
+
+  const {
+    connectOAuth,
+    connectApiToken,
+    disconnect,
+    refresh,
+  } = useIntegrations({
+    onError: (message) => console.error("Integration error:", message),
+  });
 
   const [showModal, setShowModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] =
     useState<Integration | null>(null);
+  const [authStatuses, setAuthStatuses] = useState<
+    Record<string, AuthStatus>
+  >({});
 
-  // Load integrations on mount
   useEffect(() => {
-    loadIntegrations();
-  }, [loadIntegrations]);
+    if (!showModal) {
+      setSelectedIntegration(null);
+    }
+  }, [showModal]);
 
-  // Set up event listeners
   useEffect(() => {
-    // OAuth success
-    const cleanupOAuthSuccess = window.flowstate.oauth.onSuccess(
-      (event: unknown) => {
-        const { service } = event as OAuthSuccessEvent;
-        console.log(`[Integrations] OAuth success for ${service}`);
-        loadIntegrations();
-        setConnecting(null);
-        setShowModal(false);
-      },
+    if (!onboardingConnectId) return;
+    const integration = integrations.find(
+      (item) => item.id === onboardingConnectId,
     );
-
-    // OAuth error
-    const cleanupOAuthError = window.flowstate.oauth.onError(
-      (event: unknown) => {
-        const { service, error } = event as OAuthErrorEvent;
-        console.error(`[Integrations] OAuth error for ${service}:`, error);
-        updateIntegration(service, { status: "error", error });
-        setConnecting(null);
-      },
-    );
-
-    // API token success
-    const cleanupApiTokenSuccess = window.flowstate.auth.onApiTokenSuccess(
-      (event: unknown) => {
-        const { service } = event as ApiTokenSuccessEvent;
-        console.log(`[Integrations] API token success for ${service}`);
-        loadIntegrations();
-        setConnecting(null);
-        setShowModal(false);
-      },
-    );
-
-    return () => {
-      cleanupOAuthSuccess();
-      cleanupOAuthError();
-      cleanupApiTokenSuccess();
-    };
-  }, [loadIntegrations, updateIntegration, setConnecting]);
+    if (!integration) return;
+    setSelectedIntegration(integration);
+    setShowModal(true);
+    setOnboardingConnect(null);
+  }, [integrations, onboardingConnectId, setOnboardingConnect]);
 
   // Handlers
   const handleConnect = (integration: Integration) => {
@@ -457,63 +445,42 @@ function IntegrationsMode() {
     setShowModal(true);
   };
 
-  const handleOAuthSubmit = async (clientId: string, clientSecret: string) => {
-    if (!selectedIntegration) return;
-
-    setConnecting(selectedIntegration.id);
-    try {
-      await window.flowstate.oauth.start(
-        selectedIntegration.id,
-        clientId,
-        clientSecret,
-      );
-    } catch (error) {
-      console.error("OAuth error:", error);
-      updateIntegration(selectedIntegration.id, {
-        status: "error",
-        error: error instanceof Error ? error.message : "Connection failed",
-      });
-      setConnecting(null);
-    }
+  const handleOAuthSubmit = async (
+    service: string,
+    clientId: string,
+    clientSecret: string,
+  ) => {
+    await connectOAuth(service, clientId, clientSecret);
   };
 
-  const handleApiTokenSubmit = async (apiToken: string) => {
-    if (!selectedIntegration) return;
-
-    setConnecting(selectedIntegration.id);
-    try {
-      await window.flowstate.auth.storeApiToken(
-        selectedIntegration.id,
-        apiToken,
-      );
-    } catch (error) {
-      console.error("API token error:", error);
-      updateIntegration(selectedIntegration.id, {
-        status: "error",
-        error: error instanceof Error ? error.message : "Connection failed",
-      });
-      setConnecting(null);
-    }
+  const handleApiTokenSubmit = async (service: string, apiToken: string) => {
+    await connectApiToken(service, apiToken);
   };
 
   const handleDisconnect = async (service: string) => {
-    try {
-      await window.flowstate.oauth.disconnect(service);
-      updateIntegration(service, {
-        status: "disconnected",
-        email: undefined,
-        lastSync: undefined,
-        error: undefined,
-        activeAuthMethod: undefined,
-      });
-    } catch (error) {
-      console.error("Disconnect error:", error);
-    }
+    await disconnect(service);
   };
 
   const handleRefresh = () => {
-    loadIntegrations();
+    refresh();
   };
+
+  useEffect(() => {
+    const fetchStatuses = async () => {
+      try {
+        const statuses = await window.flowstate.auth.getAllStatuses();
+        const map: Record<string, AuthStatus> = {};
+        statuses.forEach((status) => {
+          map[status.service] = status;
+        });
+        setAuthStatuses(map);
+      } catch (error) {
+        console.error("Failed to fetch auth statuses:", error);
+      }
+    };
+
+    fetchStatuses();
+  }, [integrations, isLoading, connectingService]);
 
   // Separate integrations
   const officialIntegrations = integrations.filter((i) => i.isOfficial);
@@ -726,7 +693,7 @@ function IntegrationsMode() {
             <h2 className="text-lg font-semibold text-foreground">
               Custom MCPs
             </h2>
-            <button className="fs-button-secondary bg-primary text-sm flex items-center gap-1">
+            <button className="fs-button-primary text-sm flex items-center gap-1">
               <Plus className="w-4 h-4" />
               Add MCP
             </button>
@@ -768,7 +735,7 @@ function IntegrationsMode() {
               </p>
             </div>
           </div>
-          <button className="fs-button-secondary text-sm">Open Settings</button>
+          <button className="fs-button-ghost text-sm">Open Settings</button>
         </div>
 
         {/* Connection Modal */}

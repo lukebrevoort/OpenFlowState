@@ -67,6 +67,10 @@ const NOTION_TOOLS = [
         sorts: {
           type: 'array',
           description: 'Optional sort configuration',
+          items: {
+            type: 'object',
+            description: 'Notion sort object',
+          },
         },
       },
       required: ['databaseId'],

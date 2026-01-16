@@ -12,6 +12,7 @@ declare const flowstateAPI: {
         getInfo: () => Promise<any>;
         getTheme: () => Promise<any>;
         openExternal: (url: string) => Promise<any>;
+        openTerminal: (command: string) => Promise<any>;
     };
     window: {
         minimize: () => Promise<any>;
@@ -24,16 +25,39 @@ declare const flowstateAPI: {
     };
     auth: {
         getToken: (service: string) => Promise<any>;
-        setToken: (service: string, token: unknown) => Promise<any>;
+        getStatus: (service: string) => Promise<any>;
+        getAllStatuses: () => Promise<any>;
+        removeToken: (service: string) => Promise<any>;
+        setCredentials: (service: string, credentials: unknown) => Promise<any>;
+        getCredentials: (service: string) => Promise<any>;
+        removeCredentials: (service: string) => Promise<any>;
+        storeApiToken: (service: string, apiToken: string) => Promise<any>;
+        onApiTokenSuccess: (callback: (event: unknown) => void) => () => void;
     };
     oauth: {
-        start: (service: string) => Promise<any>;
+        start: (service: string, clientId: string, clientSecret: string) => Promise<any>;
+        refresh: (service: string) => Promise<any>;
+        disconnect: (service: string) => Promise<any>;
+        onSuccess: (callback: (event: unknown) => void) => () => void;
+        onError: (callback: (event: unknown) => void) => () => void;
+        removeAllListeners: () => void;
     };
     opencode: {
         send: (message: string) => Promise<any>;
-        onMessage: (callback: (message: unknown) => void) => void;
-        onProgress: (callback: (progress: unknown) => void) => void;
+        status: () => Promise<any>;
+        newSession: (title?: string) => Promise<any>;
+        listSessions: () => Promise<any>;
+        switchSession: (sessionId: string) => Promise<any>;
+        getMessages: () => Promise<any>;
+        onMessage: (callback: (message: unknown) => void) => () => void;
+        onProgress: (callback: (progress: unknown) => void) => () => void;
+        onError: (callback: (error: unknown) => void) => () => void;
+        onEvent: (callback: (event: unknown) => void) => () => void;
         removeAllListeners: () => void;
+    };
+    mcp: {
+        reload: () => Promise<any>;
+        status: () => Promise<any>;
     };
 };
 export type FlowstateAPI = typeof flowstateAPI;

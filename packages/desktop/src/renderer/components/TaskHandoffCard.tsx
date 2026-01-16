@@ -4,10 +4,9 @@ interface TaskHandoffCardProps {
   title: string;
   description: string;
   onViewTask?: () => void;
-  onKeepInChat?: () => void;
 }
 
-export function TaskHandoffCard({ title, description, onViewTask, onKeepInChat }: TaskHandoffCardProps) {
+export function TaskHandoffCard({ title, description, onViewTask }: TaskHandoffCardProps) {
   return (
     <div className="bg-card/90 backdrop-blur-xl border border-border rounded-2xl p-5 shadow-md">
       <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Task running</p>
@@ -22,13 +21,6 @@ export function TaskHandoffCard({ title, description, onViewTask, onKeepInChat }
         >
           View Task
           <ArrowRight className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onKeepInChat}
-          className="px-4 py-2 rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-all duration-300 ease-in-out text-sm"
-        >
-          Keep in Chat
         </button>
       </div>
     </div>

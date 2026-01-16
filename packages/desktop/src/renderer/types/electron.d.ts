@@ -39,6 +39,42 @@ export interface OpenCodeEvent {
   data: unknown;
 }
 
+export type TimelineEventKind =
+  | 'phase'
+  | 'tool_call'
+  | 'tool_result'
+  | 'approval_request'
+  | 'approval_response'
+  | 'error'
+  | 'status';
+
+export interface TimelineEvent {
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  timestamp: number;
+  kind: TimelineEventKind;
+  title: string;
+  detail?: string;
+  toolName?: string;
+  payloadInline?: unknown;
+  payloadRef?: string;
+  redacted?: boolean;
+}
+
+export interface TaskRun {
+  id: string;
+  sessionId: string;
+  title: string;
+  description: string;
+  status: 'running' | 'waiting_approval' | 'completed' | 'failed';
+  startedAt: number;
+  updatedAt: number;
+  progress: number;
+  summary?: string;
+  summarySent?: boolean;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -103,6 +139,7 @@ export interface FlowstateAPI {
     getInfo: () => Promise<AppInfo>;
     getTheme: () => Promise<'light' | 'dark'>;
     openExternal: (url: string) => Promise<void>;
+    openTerminal: (command: string) => Promise<void>;
   };
 
   window: {
@@ -155,6 +192,7 @@ export interface FlowstateAPI {
 
     // Get status
     status: () => Promise<OpenCodeStatus>;
+    restart: () => Promise<void>;
 
     // Session management
     newSession: (title?: string) => Promise<{ sessionId: string }>;
@@ -167,9 +205,15 @@ export interface FlowstateAPI {
     onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
     onError: (callback: (error: OpenCodeError) => void) => () => void;
     onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
 
     // Cleanup
     removeAllListeners: () => void;
+  };
+
+  timeline: {
+    list: (sessionId: string, limit?: number, offset?: number) => Promise<TimelineEvent[]>;
+    resolvePayload: (payloadRef: string) => Promise<unknown | null>;
   };
 
   mcp: {

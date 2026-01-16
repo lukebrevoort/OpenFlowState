@@ -53,7 +53,7 @@ const extractToolName = (data: Record<string, unknown>) => {
 };
 
 const extractDetail = (data: Record<string, unknown>) => {
-  const candidates = [data.action, data.intent, data.summary, data.step];
+  const candidates = [data.action, data.intent, data.summary, data.step, data.message, data.plan];
 
   for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.trim().length > 0) {
@@ -101,7 +101,7 @@ export const stepFromOpenCodeEvent = (event: OpenCodeEvent): ActivityStep | null
     return {
       id: `phase-message-${timestamp}`,
       title: 'Drafting response',
-      detail: 'Composing the best answer',
+      detail: extractDetail(data) || 'Composing the best answer',
       kind: 'phase',
       dedupeKey: 'phase-draft',
       timestamp,
@@ -112,7 +112,7 @@ export const stepFromOpenCodeEvent = (event: OpenCodeEvent): ActivityStep | null
     return {
       id: `phase-session-${timestamp}`,
       title: 'Planning approach',
-      detail: 'Mapping the next steps',
+      detail: extractDetail(data) || 'Mapping the next steps',
       kind: 'phase',
       dedupeKey: 'phase-plan',
       timestamp,
@@ -146,7 +146,7 @@ export const stepFromOpenCodeEvent = (event: OpenCodeEvent): ActivityStep | null
   return null;
 };
 
-export const mergeActivityStep = (steps: ActivityStep[], step: ActivityStep, limit = 6) => {
+export const mergeActivityStep = (steps: ActivityStep[], step: ActivityStep, limit = 10) => {
   const dedupeKey = step.dedupeKey || step.title;
   const lastStep = steps[steps.length - 1];
 

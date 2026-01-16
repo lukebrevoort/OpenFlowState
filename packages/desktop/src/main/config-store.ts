@@ -71,7 +71,7 @@ export interface FlowStateConfig {
 const DEFAULT_CONFIG: FlowStateConfig = {
   $schema: 'https://flowstate.app/config.json',
   provider: {
-    default: 'zen/claude-sonnet', // OpenCode Zen (free) by default
+    default: 'opencode/grok-code',
     apiKeys: {},
   },
   mcpServers: {

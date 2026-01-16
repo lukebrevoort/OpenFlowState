@@ -14,6 +14,9 @@ import path from 'path';
 import fs from 'fs';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
 import { authManager } from './auth-manager.js';
+import { configStore } from './config-store.js';
+import { timelineStore } from './timeline-store.js';
+import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -23,6 +26,12 @@ class ProcessManager {
   private isRunning: boolean = false;
   private activeSessionId: string | null = null;
   private eventStreamAbortController: AbortController | null = null;
+  private flowstatePrompt: string | null = null;
+  private timelineInitialized = false;
+  private taskPromotionState = new Map<
+    string,
+    { promoted: boolean; completed: boolean; startAt: number; toolCalls: number }
+  >();
 
   constructor() {
     // Handle app shutdown
@@ -93,9 +102,29 @@ class ProcessManager {
   /**
    * Build MCP configuration with auth tokens from auth-manager
    */
+  private loadFlowstatePrompt(packagesDir: string): string | null {
+    try {
+      const agentsDir = path.resolve(packagesDir, '..', 'agents');
+      const agentPath = path.join(agentsDir, 'flowstate.md');
+      const raw = fs.readFileSync(agentPath, 'utf8');
+      const parts = raw.split('---');
+      if (parts.length >= 3) {
+        return parts.slice(2).join('---').trim();
+      }
+      return raw.trim();
+    } catch (error) {
+      console.error('[ProcessManager] Failed to load FlowState agent prompt:', error);
+      return null;
+    }
+  }
+
   private async buildMcpConfig(): Promise<Record<string, McpLocalConfig>> {
     const mcpConfig: Record<string, McpLocalConfig> = {};
     const packagesDir = this.getMcpPackagesDir();
+
+    if (!this.flowstatePrompt) {
+      this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
+    }
 
     // Gmail MCP
     const gmailToken = await authManager.getToken('gmail');
@@ -194,13 +223,14 @@ class ProcessManager {
 
       // Start OpenCode (both server and client)
       // Using port 0 lets the OS assign an available port
+      const selectedModel = configStore.get()?.provider.default ?? 'opencode/grok-code';
+      console.log('[ProcessManager] Using OpenCode model:', selectedModel);
       this.instance = await createOpencode({
         hostname: '127.0.0.1',
         port: 0,
         timeout: 30000, // 30 second timeout for server start
         config: {
-          // Use opencode/grok-code as the default model
-          model: 'opencode/grok-code',
+          model: selectedModel,
           // Configure MCP servers with tokens
           mcp: mcpConfig,
         },
@@ -214,6 +244,14 @@ class ProcessManager {
 
       // Check MCP status after a short delay to let servers connect
       setTimeout(() => this.logMcpStatus(), 2000);
+
+      // Initialize timeline storage
+      if (!this.timelineInitialized) {
+        timelineStore.configure({ dataDir: configStore.getDataDir() });
+        timelineStore.initialize();
+        this.timelineInitialized = true;
+      }
+
 
     } catch (error) {
       console.error('Failed to start OpenCode:', error);
@@ -356,6 +394,7 @@ class ProcessManager {
       }
 
       this.activeSessionId = result.data?.id ?? null;
+
       console.log(`Created new session: ${this.activeSessionId}`);
       return this.activeSessionId!;
     } catch (error) {
@@ -380,6 +419,8 @@ class ProcessManager {
       await this.createSession();
     }
 
+    const systemPrompt = this.flowstatePrompt ?? undefined;
+
     // Notify renderer that we're processing
     if (webContents) {
       webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
@@ -389,6 +430,7 @@ class ProcessManager {
       const result = await this.instance.client.session.prompt({
         path: { id: this.activeSessionId! },
         body: {
+          system: systemPrompt,
           parts: [{ type: 'text', text: content }],
         },
       });
@@ -440,6 +482,8 @@ class ProcessManager {
       await this.createSession();
     }
 
+    const systemPrompt = this.flowstatePrompt ?? undefined;
+
     // Notify renderer that we're processing
     webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
 
@@ -448,6 +492,7 @@ class ProcessManager {
       const result = await this.instance.client.session.prompt({
         path: { id: this.activeSessionId! },
         body: {
+          system: systemPrompt,
           parts: [{ type: 'text', text: content }],
         },
       });
@@ -520,29 +565,38 @@ class ProcessManager {
           // Type the event
           const typedEvent = event as { type?: string; properties?: unknown };
 
-          // Forward relevant events to renderer
-          if (typedEvent.type) {
-            switch (typedEvent.type) {
-              case 'message.created':
-              case 'message.updated':
-                webContents.send('opencode:event', {
-                  type: typedEvent.type,
-                  data: typedEvent.properties,
-                });
-                break;
+           // Forward relevant events to renderer
+           if (typedEvent.type) {
+             webContents.send('opencode:event', {
+               type: typedEvent.type,
+               data: typedEvent.properties,
+             });
 
-              case 'session.updated':
-                webContents.send('opencode:event', {
-                  type: typedEvent.type,
-                  data: typedEvent.properties,
-                });
-                break;
+             const sessionId =
+               this.activeSessionId ??
+               (typeof typedEvent.properties === 'object' && typedEvent.properties
+                 ? (typedEvent.properties as { sessionId?: string }).sessionId
+                 : undefined) ??
+               'unknown-session';
+             const normalized = normalizeOpenCodeEvent(
+               { type: typedEvent.type, properties: typedEvent.properties },
+               sessionId
+             );
+             if (normalized) {
+               try {
+                 const stored = await timelineStore.appendWithPayload({
+                   ...normalized.event,
+                   redacted: normalized.redacted,
+                   payload: normalized.payload,
+                 });
+                 webContents.send('timeline:event', stored);
+                 this.trackTaskPromotion(sessionId, normalized.event, webContents);
+               } catch (error) {
+                 console.warn('[ProcessManager] Failed to persist timeline event:', error);
+               }
+             }
+           }
 
-              default:
-                // Log other events for debugging
-                console.log('OpenCode event:', typedEvent.type);
-            }
-          }
         }
       } catch (error) {
         if (!this.eventStreamAbortController?.signal.aborted) {
@@ -574,7 +628,7 @@ class ProcessManager {
         return [];
       }
 
-      return (result.data as Array<{ info: { id: string; role: string; createdAt?: string }; parts: Array<{ type: string; text?: string }> }>).map((msg) => ({
+      return (result.data as Array<{ info: { id: string; role: string; createdAt?: string; sessionId?: string }; parts: Array<{ type: string; text?: string }> }>).map((msg) => ({
         id: msg.info.id,
         role: msg.info.role,
         content: msg.parts
@@ -587,6 +641,135 @@ class ProcessManager {
       console.error('Error getting session messages:', error);
       return [];
     }
+  }
+
+  /**
+   * Get timeline events for current session
+   */
+  async getTimelineEventsForSession(sessionId: string, limit: number = 100, offset: number = 0) {
+    if (!sessionId) {
+      return [];
+    }
+
+    return timelineStore.list({
+      sessionId,
+      limit,
+      offset,
+    });
+  }
+
+  /**
+   * Resolve a timeline payload from blob storage
+   */
+  async getTimelinePayload(ref: string) {
+    return timelineStore.resolvePayload(ref);
+  }
+
+  private trackTaskPromotion(
+    sessionId: string,
+    event: { kind: string; title: string; detail?: string; timestamp: number },
+    webContents: Electron.WebContents
+  ) {
+    const state = this.taskPromotionState.get(sessionId) ?? {
+      promoted: false,
+      completed: false,
+      startAt: Date.now(),
+      toolCalls: 0,
+    };
+
+    if (event.kind === 'tool_call') {
+      state.toolCalls += 1;
+    }
+
+    if (event.kind === 'status' && event.title === 'Task promoted') {
+      state.promoted = true;
+    }
+
+    if (event.kind === 'status' && event.title === 'Task completed') {
+      state.completed = true;
+    }
+
+    const elapsed = Date.now() - state.startAt;
+    const shouldPromote = !state.promoted && (elapsed > 15000 || state.toolCalls >= 2);
+
+    if (shouldPromote) {
+      state.promoted = true;
+      const promotion = normalizeOpenCodeEvent(
+        {
+          type: 'task.promoted',
+          properties: {
+            sessionId,
+            taskId: `task-${sessionId}`,
+            summary: event.detail ?? 'Task promoted from long-running request',
+          },
+        },
+        sessionId
+      );
+      if (promotion) {
+        timelineStore.appendWithPayload({
+          ...promotion.event,
+          redacted: promotion.redacted,
+          payload: promotion.payload,
+        }).then((stored) => {
+          webContents.send('timeline:event', stored);
+        }).catch((error) => {
+          console.warn('[ProcessManager] Failed to persist promotion event:', error);
+        });
+      }
+    }
+
+    const shouldComplete = state.promoted && !state.completed && event.kind === 'phase' && event.title === 'Drafting response';
+
+    if (shouldComplete) {
+      state.completed = true;
+      const completion = normalizeOpenCodeEvent(
+        {
+          type: 'task.completed',
+          properties: {
+            sessionId,
+            taskId: `task-${sessionId}`,
+            summary: event.detail ?? 'Task completed',
+          },
+        },
+        sessionId
+      );
+      if (completion) {
+        timelineStore.appendWithPayload({
+          ...completion.event,
+          redacted: completion.redacted,
+          payload: completion.payload,
+        }).then((stored) => {
+          webContents.send('timeline:event', stored);
+        }).catch((error) => {
+          console.warn('[ProcessManager] Failed to persist completion event:', error);
+        });
+      }
+
+      const summary = normalizeOpenCodeEvent(
+        {
+          type: 'task.summary',
+          properties: {
+            sessionId,
+            taskId: `task-${sessionId}`,
+            summary: event.detail ?? 'Task summary available',
+          },
+        },
+        sessionId
+      );
+      if (summary) {
+        timelineStore.appendWithPayload({
+          ...summary.event,
+          redacted: summary.redacted,
+          payload: summary.payload,
+        }).then((stored) => {
+          webContents.send('timeline:event', stored);
+        }).catch((error) => {
+          console.warn('[ProcessManager] Failed to persist summary event:', error);
+        });
+      }
+    }
+
+    this.taskPromotionState.set(sessionId, state);
   }
 
   /**

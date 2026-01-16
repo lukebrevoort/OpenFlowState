@@ -162,6 +162,23 @@ ipcMain.handle('app:openExternal', async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle('app:openTerminal', async (_event, command: string) => {
+  try {
+    await shell.openExternal(`terminal://${encodeURIComponent(command)}`);
+  } catch (error) {
+    console.error('Failed to open terminal via URL scheme:', error);
+  }
+
+  try {
+    const { exec } = await import('node:child_process');
+    const escapedCommand = command.replace(/"/g, '\\"');
+    exec(`osascript -e 'tell application "Terminal" to do script "${escapedCommand}"'`);
+  } catch (error) {
+    console.error('Failed to open terminal via exec:', error);
+    throw error;
+  }
+});
+
 // ============================================================================
 // Window Controls
 // ============================================================================
@@ -453,13 +470,25 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
  * Get OpenCode status
  */
 ipcMain.handle('opencode:status', async () => {
-  const health = await processManager.healthCheck();
-  return {
-    running: processManager.running,
-    sessionId: processManager.sessionId,
-    ...health,
-  };
+  try {
+    return { success: true, status: processManager.running };
+  } catch (error) {
+    console.error('Failed to get OpenCode status:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
+
+ipcMain.handle('opencode:restart', async () => {
+  try {
+    await processManager.stop();
+    await processManager.start();
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to restart OpenCode:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 
 /**
  * Create a new session
@@ -489,10 +518,25 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
 });
 
 /**
- * Get messages from current session
- */
-ipcMain.handle('opencode:getMessages', async () => {
-  return await processManager.getSessionMessages();
-});
+  * Get messages from current session
+  */
+ ipcMain.handle('opencode:getMessages', async () => {
+   return await processManager.getSessionMessages();
+ });
 
-console.log('IPC handlers registered');
+ /**
+  * List timeline events for a session
+  */
+ ipcMain.handle('timeline:list', async (_event, sessionId: string, limit?: number, offset?: number) => {
+   return await processManager.getTimelineEventsForSession(sessionId, limit ?? 100, offset ?? 0);
+ });
+
+ /**
+  * Resolve a timeline payload from blob storage
+  */
+ ipcMain.handle('timeline:payload', async (_event, payloadRef: string) => {
+   return await processManager.getTimelinePayload(payloadRef);
+ });
+ 
+ console.log('IPC handlers registered');
+

@@ -8,8 +8,9 @@
   "main": "dist/main/index.js",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:main\" \"npm run dev:renderer\"",
+    "dev": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json --watch",
+    "dev:preload": "tsc -p tsconfig.preload.json --watch",
     "dev:renderer": "vite",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
@@ -27,14 +28,18 @@
     "@opencode-ai/sdk": "^1.1.20"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
+    "better-sqlite3": "^11.10.0",
     "concurrently": "^8.2.2",
     "electron": "^28.2.0",
     "electron-builder": "^24.9.1",
+    "lucide-react": "^0.312.0",
     "postcss": "^8.4.33",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -43,8 +48,7 @@
     "vite": "^5.0.12",
     "vite-plugin-electron": "^0.28.4",
     "vite-plugin-electron-renderer": "^0.14.5",
-    "zustand": "^4.5.0",
-    "lucide-react": "^0.312.0"
+    "zustand": "^4.5.0"
   },
   "build": {
     "appId": "com.flowstate.app",
@@ -57,7 +61,10 @@
       "assets/**/*"
     ],
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/flowstate-main-logo.png",
       "category": "public.app-category.productivity"
     }

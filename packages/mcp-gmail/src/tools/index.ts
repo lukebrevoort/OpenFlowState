@@ -12,6 +12,9 @@ import {
 import { notifications } from '@flowstate/core';
 import * as gmailApi from '../api/index.js';
 
+const DEFAULT_FIELDS = 'id,threadId,labelIds,snippet,payload/headers';
+const THREAD_FIELDS = 'id,historyId,messages/id,messages/threadId,messages/labelIds,messages/snippet,messages/payload/headers';
+
 const formatToolError = (error: unknown): string => {
   if (error instanceof Error) {
     const responseData = (error as { response?: { data?: unknown; status?: number } }).response;
@@ -28,14 +31,14 @@ const formatToolError = (error: unknown): string => {
 const GMAIL_TOOLS = [
   {
     name: 'gmail_list',
-    description: 'List emails from inbox with optional filters',
+    description: 'List emails from inbox with optional filters (metadata by default)',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
       properties: {
         maxResults: {
           type: 'number',
-          description: 'Maximum number of emails to return (default: 10)',
+          description: 'Maximum number of emails to return (default: 10, max: 50)',
         },
         labelIds: {
           type: 'array',
@@ -46,12 +49,16 @@ const GMAIL_TOOLS = [
           type: 'string',
           description: 'Gmail search query (same as Gmail search box)',
         },
+        detailLevel: {
+          type: 'string',
+          description: 'ids | metadata | full (default: metadata)',
+        },
       },
     },
   },
   {
     name: 'gmail_read',
-    description: 'Read the full content of a specific email',
+    description: 'Read a specific email (metadata by default)',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
@@ -60,13 +67,25 @@ const GMAIL_TOOLS = [
           type: 'string',
           description: 'The ID of the email to read',
         },
+        detailLevel: {
+          type: 'string',
+          description: 'ids | metadata | full (default: metadata)',
+        },
+        maxBodyChars: {
+          type: 'number',
+          description: 'Maximum body characters to return (default: 2000)',
+        },
+        includeHtml: {
+          type: 'boolean',
+          description: 'Include HTML content when detailLevel=full (default: false)',
+        },
       },
       required: ['messageId'],
     },
   },
   {
     name: 'gmail_search',
-    description: 'Search emails using Gmail query syntax',
+    description: 'Search emails using Gmail query syntax (metadata by default)',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
@@ -77,7 +96,11 @@ const GMAIL_TOOLS = [
         },
         maxResults: {
           type: 'number',
-          description: 'Maximum number of results (default: 10)',
+          description: 'Maximum number of results (default: 10, max: 50)',
+        },
+        detailLevel: {
+          type: 'string',
+          description: 'ids | metadata | full (default: metadata)',
         },
       },
       required: ['query'],
@@ -194,6 +217,29 @@ const GMAIL_TOOLS = [
     },
   },
   {
+    name: 'gmail_get_thread',
+    description: 'Get messages from a thread (metadata by default)',
+    autonomy: 'auto',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threadId: {
+          type: 'string',
+          description: 'The ID of the thread to fetch',
+        },
+        maxMessages: {
+          type: 'number',
+          description: 'Maximum number of messages to return (default: 5)',
+        },
+        detailLevel: {
+          type: 'string',
+          description: 'metadata | full (default: metadata)',
+        },
+      },
+      required: ['threadId'],
+    },
+  },
+  {
     name: 'gmail_delete',
     description: 'Move an email to trash',
     autonomy: 'approval',
@@ -226,12 +272,38 @@ export function registerTools(server: Server): void {
       switch (name) {
         case 'gmail_list':
         case 'gmail_search': {
-          const messages = await gmailApi.listMessages({
+          const detailLevel = (args?.detailLevel as gmailApi.GmailMessageDetailLevel | undefined) ?? 'metadata';
+          const messageIds = await gmailApi.listMessages({
             maxResults: args?.maxResults as number | undefined,
             labelIds: args?.labelIds as string[] | undefined,
             query: args?.query as string | undefined,
           });
-          
+
+          if (detailLevel === 'ids') {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(messageIds, null, 2),
+                },
+              ],
+            };
+          }
+
+          const messages = await Promise.all(
+            (messageIds || []).map((item) =>
+              gmailApi.getMessage(item.id as string, {
+                detailLevel,
+                format: detailLevel === 'full' ? 'full' : 'metadata',
+                fields: detailLevel === 'full'
+                  ? undefined
+                  : DEFAULT_FIELDS,
+                includeHeaders: detailLevel === 'metadata',
+              })
+            )
+          );
+
+
           return {
             content: [
               {
@@ -243,8 +315,44 @@ export function registerTools(server: Server): void {
         }
 
         case 'gmail_read': {
-          const message = await gmailApi.getMessage(args?.messageId as string);
-          
+          const detailLevel = (args?.detailLevel as gmailApi.GmailMessageDetailLevel | undefined) ?? 'metadata';
+          const includeHtml = args?.includeHtml === true;
+          const maxBodyChars = (args?.maxBodyChars as number | undefined) ?? 2000;
+          const message = await gmailApi.getMessage(args?.messageId as string, {
+            detailLevel,
+            format: detailLevel === 'full' ? 'full' : 'metadata',
+            fields: detailLevel === 'full'
+              ? undefined
+              : DEFAULT_FIELDS,
+            includeHeaders: detailLevel === 'metadata',
+          });
+
+          if (detailLevel === 'full' && message?.payload && !includeHtml) {
+            const stripHtmlParts = (part: any) => {
+              if (!part) return;
+              if (part.mimeType === 'text/html') {
+                part.body = { size: 0, data: '' };
+              }
+              if (Array.isArray(part.parts)) {
+                part.parts.forEach(stripHtmlParts);
+              }
+            };
+            stripHtmlParts(message.payload);
+          }
+
+          if (detailLevel === 'full' && maxBodyChars && message?.payload) {
+            const payload = message.payload;
+            const bodyData = payload.body?.data;
+            if (bodyData) {
+              const decoded = Buffer.from(bodyData, 'base64').toString('utf8');
+              const trimmed = decoded.slice(0, maxBodyChars);
+              payload.body = {
+                ...payload.body,
+                data: Buffer.from(trimmed, 'utf8').toString('base64'),
+              };
+            }
+          }
+
           return {
             content: [
               {
@@ -263,16 +371,38 @@ export function registerTools(server: Server): void {
             cc: args?.cc as string | undefined,
             bcc: args?.bcc as string | undefined,
           });
-          
+
           return {
             content: [
               {
                 type: 'text',
-                text: `Created draft: ${draft.id}\n${JSON.stringify(draft, null, 2)}`,
+                text: JSON.stringify(draft, null, 2),
               },
             ],
           };
         }
+
+        case 'gmail_get_thread': {
+          const detailLevel = (args?.detailLevel as gmailApi.GmailMessageDetailLevel | undefined) ?? 'metadata';
+          const thread = await gmailApi.getThread(args?.threadId as string, {
+            detailLevel,
+            maxMessages: (args?.maxMessages as number | undefined) ?? 5,
+            fields: detailLevel === 'full'
+              ? undefined
+              : THREAD_FIELDS,
+            includeHeaders: detailLevel === 'metadata',
+          });
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(thread, null, 2),
+              },
+            ],
+          };
+        }
+
 
         case 'gmail_label': {
           const message = await gmailApi.modifyLabels(

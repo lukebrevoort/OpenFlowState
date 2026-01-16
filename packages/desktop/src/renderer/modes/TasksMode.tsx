@@ -1,12 +1,17 @@
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import { CheckCircle2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { ApprovalCard } from '../components/ApprovalCard';
+import { useMemo, useState } from 'react';
+import type { TimelineEvent } from '../types/electron';
+import { ActivityTimeline } from '../components/ActivityTimeline';
+import { useChatStore } from '../stores/chatStore';
 
 interface RunningTask {
-  id: number;
+  id: string;
   title: string;
   description: string;
   progress: number;
   status: 'analyzing' | 'processing' | 'finalizing';
+  timeline: TimelineEvent[];
 }
 
 interface CompletedTask {
@@ -16,7 +21,15 @@ interface CompletedTask {
   completedAt: Date;
 }
 
+const deriveProgress = (events: TimelineEvent[]) => {
+  if (!events || events.length === 0) return 0;
+  const total = events.length;
+  const completed = events.filter((event) => ['tool_result', 'approval_response'].includes(event.kind)).length;
+  return Math.min(100, Math.round((completed / total) * 100));
+};
+
 function RunningTaskCard({ task }: { task: RunningTask }) {
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const statusText = {
     analyzing: 'Analyzing...',
     processing: 'Processing...',
@@ -24,7 +37,7 @@ function RunningTaskCard({ task }: { task: RunningTask }) {
   };
 
   return (
-    <div className="bg-card/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-300 ease-in-out">
+    <div className="bg-card/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-sm transition-all duration-300 ease-in-out">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <h3 className="text-base text-foreground mb-1">{task.title}</h3>
@@ -46,6 +59,30 @@ function RunningTaskCard({ task }: { task: RunningTask }) {
         <span className="text-xs text-muted-foreground">{statusText[task.status]}</span>
         <span className="text-xs text-foreground">{task.progress}%</span>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setIsTimelineOpen((prev) => !prev)}
+        className="mt-4 flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/60"
+      >
+        <span>{isTimelineOpen ? 'Hide timeline' : 'Show timeline'}</span>
+        {isTimelineOpen ? (
+          <ChevronUp className="h-4 w-4" />
+        ) : (
+          <ChevronDown className="h-4 w-4" />
+        )}
+      </button>
+
+      {isTimelineOpen && (
+        <div className="mt-4">
+          <ActivityTimeline
+            events={task.timeline}
+            title="Task Activity"
+            collapsed={false}
+            maxItems={8}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -80,92 +117,75 @@ function CompletedTaskItem({ task }: { task: CompletedTask }) {
 }
 
 function TasksMode() {
-  const runningTasks: RunningTask[] = [
-    {
-      id: 1,
-      title: 'Market Research Analysis',
-      description: 'Analyzing competitor trends and market positioning',
-      progress: 67,
-      status: 'processing',
-    },
-    {
-      id: 2,
-      title: 'Content Generation',
-      description: 'Creating blog post outline and key points',
-      progress: 34,
-      status: 'analyzing',
-    },
-    {
-      id: 3,
-      title: 'Data Aggregation',
-      description: 'Compiling weekly metrics and performance data',
-      progress: 89,
-      status: 'finalizing',
-    },
-  ];
+  const timeline = useChatStore((state) => state.timeline);
+  const activeTask = useChatStore((state) => state.activeTask);
+  const sampleTimeline: TimelineEvent[] = useMemo(() => [], []);
 
-  const pendingApprovals = [
-    {
-      id: 'approval-1',
-      title: 'Send email to sarah@example.com',
-      summary: 'Subject: Re: Meeting Reschedule',
-      body: 'Hi Sarah,\n\nTuesday at 2pm works great for me. Looking forward to it!\n\nBest,\nLuke',
-    },
-  ];
+  const runningTasks: RunningTask[] = useMemo(() => {
+    if (activeTask) {
+      return [
+        {
+          id: activeTask.id,
+          title: activeTask.title,
+          description: activeTask.description,
+          status: 'processing',
+          timeline: timeline.length > 0 ? timeline : sampleTimeline,
+          progress:
+            activeTask.progress ||
+            deriveProgress(timeline.length > 0 ? timeline : sampleTimeline),
+        },
+      ];
+    }
 
-  const completedTasks: CompletedTask[] = [
-    {
-      id: 1,
-      title: 'Email Campaign Optimization',
-      description: 'Improved subject lines and call-to-action buttons',
-      completedAt: new Date(Date.now() - 600000),
-    },
-    {
-      id: 2,
-      title: 'Customer Feedback Summary',
-      description: 'Summarized 47 customer reviews into key insights',
-      completedAt: new Date(Date.now() - 3600000),
-    },
-    {
-      id: 3,
-      title: 'Social Media Post Scheduling',
-      description: 'Scheduled 15 posts across platforms for next week',
-      completedAt: new Date(Date.now() - 7200000),
-    },
-    {
-      id: 4,
-      title: 'Meeting Notes Transcription',
-      description: 'Transcribed and organized key takeaways from team meeting',
-      completedAt: new Date(Date.now() - 86400000),
-    },
-    {
-      id: 5,
-      title: 'Invoice Processing',
-      description: 'Processed and categorized 23 invoices',
-      completedAt: new Date(Date.now() - 172800000),
-    },
-  ];
+    return [];
+  }, [activeTask, sampleTimeline, timeline]);
+
+  const pendingApprovals = timeline
+    .filter((event) => event.kind === 'approval_request')
+    .map((event) => ({
+      id: event.id,
+      title: event.title,
+      summary: event.detail ?? 'Approval required',
+      body: 'Open the task timeline for full context.',
+    }));
+
+  const completedTasks: CompletedTask[] = activeTask?.status === 'completed'
+    ? [
+        {
+          id: Number(activeTask.startedAt),
+          title: activeTask.title,
+          description: activeTask.summary ?? 'Task completed',
+          completedAt: new Date(activeTask.updatedAt),
+        },
+      ]
+    : [];
 
   return (
-    <div className="h-full overflow-y-auto px-6 py-8">
-      <div className="max-w-5xl mx-auto">
-        <div className="mb-12">
-          <div className="mb-6">
-            <h2 className="text-2xl text-foreground mb-1">Running Tasks</h2>
-            <p className="text-sm text-muted-foreground">Currently active processes</p>
+    <div className="h-full overflow-y-auto px-6 py-6">
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div>
+          <div className="mb-4">
+            <h2 className="text-xl text-foreground mb-1">Active Task</h2>
+            <p className="text-sm text-muted-foreground">Live task details</p>
           </div>
 
           <div className="grid gap-4">
-            {runningTasks.map((task) => (
-              <RunningTaskCard key={task.id} task={task} />
-            ))}
+            {runningTasks.length > 0 ? (
+              runningTasks.map((task) => (
+                <RunningTaskCard key={task.id} task={task} />
+              ))
+            ) : (
+              <div className="rounded-xl border border-border bg-card/50 p-6 text-sm text-muted-foreground">
+                No active task yet.
+              </div>
+            )}
           </div>
         </div>
 
         {pendingApprovals.length > 0 && (
-          <div className="mb-12">
-            <div className="mb-6">
-              <h2 className="text-2xl text-foreground mb-1">Waiting for Approval</h2>
+          <div>
+            <div className="mb-4">
+              <h2 className="text-xl text-foreground mb-1">Waiting for Approval</h2>
               <p className="text-sm text-muted-foreground">Review and approve pending actions</p>
             </div>
 
@@ -186,12 +206,12 @@ function TasksMode() {
         )}
 
         <div>
-          <div className="mb-6">
-            <h2 className="text-2xl text-foreground mb-1">Completed Tasks</h2>
+          <div className="mb-4">
+            <h2 className="text-xl text-foreground mb-1">Completed Tasks</h2>
             <p className="text-sm text-muted-foreground">Recent accomplishments</p>
           </div>
 
-          <div className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-6">
+          <div className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-5">
             {completedTasks.map((task, index) => (
               <div key={task.id} className={index < completedTasks.length - 1 ? 'mb-2' : ''}>
                 <CompletedTaskItem task={task} />

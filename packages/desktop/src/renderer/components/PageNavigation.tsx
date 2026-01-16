@@ -17,7 +17,7 @@ export function PageNavigation({
   ];
 
   return (
-    <div className="relative flex items-center gap-2 px-4 py-2 bg-card/70 backdrop-blur-2xl border border-border rounded-2xl shadow-lg">
+    <div className="relative flex items-center gap-2 px-3 py-1.5 bg-card/70 backdrop-blur-2xl border border-border rounded-2xl shadow-lg">
       {pages.map((page) => {
         const Icon = page.icon;
         const isActive = currentPage === page.id;
@@ -26,13 +26,13 @@ export function PageNavigation({
           <button
             key={page.id}
             onClick={() => onNavigate(page.id)}
-            className={`relative px-4 py-2 rounded-xl text-sm transition-all duration-300 ease-linear flex items-center gap-2 ${
+            className={`relative px-3 py-1.5 rounded-xl text-xs transition-all duration-300 ease-linear flex items-center gap-2 ${
               isActive
                 ? "bg-[#404040] text-[#fffdfb] shadow-md"
                 : "text-foreground/70 hover:bg-[#a5b574]/30"
             }`}
           >
-            <Icon className="w-4 h-4" />
+            <Icon className="w-3.5 h-3.5" />
             <span className="font-medium">{page.label}</span>
             {isActive && (
               <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[rgb(255,137,0)]" />

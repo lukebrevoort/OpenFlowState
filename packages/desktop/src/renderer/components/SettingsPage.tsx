@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Clock, Palette, Cpu, Globe, Shield, Bell } from "lucide-react";
+import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw } from "lucide-react";
 
 export function SettingsPage() {
   const [timezone, setTimezone] = useState("America/New_York");
@@ -7,6 +7,18 @@ export function SettingsPage() {
   const [modelProvider, setModelProvider] = useState("openai");
   const [modelName, setModelName] = useState("gpt-4");
   const [language, setLanguage] = useState("en");
+  const [resetStatus, setResetStatus] = useState<"idle" | "done">("idle");
+  const resetLabel = resetStatus === "done" ? "Reset" : "Reset now";
+
+  const handleResetOnboarding = async () => {
+    try {
+      await window.flowstate.config.set({ onboardingComplete: false });
+      setResetStatus("done");
+      window.setTimeout(() => window.location.reload(), 300);
+    } catch (error) {
+      console.error("Failed to reset onboarding", error);
+    }
+  };
 
   const timezones = [
     "America/New_York",
@@ -234,6 +246,29 @@ export function SettingsPage() {
                   <div className="absolute right-1 top-1 w-4 h-4 rounded-full bg-white transition-transform" />
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6">
+              <RotateCcw className="w-5 h-5 text-primary" />
+              <h3 className="text-xl text-foreground">Debugging</h3>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm text-foreground">Reset onboarding</p>
+                <p className="text-xs text-muted-foreground">
+                  Re-run the onboarding flow for testing.
+                </p>
+              </div>
+              <button
+                onClick={handleResetOnboarding}
+                className="fs-button-secondary flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4" />
+                {resetLabel}
+              </button>
             </div>
           </div>
 

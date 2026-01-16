@@ -155,6 +155,12 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 | Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
 | Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen | **New** |
 | Jan 2026 | **Internet Required for MVP** | Optimize for offline later | **New** |
+| Jan 2026 | **Unified Real-Time Timeline** | Single chronological feed (no tabs) for tool calls, approvals, status | **New** |
+| Jan 2026 | **Hybrid Timeline Storage** | SQLite for metadata, disk blobs for payloads ≥10KB | **New** |
+| Jan 2026 | **Smart Metadata Gmail Defaults** | Return snippet + headers + labels by default, full body on-demand | **New** |
+| Jan 2026 | **Redact Secrets Even in Dev Mode** | Always strip tokens/keys; export bundle requires explicit action | **New** |
+| Jan 2026 | **Hybrid Task Promotion** | Agent-led promotion + heuristic escalation; no user override | **New** |
+| Jan 2026 | **Task Summary from Timeline** | Final task summary auto-generated from timeline; last chat message | **New** |
 
 ---
 
@@ -405,9 +411,10 @@ These are product decisions derived from the current `appmockup/` and Luke's cla
   - Workflows can be explicitly configured as **Always Approve** (opt-in) after the user has validated behavior.
     - Semantics: if the workflow is set to auto-approve, FlowState intercepts approval-gated tool requests associated with that workflow task run (including follow-up approvals like retries/delayed steps) and approves them automatically (the user never sees the approval prompt).
   - Tasks is the primary place to review/approve long-running actions.
-- **Chat vs task routing**: Quick actions stay in Chat; anything expected to run longer than ~1 minute becomes a Task and auto-navigates to Tasks.
-  - Users may override promotion to keep execution in Chat (no “run in background” override in MVP).
-  - If promoted, Chat shows a handoff card linking to Task details.
+- **Chat vs task routing**: Quick actions stay in Chat; anything expected to run longer than ~1 minute becomes a Task via **hybrid promotion** (agent-driven + heuristic escalation).
+  - No manual override: if promoted, execution continues as a Task.
+  - Chat shows a handoff card linking to Task details (click → Tasks view).
+  - Completed long-running tasks end with an **auto-generated summary** derived from the timeline; this summary becomes the last assistant message in the original chat.
 - **Workflow execution**: Running a workflow always creates a Task and switches the UI to Tasks.
 - **Integrations focus**: Optimize for easy setup of custom MCPs (local + remote) with “Easy” + “Advanced” paths; store secrets in **macOS Keychain** (MVP).
   - Use OAuth for specific providers (e.g., Google, Notion, Office 365).
@@ -995,6 +1002,133 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Create suggested prompts for wow moment
 - [ ] Add approval flow UI (inline + notifications)
 - [ ] Implement Tasks mode (view running tasks)
+
+#### Phase 4 Additions: OpenCode Observability UX — Unified Real-Time Timeline
+> Goal: show users what FlowState is doing *in real time* via a single, chronological activity feed. No tabs—just a live stream of steps, tool calls, and approvals that auto-scrolls as work progresses.
+
+**Task Promotion (Hybrid)**:
+- Agent can explicitly promote a chat to a Task.
+- FlowState can auto-promote based on heuristics (runtime > 60s, multi-tool chains, multi-step approvals).
+- **MVP constraint**: one active Task per session; new tasks can start after completion.
+- Once promoted, execution continues in Tasks; Chat shows a single handoff card with a “View Task” CTA.
+- No “Keep in Chat” option.
+- Completed task runs end with a **timeline-derived summary**, which becomes the last assistant message in the original chat.
+
+**Task Progress**:
+- Percent progress derived from completed steps vs. total steps in the timeline (approvals count as steps).
+- Tasks display current step + progress bar; Chat shows a collapsed current step indicator.
+
+**Timeline Event Schema** (`TimelineEvent`):
+```typescript
+type TimelineEvent = {
+  id: string;                          // UUID
+  sessionId: string;
+  taskId?: string;                     // if promoted to Task
+  timestamp: number;                   // epoch ms
+  kind: 'phase' | 'tool_call' | 'tool_result' | 'approval_request' | 'approval_response' | 'error' | 'status';
+  title: string;                       // user-friendly label
+
+  detail?: string;                     // short description (≤120 chars)
+  toolName?: string;                   // e.g. "gmail_search"
+  // For large payloads, store reference instead of inline
+  payloadRef?: string;                 // file path to blob on disk (if ≥10KB)
+  payloadInline?: unknown;             // JSON if <10KB
+  redacted?: boolean;                  // true if secrets were stripped
+};
+```
+
+**Storage strategy (performance-first)**:
+| Data | Location | Reason |
+|------|----------|--------|
+| `TimelineEvent` metadata | SQLite row | Fast queries, pagination |
+| Payload < 10 KB | `payloadInline` (JSON in SQLite) | Single read, no extra I/O |
+| Payload ≥ 10 KB | Disk blob (`~/Library/Application Support/FlowState/blobs/<id>.json`) + `payloadRef` | Keeps DB lean; lazy-load on expand |
+
+**Implementation checklist**:
+- [ ] Audit OpenCode `client.event.subscribe()` and document all event types we need to capture
+- [ ] Expand `ProcessManager.startEventStream` to forward *all* relevant events (tool.*, permission.*, message.*, session.*, error.*) with redaction of secrets (`/token|secret|key|password|credential|bearer/i`)
+- [ ] Create `TimelineEventNormalizer` class in main process: raw OpenCode event → `TimelineEvent`
+- [ ] Implement `TimelineStore` (SQLite table + blob dir) with append, query-by-session, and retention (90-day default, configurable)
+- [ ] Build `<ActivityTimeline>` React component: auto-scroll, collapsible in Chat (shows latest step inline), fully expanded in Tasks "Run Details"
+- [ ] Inline approval cards within timeline when `kind === 'approval_request'`
+- [ ] Add "Developer Mode" toggle (Settings): shows raw JSON + full payloads; secrets *still* redacted even in dev mode
+- [ ] Add "Export Debug Bundle" action per run: zips messages + timeline + blobs (with explicit user warning)
+
+**UI behavior**:
+```
+Chat Mode (collapsed):
+┌─────────────────────────────────────────────────────────┐
+│ ⏳ Searching Gmail for unread emails…            [▾]   │
+└─────────────────────────────────────────────────────────┘
+
+Chat Mode (expanded via [▾]):
+┌─────────────────────────────────────────────────────────┐
+│  Activity                                               │
+│  ───────────────────────────────────────────────────────│
+│  ✓ Understanding your request                   2:34:01│
+│  ✓ Searching Gmail (gmail_search)               2:34:03│
+│  ✓ Found 23 unread messages                     2:34:05│
+│  ⏳ Reading email from Sarah…                   2:34:07│
+│                                                         │
+│  ┌─────────────────────────────────────────────────────┐
+│  │ 📧 Approval Required                                │
+│  │ Send reply to sarah@example.com                     │
+│  │ [Approve]  [Always Approve]  [Deny]                 │
+│  └─────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────┘
+
+Tasks Mode "Run Details": same timeline, always expanded, virtualized for long runs.
+```
+
+---
+
+#### Phase 4 Additions: MCP Efficiency (Gmail-first) — Smart Metadata Defaults
+> Goal: reduce LLM context/token cost by returning lean, structured data by default. Full bodies are fetched *only* on explicit request.
+
+**Default response shape** for `gmail_list` / `gmail_search`:
+```typescript
+// Per message (default detailLevel: 'metadata')
+{
+  id: string;
+  threadId: string;
+  snippet: string;            // ~100 char preview
+  headers: {
+    from: string;
+    to: string;
+    subject: string;
+    date: string;             // ISO 8601
+  };
+  labelIds: string[];         // e.g. ["INBOX", "UNREAD"]
+  // NO body, NO attachments, NO raw payload
+}
+```
+
+**Controlled expansion** via optional params on `gmail_read`:
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `detailLevel` | `'ids'` \| `'metadata'` \| `'full'` | `'metadata'` | How much data to return |
+| `maxBodyChars` | `number` | `2000` | Truncate body to N chars (full mode) |
+| `includeHtml` | `boolean` | `false` | Return HTML part if available |
+
+**New tool**: `gmail_get_thread`
+```typescript
+gmail_get_thread({
+  threadId: string;
+  maxMessages?: number;       // default 5
+  detailLevel?: 'metadata' | 'full';
+})
+```
+
+**Implementation checklist**:
+- [ ] Refactor `gmail_list` / `gmail_search` to use Gmail API `format: 'metadata'` + `fields` param for partial response
+- [ ] Refactor `gmail_read` to accept `detailLevel`, `maxBodyChars`, `includeHtml`; default to metadata-only
+- [ ] Add `gmail_get_thread` tool with `maxMessages` limit
+- [ ] Implement LRU in-memory cache (100 messages) in Gmail MCP to avoid repeat fetches within a session
+- [ ] Add guardrails: `maxResults` default 10 (cap 50), body truncation, and `contentRef` handle for oversized payloads (>50KB) so UI can lazy-expand
+- [ ] Update FlowState agent prompt to follow two-step pattern: (1) list/search metadata, (2) selectively `gmail_read` top N messages
+- [ ] Update workflow templates (e.g. `inbox-review`) to use lean tools
+
+**Token savings estimate**: typical inbox scan drops from ~80K tokens (full payloads for 20 emails) to ~4K tokens (metadata only), with selective reads adding ~2K per expanded email.
 
 ### Phase 5: Workflows (Weeks 9-10)
 - [ ] Build Workflows mode UI

@@ -41,12 +41,14 @@ interface IntegrationsState {
   
   // OAuth flow
   connectingService: string | null;
+  onboardingConnectId: string | null;
   
   // Actions
   setIntegrations: (integrations: Integration[]) => void;
   updateIntegration: (id: string, updates: Partial<Integration>) => void;
   setConnecting: (service: string | null) => void;
   setLoading: (loading: boolean) => void;
+  setOnboardingConnect: (service: string | null) => void;
   loadIntegrations: () => Promise<void>;
   connect: (service: string) => Promise<void>;
   disconnect: (service: string) => Promise<void>;
@@ -112,6 +114,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
   integrations: DEFAULT_INTEGRATIONS,
   isLoading: false,
   connectingService: null,
+  onboardingConnectId: null,
 
   // Actions
   setIntegrations: (integrations) => {
@@ -135,6 +138,10 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
 
   setLoading: (loading) => {
     set({ isLoading: loading });
+  },
+
+  setOnboardingConnect: (service) => {
+    set({ onboardingConnectId: service });
   },
 
   loadIntegrations: async () => {

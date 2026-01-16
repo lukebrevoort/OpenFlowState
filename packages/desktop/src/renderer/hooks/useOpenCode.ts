@@ -11,7 +11,7 @@
 import { useEffect, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import { useConfigStore } from '../stores/configStore';
-import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError } from '../types/electron';
+import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError, TimelineEvent } from '../types/electron';
 
 let listenersInitialized = false;
 
@@ -19,6 +19,9 @@ export function useOpenCode() {
   const {
     addUserMessage,
     addAssistantMessage,
+    addTimelineEvent,
+    setHandoffTaskFromTimeline,
+    updateActiveTask,
     setStatus,
     setError,
     setCurrentSessionId,
@@ -29,6 +32,8 @@ export function useOpenCode() {
     error,
     currentSessionId,
     sessions,
+    timeline,
+    activeTask,
   } = useChatStore();
 
   const { setOpenCodeStatus, refreshStatus } = useConfigStore();
@@ -68,6 +73,33 @@ export function useOpenCode() {
       console.log('OpenCode event:', event);
     });
 
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((event: TimelineEvent) => {
+      addTimelineEvent(event);
+      if (event.kind === 'status' && event.title === 'Task promoted') {
+        setHandoffTaskFromTimeline(event);
+      }
+
+      if (event.kind === 'approval_request') {
+        updateActiveTask({ status: 'waiting_approval' });
+      }
+
+      if (event.kind === 'approval_response') {
+        updateActiveTask({ status: 'running' });
+      }
+
+      if (event.kind === 'error') {
+        updateActiveTask({ status: 'failed' });
+      }
+
+      if (event.kind === 'status' && event.title === 'Task completed') {
+        updateActiveTask({ status: 'completed' });
+      }
+
+      if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
+        updateActiveTask({ summary: event.detail, summarySent: false });
+      }
+    });
+
     // Initial status check
     refreshStatus();
 
@@ -78,15 +110,33 @@ export function useOpenCode() {
       removeProgressListener();
       removeErrorListener();
       removeEventListener();
+      removeTimelineListener();
       listenersInitialized = false;
     };
-  }, [addAssistantMessage, setStatus, setError, setCurrentSessionId, refreshStatus]);
+  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus]);
+
+  useEffect(() => {
+    if (activeTask?.status === 'completed' && activeTask.summary && !activeTask.summarySent) {
+      addAssistantMessage({
+        id: `summary-${Date.now()}`,
+        role: 'assistant',
+        content: activeTask.summary,
+        timestamp: new Date().toISOString(),
+      });
+      updateActiveTask({ summarySent: true });
+    }
+  }, [activeTask, addAssistantMessage, updateActiveTask]);
 
   /**
    * Send a message to OpenCode
    */
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim()) return;
+
+    if (activeTask && activeTask.status === 'running') {
+      setError('Another task is already running for this conversation.');
+      return { success: false, error: 'Task already running' };
+    }
 
     // Add user message to store immediately
     addUserMessage(content);
@@ -104,12 +154,16 @@ export function useOpenCode() {
           content: result.content || `Error: ${result.error}`,
           timestamp: new Date().toISOString(),
         });
+        return { success: false, error: result.error };
       }
+
+      return { success: true };
     } catch (err) {
       console.error('Failed to send message:', err);
       setError(err instanceof Error ? err.message : 'Failed to send message');
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to send message' };
     }
-  }, [addUserMessage, setError, addAssistantMessage]);
+  }, [activeTask, addUserMessage, setError, addAssistantMessage]);
 
   /**
    * Create a new session
@@ -120,6 +174,8 @@ export function useOpenCode() {
       setCurrentSessionId(result.sessionId);
       // Clear messages for new session
       useChatStore.getState().clearMessages();
+      useChatStore.getState().clearTimeline();
+      useChatStore.getState().setActiveTask(null);
       return result.sessionId;
     } catch (err) {
       console.error('Failed to create session:', err);
@@ -138,6 +194,9 @@ export function useOpenCode() {
       // Load messages for the session
       const messages = await window.flowstate.opencode.getMessages();
       loadMessages(messages);
+
+      const timeline = await window.flowstate.timeline.list(sessionId, 100, 0);
+      useChatStore.getState().loadTimelineEvents(timeline);
     } catch (err) {
       console.error('Failed to switch session:', err);
       throw err;

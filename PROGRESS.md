@@ -49,6 +49,10 @@
 | Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
 | Jan 2026 | **Model Provider Choice** | Ask user in onboarding, default to Zen | **New** |
 | Jan 2026 | **opencode/grok-code as default** | Fast, capable model for initial testing | **New** |
+| Jan 2026 | **Unified Real-Time Timeline** | Single chronological feed for tool calls/approvals/status (no tabs) | **New** |
+| Jan 2026 | **Hybrid Timeline Storage** | SQLite metadata + disk blobs for large payloads (≥10KB) | **New** |
+| Jan 2026 | **Smart Metadata Gmail Defaults** | Snippet + headers + labels by default; full body on-demand only | **New** |
+| Jan 2026 | **Always Redact Secrets** | Strip tokens/keys even in Developer Mode; export requires explicit action | **New** |
 
 ---
 
@@ -733,5 +737,112 @@ packages/desktop/src/
 - Run `pnpm dev:desktop` and confirm the chat header layers look stable again.
 
 ---
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 2 - Providers + Connect CTA)
+**Timestamp**: Jan 15, 2026 11:35
+**TASKS COMPLETED**
+- ✅ Refined secondary button styling and swapped onboarding secondary CTAs to ghost buttons for cleaner contrast.
+- ✅ Added provider + model selection sourced from `opencode models`, plus model dropdowns and provider setup CTA in onboarding.
+- ✅ Introduced provider/auth helper data (`providerData.ts`, `providerAuth.ts`) and new provider state store for model persistence.
+- ✅ Wired onboarding connect buttons to open the existing Integrations modal via shared store flagging.
+- ✅ Added terminal-based OpenCode auth launcher and Settings debug option to reset onboarding.
+- ✅ Fixed Integrations update loop by removing unstable hook dependencies.
+- ✅ Added fallback + terminal launch guard when `openTerminal` is missing in renderer.
+- ✅ Wired headless OpenCode to use persisted `provider.default` model and restart after onboarding.
+- ✅ Reverted priming and instead inject FlowState system prompt per message to avoid developer-mode responses.
+**IN PROGRESS**
+- [ ] Phase 4: integrate OpenCode provider auth UI (embedded vs external) and finalize approvals/tasks polish.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Rebuild/restart the desktop app so the preload + headless model changes take effect.
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 3 - Timeline + Gmail Efficiency)
+**Timestamp**: Jan 15, 2026 14:10
+**TASKS COMPLETED**
+- ✅ Added timeline storage foundation (`timeline-types.ts`, `timeline-store.ts`) with SQLite metadata + blob storage for large payloads.
+- ✅ Implemented OpenCode timeline normalization + redaction (`timeline-normalizer.ts`) and wired event persistence from the OpenCode event stream.
+- ✅ Added timeline IPC endpoints + preload API (`timeline:list`, `timeline:payload`, `timeline:event`) for renderer consumption.
+- ✅ Introduced Gmail MCP efficiency upgrades: metadata-first list/search/read, new `gmail_get_thread`, default body truncation, and HTML stripping toggle.
+- ✅ Added in-memory LRU caches for Gmail messages + threads to reduce repeat fetch cost.
+- ✅ Fixed ChatMode overflow by confining scroll to the message list and preserving the header/composer layout for long conversations.
+**IN PROGRESS**
+- [ ] Render timeline events in Chat/Tasks UI and add approval cards inline.
+- [ ] Add developer-mode payload viewer (redacted) + debug bundle export.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Build Activity Timeline component and wire it to `chatStore.timeline`.
+- Update agent/workflow prompts to use metadata-first Gmail tools.
+- Run `pnpm -C packages/desktop run build` and `pnpm -C packages/mcp-gmail run build` to validate.
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 4 - Timeline UI + Task Promotion Spec)
+**Timestamp**: Jan 15, 2026 15:30
+**TASKS COMPLETED**
+- ✅ Added Activity Timeline component and surfaced it in Chat + Tasks UI with collapsed/expanded behavior.
+- ✅ Removed "Keep in Chat" from Task handoff; Chat now only offers "View Task".
+- ✅ Began wiring timeline events to chat store and session switching so activity persists across sessions.
+- ✅ Defined hybrid task promotion rules and timeline-derived summary behavior in PLAN.md.
+- ✅ Tasks page now derives progress from timeline steps and shows inline timeline details.
+**IN PROGRESS**
+- [ ] Replace sample task data in TasksMode with real task store + taskId routing.
+- [ ] Emit explicit `task.promoted` events from OpenCode/agent to drive task handoff.
+- [ ] Generate final summary message from timeline on task completion.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Implement task store + routing for running tasks and details.
+- Wire approvals into timeline and Task detail view.
+- Run desktop build to validate component wiring.
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 5 - Task MVP + Timeline Wiring)
+**Timestamp**: Jan 15, 2026 16:40
+**TASKS COMPLETED**
+- ✅ Added MVP constraint: one active task per session and documented in PLAN.
+- ✅ Introduced `activeTask` state (task run tracking) and progress updates derived from timeline events.
+- ✅ Added summary injection: task summary becomes the last assistant message once `Task summary` arrives.
+- ✅ Wired Tasks view to live timeline/active task and removed sample-only running tasks.
+- ✅ Added `task.completed`/`task.summary` normalization support for task lifecycle events.
+- ✅ Builds passed (`pnpm -C packages/desktop run build`, `pnpm -C packages/mcp-gmail run build`).
+**IN PROGRESS**
+- [ ] Emit `task.promoted` / `task.completed` / `task.summary` events from agent execution.
+- [ ] Replace remaining mock approvals with real approval data.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Connect OpenCode agent output to task lifecycle events.
+- Finalize task detail routing + run detail view.
+- Replace sample approvals with real approval payloads.
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 6 - Native Module Fix)
+**Timestamp**: Jan 15, 2026 16:55
+**TASKS COMPLETED**
+- ✅ Rebuilt `better-sqlite3` against Electron using `@electron/rebuild` to resolve NODE_MODULE_VERSION mismatch.
+- ✅ Desktop + Gmail MCP builds passed after native module rebuild.
+**IN PROGRESS**
+- [ ] Emit `task.promoted` / `task.completed` / `task.summary` events from agent execution.
+- [ ] Replace remaining mock approvals with real approval data.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Add an Electron rebuild step to the dev flow or a script for repeatability.
+- Continue task lifecycle event wiring.
+
+## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 9 - Task Completion + Timeline UX)
+**Timestamp**: Jan 15, 2026 18:35
+**TASKS COMPLETED**
+- ✅ Added collapsible timeline toggle inside task cards to reduce vertical clutter.
+- ✅ Removed mock task/approval data and tied Tasks view to live timeline + active task.
+- ✅ Added heuristic `task.completed` + `task.summary` emission and summary injection handling.
+- ✅ Task handoff now clears once summary arrives.
+- ✅ Desktop build passes after task completion fix.
+**IN PROGRESS**
+- [ ] Emit explicit task lifecycle events from the agent execution pipeline.
+- [ ] Replace remaining mock approvals with real approval payloads.
+**BLOCKERS**
+- None
+**NEXT STEPS**
+- Wire approval payloads into timeline/approval cards.
+- Finalize task detail routing and summary formatting.
 
 *Update this document after each development session.*

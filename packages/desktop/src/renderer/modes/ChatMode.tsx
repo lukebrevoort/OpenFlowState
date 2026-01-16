@@ -6,6 +6,7 @@ import { useOpenCode } from "../hooks/useOpenCode";
 import { useConfigStore } from "../stores/configStore";
 import type { McpServerStatus } from "../types/electron";
 import { TaskHandoffCard } from "../components/TaskHandoffCard";
+import { ActivityTimeline } from "../components/ActivityTimeline";
 import {
   errorActivityStep,
   initialActivitySteps,
@@ -35,18 +36,19 @@ const getTypingStepSize = (contentLength: number) => {
 /**
  * ChatMode - Primary chat interface for natural language interaction with OpenCode
  */
-function ChatMode() {
+function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const [input, setInput] = useState("");
   const [mcpStatus, setMcpStatus] = useState<Record<
     string,
     McpServerStatus
   > | null>(null);
   const [activitySteps, setActivitySteps] = useState(initialActivitySteps());
+  const [activityIndex, setActivityIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
   const animatedMessagesRef = useRef(new Set<string>());
 
-  const { messages, isLoading, status, error, currentSessionId, handoffTask } =
+  const { messages, isLoading, status, error, currentSessionId, handoffTask, timeline } =
     useChatStore();
   const { sendMessage, checkStatus } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
@@ -101,18 +103,31 @@ function ChatMode() {
   }, []);
 
   useEffect(() => {
+    if (status !== "thinking" || activitySteps.length <= 1) return undefined;
+
+    const interval = window.setInterval(() => {
+      setActivityIndex((prev) => (prev + 1) % activitySteps.length);
+    }, 2400);
+
+    return () => window.clearInterval(interval);
+  }, [status, activitySteps]);
+
+  useEffect(() => {
     const previousStatus = previousStatusRef.current;
 
     if (status === "thinking" && previousStatus !== "thinking") {
       setActivitySteps(initialActivitySteps());
+      setActivityIndex(0);
     }
 
     if (status === "error") {
       setActivitySteps([errorActivityStep()]);
+      setActivityIndex(0);
     }
 
     if (status === "idle" && previousStatus === "thinking") {
       setActivitySteps([]);
+      setActivityIndex(0);
     }
 
     previousStatusRef.current = status;
@@ -156,7 +171,7 @@ function ChatMode() {
     ? `Provider: ${config.provider.default}`
     : "Loading config...";
 
-  const currentActivity = activitySteps[activitySteps.length - 1];
+  const currentActivity = activitySteps[activityIndex] ?? activitySteps[activitySteps.length - 1];
   const activityTitle =
     currentActivity?.title ??
     (status === "thinking"
@@ -319,8 +334,8 @@ function ChatMode() {
   };
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex-shrink-0 px-6 pt-8">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 px-6 pt-4">
         <div className="max-w-4xl mx-auto">
           <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
@@ -352,6 +367,17 @@ function ChatMode() {
               <p className="mt-2 text-xs text-muted-foreground">
                 {activityDetail}
               </p>
+            )}
+            {timeline.length > 0 && (
+              <div className="mt-2">
+                <ActivityTimeline
+                  events={timeline}
+                  title="Activity"
+                  collapsed
+                  maxItems={1}
+                  variant="compact"
+                />
+              </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
               <span className="rounded-full border border-border px-3 py-1 text-muted-foreground">
@@ -407,8 +433,8 @@ function ChatMode() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-4 scrollbar-hide">
+      <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
+        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -464,8 +490,7 @@ function ChatMode() {
             <TaskHandoffCard
               title={handoffTask.title}
               description={handoffTask.description}
-              onViewTask={() => console.log("View task", handoffTask.id)}
-              onKeepInChat={() => console.log("Keep in chat", handoffTask.id)}
+              onViewTask={onViewTask}
             />
           </div>
         </div>
