@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Star, Edit2, Play, MoreVertical, Copy, Trash2 } from 'lucide-react';
+import { Star, Edit2, Play, MoreVertical, Copy, Trash2, Newspaper, PenLine, BarChart3, Mic, Search, Mail } from 'lucide-react';
 
 interface Workflow {
   id: number;
   name: string;
   description: string;
-  icon: string;
+  icon: typeof Newspaper;
   isPinned: boolean;
   lastRun?: Date;
   runCount: number;
@@ -31,10 +31,10 @@ function WorkflowCard({
 
       <div className="mb-4">
         <div
-          className="w-14 h-14 rounded-xl flex items-center justify-center shadow-md text-2xl"
+          className="w-14 h-14 rounded-xl flex items-center justify-center shadow-md"
           style={{ backgroundColor: workflow.color }}
         >
-          {workflow.icon}
+          <workflow.icon className="h-6 w-6 text-white" />
         </div>
       </div>
 
@@ -122,7 +122,7 @@ function WorkflowsMode() {
       id: 1,
       name: 'Daily Briefing',
       description: 'Summarize emails, calendar events, and top news each morning',
-      icon: '📰',
+      icon: Newspaper,
       isPinned: true,
       lastRun: new Date(Date.now() - 86400000),
       runCount: 147,
@@ -132,7 +132,7 @@ function WorkflowsMode() {
       id: 2,
       name: 'Content Generator',
       description: 'Create blog posts, social media content, and marketing copy',
-      icon: '✍️',
+      icon: PenLine,
       isPinned: true,
       lastRun: new Date(Date.now() - 3600000),
       runCount: 89,
@@ -142,7 +142,7 @@ function WorkflowsMode() {
       id: 3,
       name: 'Data Analyzer',
       description: 'Process spreadsheets, generate reports, and identify trends',
-      icon: '📊',
+      icon: BarChart3,
       isPinned: false,
       lastRun: new Date(Date.now() - 7200000),
       runCount: 63,
@@ -152,7 +152,7 @@ function WorkflowsMode() {
       id: 4,
       name: 'Meeting Assistant',
       description: 'Transcribe meetings, create action items, and send summaries',
-      icon: '🎙️',
+      icon: Mic,
       isPinned: false,
       lastRun: new Date(Date.now() - 172800000),
       runCount: 34,
@@ -162,7 +162,7 @@ function WorkflowsMode() {
       id: 5,
       name: 'Research Helper',
       description: 'Gather information, summarize articles, and compile references',
-      icon: '🔍',
+      icon: Search,
       isPinned: true,
       lastRun: new Date(Date.now() - 259200000),
       runCount: 128,
@@ -172,7 +172,7 @@ function WorkflowsMode() {
       id: 6,
       name: 'Email Composer',
       description: 'Draft professional emails, responses, and follow-ups',
-      icon: '✉️',
+      icon: Mail,
       isPinned: false,
       lastRun: new Date(Date.now() - 432000000),
       runCount: 201,

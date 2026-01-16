@@ -42,15 +42,22 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     string,
     McpServerStatus
   > | null>(null);
-  const [activitySteps, setActivitySteps] = useState(initialActivitySteps());
+  const [activitySteps, setActivitySteps] = useState<ReturnType<typeof initialActivitySteps>>([]);
   const [activityIndex, setActivityIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
   const animatedMessagesRef = useRef(new Set<string>());
 
-  const { messages, isLoading, status, error, currentSessionId, handoffTask, timeline } =
-    useChatStore();
-  const { sendMessage, checkStatus } = useOpenCode();
+  const {
+    messages,
+    isLoading,
+    status,
+    error,
+    currentSessionId,
+    handoffTask,
+    timeline,
+  } = useChatStore();
+  const { sendMessage, checkStatus, refreshTimeline } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
   useEffect(() => {
@@ -94,13 +101,14 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     if (!window.flowstate?.opencode?.onEvent) return undefined;
 
     const removeEvent = window.flowstate.opencode.onEvent((event) => {
+      if (status !== 'thinking') return;
       const step = stepFromOpenCodeEvent(event);
       if (!step) return;
       setActivitySteps((prev) => mergeActivityStep(prev, step));
     });
 
     return removeEvent;
-  }, []);
+  }, [status]);
 
   useEffect(() => {
     if (status !== "thinking" || activitySteps.length <= 1) return undefined;
@@ -139,7 +147,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     const message = input.trim();
     setInput("");
 
-    await sendMessage(message);
+    const result = await sendMessage(message);
+    if (result?.success) {
+      refreshTimeline();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -171,7 +182,8 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     ? `Provider: ${config.provider.default}`
     : "Loading config...";
 
-  const currentActivity = activitySteps[activityIndex] ?? activitySteps[activitySteps.length - 1];
+  const currentActivity =
+    activitySteps[activityIndex] ?? activitySteps[activitySteps.length - 1];
   const activityTitle =
     currentActivity?.title ??
     (status === "thinking"
@@ -359,7 +371,6 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 </div>
               </div>
               <div className="text-xs text-muted-foreground text-right">
-                <p>{openCodeLabel}</p>
                 <p>{providerLabel}</p>
               </div>
             </div>

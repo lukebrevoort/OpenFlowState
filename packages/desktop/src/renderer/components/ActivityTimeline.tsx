@@ -32,6 +32,7 @@ interface ActivityTimelineProps {
   title?: string;
   collapsed?: boolean;
   maxItems?: number;
+  maxItemsExpanded?: number;
   emptyMessage?: string;
   variant?: 'default' | 'compact';
 }
@@ -41,6 +42,7 @@ export function ActivityTimeline({
   title = 'Activity',
   collapsed = false,
   maxItems = 5,
+  maxItemsExpanded = 20,
   emptyMessage = 'No activity yet',
   variant = 'default',
 }: ActivityTimelineProps) {
@@ -56,9 +58,20 @@ export function ActivityTimeline({
     );
   }
 
-  const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
-  const visible = collapsed ? sorted.slice(-maxItems) : sorted;
-  const latest = visible[visible.length - 1];
+  const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
+  const seenKeys = new Set<string>();
+  const deduped = sorted.filter((event) => {
+    const key = `${event.kind}-${event.title}-${event.detail ?? ''}-${event.toolName ?? ''}`;
+    if (seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+    return true;
+  });
+  const visible = collapsed
+    ? deduped.slice(0, maxItems)
+    : deduped.slice(0, maxItemsExpanded);
+  const latest = visible[0];
 
   if (variant === 'compact') {
     const Icon = iconByKind[latest.kind] ?? Loader2;
@@ -95,7 +108,7 @@ export function ActivityTimeline({
     <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <span className="text-xs text-muted-foreground">{sorted.length} steps</span>
+        <span className="text-xs text-muted-foreground">{deduped.length} steps</span>
       </div>
       <div className="mt-4 space-y-3">
         {visible.map((event, index) => {

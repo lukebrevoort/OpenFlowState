@@ -215,6 +215,16 @@ export function useOpenCode() {
     }
   }, [setSessions]);
 
+  const refreshTimeline = useCallback(async () => {
+    if (!currentSessionId) return;
+    try {
+      const timeline = await window.flowstate.timeline.list(currentSessionId, 100, 0);
+      useChatStore.getState().loadTimelineEvents(timeline);
+    } catch (err) {
+      console.error('Failed to refresh timeline:', err);
+    }
+  }, [currentSessionId]);
+
   /**
    * Check OpenCode status
    */
@@ -242,6 +252,7 @@ export function useOpenCode() {
     createSession,
     switchSession,
     refreshSessions,
+    refreshTimeline,
     checkStatus,
   };
 }

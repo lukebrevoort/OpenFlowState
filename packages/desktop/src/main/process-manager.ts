@@ -30,7 +30,7 @@ class ProcessManager {
   private timelineInitialized = false;
   private taskPromotionState = new Map<
     string,
-    { promoted: boolean; completed: boolean; startAt: number; toolCalls: number }
+    { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
 
   constructor() {
@@ -421,6 +421,8 @@ class ProcessManager {
 
     const systemPrompt = this.flowstatePrompt ?? undefined;
 
+    this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+
     // Notify renderer that we're processing
     if (webContents) {
       webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
@@ -446,9 +448,19 @@ class ProcessManager {
         .map((p: { type: string; text?: string }) => p.text || '')
         .join('') || '';
 
-      // Notify renderer of completion
+      // Send the complete message to renderer
+      const assistantMessage = {
+        id: (result.data as { info?: { id?: string } })?.info?.id || Date.now().toString(),
+        role: 'assistant' as const,
+        content: textContent,
+        timestamp: new Date().toISOString(),
+        parts: parts,
+      };
+
       if (webContents) {
+        webContents.send('opencode:message', assistantMessage);
         webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
+        this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
       }
 
       return {
@@ -484,6 +496,8 @@ class ProcessManager {
 
     const systemPrompt = this.flowstatePrompt ?? undefined;
 
+    this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+
     // Notify renderer that we're processing
     webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
 
@@ -507,6 +521,8 @@ class ProcessManager {
         .filter((p: { type: string }) => p.type === 'text')
         .map((p: { type: string; text?: string }) => p.text || '')
         .join('') || '';
+
+      this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
 
       // Send the complete message to renderer
       const assistantMessage = {
@@ -562,40 +578,44 @@ class ProcessManager {
             break;
           }
 
-          // Type the event
-          const typedEvent = event as { type?: string; properties?: unknown };
+            // Type the event
+            const typedEvent = event as { type?: string; properties?: unknown };
 
-           // Forward relevant events to renderer
-           if (typedEvent.type) {
-             webContents.send('opencode:event', {
-               type: typedEvent.type,
-               data: typedEvent.properties,
-             });
+            // Forward relevant events to renderer
+            if (typedEvent.type) {
+              webContents.send('opencode:event', {
+                type: typedEvent.type,
+                data: typedEvent.properties,
+              });
 
-             const sessionId =
-               this.activeSessionId ??
-               (typeof typedEvent.properties === 'object' && typedEvent.properties
-                 ? (typedEvent.properties as { sessionId?: string }).sessionId
-                 : undefined) ??
-               'unknown-session';
-             const normalized = normalizeOpenCodeEvent(
-               { type: typedEvent.type, properties: typedEvent.properties },
-               sessionId
-             );
-             if (normalized) {
-               try {
-                 const stored = await timelineStore.appendWithPayload({
-                   ...normalized.event,
-                   redacted: normalized.redacted,
-                   payload: normalized.payload,
-                 });
-                 webContents.send('timeline:event', stored);
-                 this.trackTaskPromotion(sessionId, normalized.event, webContents);
-               } catch (error) {
-                 console.warn('[ProcessManager] Failed to persist timeline event:', error);
-               }
-             }
-           }
+              const payloadSessionId =
+                typeof typedEvent.properties === 'object' && typedEvent.properties
+                  ? (typedEvent.properties as { sessionId?: string }).sessionId
+                  : undefined;
+              const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
+              const normalized = normalizeOpenCodeEvent(
+                { type: typedEvent.type, properties: typedEvent.properties },
+                sessionId
+              );
+              if (normalized) {
+                const shouldStore = this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId);
+                if (!shouldStore) {
+                  continue;
+                }
+                try {
+                  const stored = await timelineStore.appendWithPayload({
+                    ...normalized.event,
+                    redacted: normalized.redacted,
+                    payload: normalized.payload,
+                  });
+                  webContents.send('timeline:event', stored);
+                  this.trackTaskPromotion(sessionId, normalized.event, webContents);
+                } catch (error) {
+                  console.warn('[ProcessManager] Failed to persist timeline event:', error);
+                }
+              }
+            }
+
 
         }
       } catch (error) {
@@ -670,12 +690,10 @@ class ProcessManager {
     event: { kind: string; title: string; detail?: string; timestamp: number },
     webContents: Electron.WebContents
   ) {
-    const state = this.taskPromotionState.get(sessionId) ?? {
-      promoted: false,
-      completed: false,
-      startAt: Date.now(),
-      toolCalls: 0,
-    };
+    const state = this.taskPromotionState.get(sessionId);
+    if (!state) {
+      return;
+    }
 
     if (event.kind === 'tool_call') {
       state.toolCalls += 1;
@@ -700,7 +718,7 @@ class ProcessManager {
           properties: {
             sessionId,
             taskId: `task-${sessionId}`,
-            summary: event.detail ?? 'Task promoted from long-running request',
+            summary: state.message ?? event.detail ?? 'Task promoted from long-running request',
           },
         },
         sessionId
@@ -718,59 +736,116 @@ class ProcessManager {
       }
     }
 
-    const shouldComplete = state.promoted && !state.completed && event.kind === 'phase' && event.title === 'Drafting response';
+    this.taskPromotionState.set(sessionId, state);
+  }
 
-    if (shouldComplete) {
-      state.completed = true;
-      const completion = normalizeOpenCodeEvent(
+  private clearTaskTracking(sessionId: string) {
+    this.taskPromotionState.delete(sessionId);
+  }
+
+  private finishTaskTracking(sessionId: string, webContents: Electron.WebContents, detail?: string) {
+    const state = this.taskPromotionState.get(sessionId);
+    if (!state || state.completed) {
+      return;
+    }
+
+    if (!state.promoted) {
+      state.promoted = true;
+      const promotion = normalizeOpenCodeEvent(
         {
-          type: 'task.completed',
+          type: 'task.promoted',
           properties: {
             sessionId,
             taskId: `task-${sessionId}`,
-            summary: event.detail ?? 'Task completed',
+            summary: state.message ?? detail ?? 'Task promoted from long-running request',
           },
         },
         sessionId
       );
-      if (completion) {
+      if (promotion) {
         timelineStore.appendWithPayload({
-          ...completion.event,
-          redacted: completion.redacted,
-          payload: completion.payload,
+          ...promotion.event,
+          redacted: promotion.redacted,
+          payload: promotion.payload,
         }).then((stored) => {
           webContents.send('timeline:event', stored);
         }).catch((error) => {
-          console.warn('[ProcessManager] Failed to persist completion event:', error);
-        });
-      }
-
-      const summary = normalizeOpenCodeEvent(
-        {
-          type: 'task.summary',
-          properties: {
-            sessionId,
-            taskId: `task-${sessionId}`,
-            summary: event.detail ?? 'Task summary available',
-          },
-        },
-        sessionId
-      );
-      if (summary) {
-        timelineStore.appendWithPayload({
-          ...summary.event,
-          redacted: summary.redacted,
-          payload: summary.payload,
-        }).then((stored) => {
-          webContents.send('timeline:event', stored);
-        }).catch((error) => {
-          console.warn('[ProcessManager] Failed to persist summary event:', error);
+          console.warn('[ProcessManager] Failed to persist promotion event:', error);
         });
       }
     }
 
-    this.taskPromotionState.set(sessionId, state);
+    state.completed = true;
+
+    const completion = normalizeOpenCodeEvent(
+      {
+        type: 'task.completed',
+        properties: {
+          sessionId,
+          taskId: `task-${sessionId}`,
+          summary: detail ?? 'Task completed',
+        },
+      },
+      sessionId
+    );
+    if (completion) {
+      timelineStore.appendWithPayload({
+        ...completion.event,
+        redacted: completion.redacted,
+        payload: completion.payload,
+      }).then((stored) => {
+        webContents.send('timeline:event', stored);
+      }).catch((error) => {
+        console.warn('[ProcessManager] Failed to persist completion event:', error);
+      });
+    }
+
+    const summary = normalizeOpenCodeEvent(
+      {
+        type: 'task.summary',
+        properties: {
+          sessionId,
+          taskId: `task-${sessionId}`,
+          summary: detail ?? 'Task summary available',
+        },
+      },
+      sessionId
+    );
+    if (summary) {
+      timelineStore.appendWithPayload({
+        ...summary.event,
+        redacted: summary.redacted,
+        payload: summary.payload,
+      }).then((stored) => {
+        webContents.send('timeline:event', stored);
+      }).catch((error) => {
+        console.warn('[ProcessManager] Failed to persist summary event:', error);
+      });
+    }
+
+    this.clearTaskTracking(sessionId);
   }
+
+  private startTaskPromotionTracking(sessionId: string, payload?: { message?: string }) {
+    const existing = this.taskPromotionState.get(sessionId);
+    if (existing) {
+      existing.startAt = Date.now();
+      existing.toolCalls = 0;
+      existing.promoted = false;
+      existing.completed = false;
+      this.taskPromotionState.set(sessionId, existing);
+      return;
+    }
+
+    this.taskPromotionState.set(sessionId, {
+      promoted: false,
+      completed: false,
+      startAt: Date.now(),
+      toolCalls: 0,
+      message: payload?.message,
+    });
+  }
+
 
   /**
    * List all sessions

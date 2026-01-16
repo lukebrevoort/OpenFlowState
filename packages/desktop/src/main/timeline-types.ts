@@ -16,7 +16,14 @@ export type TimelineEvent = {
   title: string;
   detail?: string;
   toolName?: string;
-  payloadInline?: unknown;
+  payloadInline?: {
+    title?: string;
+    summary?: string;
+    body?: string;
+    approveLabel?: string;
+    alwaysApproveLabel?: string;
+    denyLabel?: string;
+  } | unknown;
   payloadRef?: string;
   redacted?: boolean;
 };

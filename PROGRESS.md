@@ -828,21 +828,19 @@ packages/desktop/src/
 - Add an Electron rebuild step to the dev flow or a script for repeatability.
 - Continue task lifecycle event wiring.
 
-## Tasks Completed (Jan 15, 2026 - Desktop Phase 4 Session 9 - Task Completion + Timeline UX)
-**Timestamp**: Jan 15, 2026 18:35
+## Tasks Completed (Jan 16, 2026 - Desktop Phase 4 Session 13 - Task Timeline Cleanup)
+**Timestamp**: Jan 16, 2026 11:05
 **TASKS COMPLETED**
-- ✅ Added collapsible timeline toggle inside task cards to reduce vertical clutter.
-- ✅ Removed mock task/approval data and tied Tasks view to live timeline + active task.
-- ✅ Added heuristic `task.completed` + `task.summary` emission and summary injection handling.
-- ✅ Task handoff now clears once summary arrives.
-- ✅ Desktop build passes after task completion fix.
+- ✅ Reordered task timelines so the newest entries appear first and deduped repeated status rows for a shorter activity feed.
+- ✅ Capped expanded timelines to keep the UI focused and updated the task status icon to show completion states.
+- ✅ Desktop build passes (`pnpm -C packages/desktop run build`).
 **IN PROGRESS**
 - [ ] Emit explicit task lifecycle events from the agent execution pipeline.
-- [ ] Replace remaining mock approvals with real approval payloads.
+- [ ] Replace remaining mock approvals with real approval execution (approve/deny handlers).
 **BLOCKERS**
 - None
 **NEXT STEPS**
-- Wire approval payloads into timeline/approval cards.
-- Finalize task detail routing and summary formatting.
+- Wire approve/deny IPC handlers into Tasks approvals.
+- Run the desktop app and verify the activity timeline shows newest items at the top.
 
 *Update this document after each development session.*

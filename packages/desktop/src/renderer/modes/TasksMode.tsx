@@ -35,6 +35,7 @@ function RunningTaskCard({ task }: { task: RunningTask }) {
     processing: 'Processing...',
     finalizing: 'Finalizing...',
   };
+  const isComplete = task.progress >= 100 || task.status === 'finalizing';
 
   return (
     <div className="bg-card/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-sm transition-all duration-300 ease-in-out">
@@ -43,7 +44,11 @@ function RunningTaskCard({ task }: { task: RunningTask }) {
           <h3 className="text-base text-foreground mb-1">{task.title}</h3>
           <p className="text-sm text-muted-foreground">{task.description}</p>
         </div>
-        <Loader2 className="w-5 h-5 text-[#A5B574] animate-spin flex-shrink-0 ml-3" />
+        {isComplete ? (
+          <CheckCircle2 className="w-5 h-5 text-[#4A7C59] flex-shrink-0 ml-3" />
+        ) : (
+          <Loader2 className="w-5 h-5 text-[#A5B574] animate-spin flex-shrink-0 ml-3" />
+        )}
       </div>
 
       <div className="mb-2">
@@ -123,16 +128,22 @@ function TasksMode() {
 
   const runningTasks: RunningTask[] = useMemo(() => {
     if (activeTask) {
+      const timelineEvents = timeline.length > 0 ? timeline : sampleTimeline;
+      const progress = activeTask.progress || deriveProgress(timelineEvents);
+      const status = activeTask.status === 'completed'
+        ? 'finalizing'
+        : progress > 0
+          ? 'processing'
+          : 'analyzing';
+
       return [
         {
           id: activeTask.id,
           title: activeTask.title,
           description: activeTask.description,
-          status: 'processing',
-          timeline: timeline.length > 0 ? timeline : sampleTimeline,
-          progress:
-            activeTask.progress ||
-            deriveProgress(timeline.length > 0 ? timeline : sampleTimeline),
+          status,
+          timeline: timelineEvents,
+          progress,
         },
       ];
     }
@@ -142,12 +153,43 @@ function TasksMode() {
 
   const pendingApprovals = timeline
     .filter((event) => event.kind === 'approval_request')
-    .map((event) => ({
-      id: event.id,
-      title: event.title,
-      summary: event.detail ?? 'Approval required',
-      body: 'Open the task timeline for full context.',
-    }));
+    .map((event) => {
+      const payload = event.payloadInline;
+      const title =
+        typeof payload?.title === 'string'
+          ? payload.title
+          : event.title;
+      const summary =
+        typeof payload?.summary === 'string'
+          ? payload.summary
+          : event.detail ?? 'Approval required';
+      const body =
+        typeof payload?.body === 'string'
+          ? payload.body
+          : 'Open the task timeline for full context.';
+      const approveLabel =
+        typeof payload?.approveLabel === 'string'
+          ? payload.approveLabel
+          : 'Approve';
+      const alwaysApproveLabel =
+        typeof payload?.alwaysApproveLabel === 'string'
+          ? payload.alwaysApproveLabel
+          : 'Always Approve';
+      const denyLabel =
+        typeof payload?.denyLabel === 'string'
+          ? payload.denyLabel
+          : 'Deny';
+
+      return {
+        id: event.id,
+        title,
+        summary,
+        body,
+        approveLabel,
+        alwaysApproveLabel,
+        denyLabel,
+      };
+    });
 
   const completedTasks: CompletedTask[] = activeTask?.status === 'completed'
     ? [
@@ -191,15 +233,19 @@ function TasksMode() {
 
             <div className="grid gap-4">
               {pendingApprovals.map((approval) => (
-                <ApprovalCard
-                  key={approval.id}
-                  title={approval.title}
-                  summary={approval.summary}
-                  body={approval.body}
-                  onApprove={() => console.log('Approved', approval.id)}
-                  onAlwaysApprove={() => console.log('Always approve', approval.id)}
-                  onDeny={() => console.log('Denied', approval.id)}
-                />
+                  <ApprovalCard
+                    key={approval.id}
+                    title={approval.title}
+                    summary={approval.summary}
+                    body={approval.body}
+                    primaryActionLabel={approval.approveLabel}
+                    alwaysApproveLabel={approval.alwaysApproveLabel}
+                    denyLabel={approval.denyLabel}
+                    onApprove={() => console.log('Approved', approval.id)}
+                    onAlwaysApprove={() => console.log('Always approve', approval.id)}
+                    onDeny={() => console.log('Denied', approval.id)}
+                  />
+
               ))}
             </div>
           </div>

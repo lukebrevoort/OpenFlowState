@@ -49,6 +49,35 @@ const extractDetail = (data: OpenCodeEventPayload) => {
   return undefined;
 };
 
+const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: string) => {
+  const titleCandidates = [data.title, data.action, data.intent, data.summary];
+  const summaryCandidates = [data.summary, data.intent, data.action, fallbackDetail];
+  const bodyCandidates = [data.body, data.preview, data.message];
+
+  const pickText = (candidates: unknown[]) => {
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return clampDetail(candidate);
+      }
+    }
+    return undefined;
+  };
+
+  const title = pickText(titleCandidates);
+  const summary = pickText(summaryCandidates);
+  const body = pickText(bodyCandidates);
+
+  return {
+    title,
+    summary,
+    body,
+    approveLabel: typeof data.approveLabel === 'string' ? data.approveLabel : undefined,
+    alwaysApproveLabel:
+      typeof data.alwaysApproveLabel === 'string' ? data.alwaysApproveLabel : undefined,
+    denyLabel: typeof data.denyLabel === 'string' ? data.denyLabel : undefined,
+  };
+};
+
 const redactValue = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map((entry) => redactValue(entry));
@@ -213,14 +242,15 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
   }
 
   if (type.startsWith('permission.') || type.startsWith('approval.')) {
+    const approvalPayload = extractApprovalPayload(sanitizedPayload ?? {}, detail);
     return {
       event: buildBaseEvent({
         sessionId,
         kind: type.includes('approved') ? 'approval_response' : 'approval_request',
-        title: type.includes('approved') ? 'Approval granted' : 'Approval requested',
-        detail: detail ?? 'User approval required',
+        title: approvalPayload.title ?? (type.includes('approved') ? 'Approval granted' : 'Approval requested'),
+        detail: approvalPayload.summary ?? detail ?? 'User approval required',
       }),
-      payload: sanitizedPayload ?? undefined,
+      payload: approvalPayload,
       redacted,
     };
   }

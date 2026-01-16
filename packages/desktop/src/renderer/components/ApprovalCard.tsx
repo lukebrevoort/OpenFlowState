@@ -2,6 +2,9 @@ interface ApprovalCardProps {
   title: string;
   summary: string;
   body: string;
+  primaryActionLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
   onApprove?: () => void;
   onAlwaysApprove?: () => void;
   onDeny?: () => void;
@@ -11,6 +14,9 @@ export function ApprovalCard({
   title,
   summary,
   body,
+  primaryActionLabel = 'Approve',
+  alwaysApproveLabel = 'Always Approve',
+  denyLabel = 'Deny',
   onApprove,
   onAlwaysApprove,
   onDeny,
@@ -37,21 +43,21 @@ export function ApprovalCard({
           onClick={onApprove}
           className="px-4 py-2 rounded-lg border border-border bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm"
         >
-          Approve
+          {primaryActionLabel}
         </button>
         <button
           type="button"
           onClick={onAlwaysApprove}
           className="px-4 py-2 rounded-lg border border-border bg-secondary text-foreground hover:bg-secondary/80 transition-all duration-300 ease-in-out text-sm"
         >
-          Always Approve
+          {alwaysApproveLabel}
         </button>
         <button
           type="button"
           onClick={onDeny}
           className="px-4 py-2 rounded-lg border border-border text-foreground hover:bg-destructive/10 transition-all duration-300 ease-in-out text-sm"
         >
-          Deny
+          {denyLabel}
         </button>
       </div>
     </div>

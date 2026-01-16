@@ -253,7 +253,7 @@ export const useChatStore = create<ChatState>((set) => ({
   },
 
   setHandoffTaskFromTimeline: (event) => {
-    const title = event.title || 'Task promoted';
+    const title = event.detail || event.title || 'Task promoted';
     const taskId = event.taskId ?? event.sessionId;
     set((state) => {
       if (state.activeTask && state.activeTask.status === 'running') {

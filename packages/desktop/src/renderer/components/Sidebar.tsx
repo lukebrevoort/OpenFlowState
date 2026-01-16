@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Workflow, Loader2, Clock, Star, Search } from 'lucide-react';
+import { MessageSquare, Workflow, Loader2, Clock, Star, Search, Mail, FileText, Smartphone } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import flowstateLogo from '../../../assets/flowstate-main-logo.png';
 
@@ -35,9 +35,9 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
   const recentSessions = filteredSessions.slice(0, 3);
 
   const pinnedWorkflows = [
-    { id: '1', title: 'Email Inbox Organizer', icon: '📧' },
-    { id: '2', title: 'Weekly Report Generator', icon: '📊' },
-    { id: '3', title: 'Social Media Scheduler', icon: '📱' },
+    { id: '1', title: 'Email Inbox Organizer', icon: Mail },
+    { id: '2', title: 'Weekly Report Generator', icon: FileText },
+    { id: '3', title: 'Social Media Scheduler', icon: Smartphone },
   ];
 
   const runningTasks = [
@@ -111,17 +111,18 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
               <span>Pinned Workflows</span>
             </div>
             <div className="space-y-0.5">
-              {pinnedWorkflows.map((workflow) => (
-                <button
-                  key={workflow.id}
+                {pinnedWorkflows.map((workflow) => (
+                  <button
+                    key={workflow.id}
                     className="w-full group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-all duration-300 ease-in-out text-left hover:translate-x-1"
-                >
-                  <span className="text-base">{workflow.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-foreground/90 truncate">{workflow.title}</div>
-                  </div>
-                </button>
-              ))}
+                  >
+                    <workflow.icon className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-foreground/90 truncate">{workflow.title}</div>
+                    </div>
+                  </button>
+                ))}
+
             </div>
           </div>
 
