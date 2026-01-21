@@ -33,13 +33,18 @@ const formatDate = (dateStr: string | null): string => {
   });
 };
 
-// Tool definitions with autonomy levels
+// Tool definitions with annotations for better LLM understanding
 const CANVAS_TOOLS = [
-  // ========== READ OPERATIONS (Auto) ==========
+  // ========== READ OPERATIONS (All read-only, safe to auto-execute) ==========
   {
     name: 'canvas_list_courses',
-    description: 'List all enrolled courses for the current student. Returns course names, codes, and enrollment status.',
-    autonomy: 'auto',
+    description: 'List enrolled courses with names, codes, and status',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,8 +62,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_course',
-    description: 'Get detailed information about a specific course',
-    autonomy: 'auto',
+    description: 'Get detailed course information by ID',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -72,8 +82,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_list_assignments',
-    description: 'List all assignments for a course, including due dates and point values. Great for understanding workload and planning study time.',
-    autonomy: 'auto',
+    description: 'List assignments with due dates, points, and submission status',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -84,11 +99,11 @@ const CANVAS_TOOLS = [
         orderBy: {
           type: 'string',
           enum: ['due_at', 'name', 'position'],
-          description: 'How to order assignments (default: due_at)',
+          description: 'Order assignments (default: due_at)',
         },
         includeSubmission: {
           type: 'boolean',
-          description: 'Include submission status for each assignment',
+          description: 'Include your submission status',
         },
       },
       required: ['courseId'],
@@ -96,8 +111,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_assignment',
-    description: 'Get detailed information about a specific assignment including description, rubric, and requirements',
-    autonomy: 'auto',
+    description: 'Get assignment details: description, requirements, and due date',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -115,8 +135,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_upcoming',
-    description: 'Get all upcoming assignments and to-do items across all courses. Essential for daily/weekly planning and prioritization.',
-    autonomy: 'auto',
+    description: 'Get all upcoming assignments and to-do items across all courses',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -124,8 +149,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_grades',
-    description: 'Get current grades for all enrolled courses. Useful for tracking academic progress and identifying courses that need attention.',
-    autonomy: 'auto',
+    description: 'Get current grades for all enrolled courses',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -133,8 +163,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_submission',
-    description: 'Get submission status and grade for a specific assignment',
-    autonomy: 'auto',
+    description: 'Check your submission status and grade for a specific assignment',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -152,8 +187,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_list_announcements',
-    description: 'Get recent announcements from courses. Helps stay informed about class updates, changes, and important notices.',
-    autonomy: 'auto',
+    description: 'Get recent announcements from specified courses',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -164,11 +204,11 @@ const CANVAS_TOOLS = [
         },
         startDate: {
           type: 'string',
-          description: 'Start date for announcements (ISO 8601 format)',
+          description: 'Start date (ISO 8601)',
         },
         endDate: {
           type: 'string',
-          description: 'End date for announcements (ISO 8601 format)',
+          description: 'End date (ISO 8601)',
         },
       },
       required: ['courseIds'],
@@ -176,8 +216,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_list_modules',
-    description: 'List course modules/units. Useful for understanding course structure and what content is available.',
-    autonomy: 'auto',
+    description: 'List course modules/units with item counts and states',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -191,8 +236,13 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_module_items',
-    description: 'Get items within a specific module (pages, files, assignments). Helpful for diving into specific course content.',
-    autonomy: 'auto',
+    description: 'Get items within a specific module (pages, files, assignments)',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -210,18 +260,23 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_get_calendar',
-    description: 'Get calendar events and assignment due dates. Perfect for weekly planning and scheduling study sessions.',
-    autonomy: 'auto',
+    description: 'Get calendar events and assignment due dates in a date range',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
         startDate: {
           type: 'string',
-          description: 'Start date (ISO 8601 format)',
+          description: 'Start date (ISO 8601)',
         },
         endDate: {
           type: 'string',
-          description: 'End date (ISO 8601 format)',
+          description: 'End date (ISO 8601)',
         },
         type: {
           type: 'string',
@@ -234,9 +289,12 @@ const CANVAS_TOOLS = [
 ];
 
 export function registerTools(server: Server): void {
-  // List available tools
+  // List available tools with annotations
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: CANVAS_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: CANVAS_TOOLS.map(({ annotations, ...tool }) => ({
+      ...tool,
+      annotations,
+    })),
   }));
 
   // Handle tool calls
@@ -253,7 +311,6 @@ export function registerTools(server: Server): void {
             includeGrades: args?.includeGrades as boolean | undefined,
           });
           
-          // Format for better readability
           const formatted = courses.map(course => ({
             id: course.id,
             name: course.name,
@@ -295,7 +352,6 @@ export function registerTools(server: Server): void {
             }
           );
           
-          // Format for study planning
           const formatted = assignments.map(a => ({
             id: a.id,
             name: a.name,
@@ -350,7 +406,7 @@ export function registerTools(server: Server): void {
               content: [
                 {
                   type: 'text',
-                  text: 'No upcoming assignments or to-do items! 🎉',
+                  text: 'No upcoming assignments or to-do items!',
                 },
               ],
             };
@@ -378,7 +434,6 @@ export function registerTools(server: Server): void {
         case 'canvas_get_grades': {
           const grades = await canvasApi.getGrades();
           
-          // Get course names
           const courses = await canvasApi.getCourses({ enrollmentState: 'active' });
           const courseMap = new Map(courses.map(c => [c.id, c.name]));
           

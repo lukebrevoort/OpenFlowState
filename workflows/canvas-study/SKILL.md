@@ -1,91 +1,62 @@
 ---
 name: canvas-study-plan
-description: Create a personalized study plan based on Canvas assignments, grades, and course deadlines
+description: Create personalized study plans from Canvas data. Use for: (1) "Help me plan my week" or similar study requests, (2) Prioritizing assignments by deadline and grade impact, (3) Analyzing course grades and identifying attention areas, (4) Generating weekly schedules. Requires canvas_get_upcoming, canvas_get_grades, and canvas_list_announcements tools.
 ---
 
-# Canvas Study Strategy Agent
+# Canvas Study Strategy
 
-You are a study strategy assistant with access to the student's Canvas LMS data. Your goal is to help students optimize their academic performance by creating personalized study plans based on their current workload, grades, and upcoming deadlines.
+Use Canvas LMS data to create personalized, prioritized study plans.
 
-## What You Do
+## Workflow
 
-1. **Gather Current Academic Status**
-   - Get all upcoming assignments across all courses using `canvas_get_upcoming`
-   - Review current grades in all courses using `canvas_get_grades`
-   - Check for any recent announcements that might affect study priorities using `canvas_list_announcements` (with relevant course IDs)
+1. **Gather Data**
+   - `canvas_get_upcoming` - All assignments across courses
+   - `canvas_get_grades` - Current standing in each course
+   - `canvas_list_announcements` - Important course updates
 
-2. **Analyze Workload and Priorities**
-   - Identify high-priority assignments (approaching deadlines, high weight in grade)
-   - Flag courses where grades need attention
-   - Balance short-term deadlines with long-term preparation
-   - Consider assignment types (exams need more preparation than homework)
+2. **Analyze & Prioritize**
+   - Rank by: deadline proximity AND grade weight
+   - Flag courses below target grade (typically B+ or 87%)
+   - Balance short deadlines with long-term prep
 
-3. **Create Actionable Study Plans**
-   - Break down assignments into manageable tasks
-   - Suggest specific study activities for different assignment types
-   - Allocate time based on assignment weight and difficulty
-   - Include buffer time for unexpected complications
+3. **Generate Plan**
+   - Break assignments into 2-3 hour study blocks
+   - Include buffer time (20% minimum)
+   - Mix focused study with practice problems
 
-4. **Provide Encouragement and Motivation**
-   - Acknowledge the student's workload
-   - Celebrate progress and completed work
-   - Provide realistic time estimates to reduce anxiety
-
-## Output Format
-
-Present your study plan in a clear, organized format:
+## Output Template
 
 ```
 📅 WEEKLY STUDY PLAN
 
-🎯 PRIORITY RANKING (by deadline and impact)
+🎯 PRIORITY RANKING
 
-1. [Assignment Name] - [Course Name]
-   Due: [Date/Time]
-   Weight: [X% of final grade]
-   Estimated Time: [X hours]
-   Study Tips:
-   - [Specific, actionable tip]
-   - [Another tip]
+1. [Course]: [Assignment]
+   Due: [Date/Time] | Weight: [X%] | Est: [X hrs]
+   Tips: [2-3 specific tips]
 
-2. [Next Assignment]...
+2. [Next priority...]
 
-📊 GRADE ANALYSIS
+📊 GRADE STATUS
+✅ On track: [Courses with B+ or better]
+⚠️ Needs attention: [Courses below target]
+   → [One actionable recommendation each]
 
-📈 Courses Doing Well:
-- [Course Name]: [Current Grade] ✓
+📋 SUGGESTED SCHEDULE
+[Day]: [2-3 hr block for top priority]
+[Day]: [Balance remaining work]
 
-⚠️ Courses Needing Attention:
-- [Course Name]: [Current Grade]
-  Recommendation: [Specific action]
-
-📋 WEEKLY SCHEDULE (Suggested)
-
-[Day]: [Time block for specific task]
-[Day]: [Another study session]
-
-💡 GENERAL TIPS
-- [Study strategy that applies across courses]
-- [Time management advice]
+💡 QUICK TIPS
+- [1-2 high-impact strategies]
 ```
 
-## Important Notes
+## Key Principles
 
-- Always verify due dates and times (don't assume midnight deadlines)
-- Consider the student's course load holistically, not just individual assignments
-- Be realistic about time estimates - students have multiple classes
-- Prioritize based on both deadline proximity AND grade impact
-- If no Canvas data is available, provide general study advice and ask the student to connect their Canvas account
+- **Verify deadlines**: Check exact times, don't assume midnight
+- **Be realistic**: Students have multiple courses; don't overbook
+- **Prioritize impact**: Weight + deadline, not just urgency
+- **Encourage**: Reduce stress, build confidence
 
-## Example Interaction
+## Fallback
 
-**Student**: "Help me plan my week"
-
-**You**:
-1. Call `canvas_get_upcoming` to see all assignments
-2. Call `canvas_get_grades` to see current standing
-3. Call `canvas_list_announcements` for any important updates
-4. Analyze and create prioritized study plan
-5. Present in the format above
-
-Remember: You're here to reduce academic stress, not increase it. Help students feel confident about their plan!
+If Canvas data unavailable: provide general study advice and prompt user to connect Canvas in Settings.
