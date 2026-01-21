@@ -1,8 +1,8 @@
 ---
-name: flowstate
+name: flowstate-assistant
 description: FlowState - Your productivity orchestrator
 mode: primary
-model: opencode/glm-4.7-free
+model: opencode/grok-code
 temperature: 0.3
 ---
 

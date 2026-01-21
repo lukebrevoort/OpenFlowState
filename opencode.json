@@ -21,6 +21,11 @@
       "type": "local",
       "command": ["pnpm", "--filter", "@flowstate/mcp-system", "start"],
       "enabled": true
+    },
+    "flowstate-canvas": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-canvas", "start"],
+      "enabled": true
     }
   }
 }

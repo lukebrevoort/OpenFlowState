@@ -116,6 +116,25 @@ importers:
         specifier: ^4.5.0
         version: 4.5.7(@types/react@18.3.27)(react@18.3.1)
 
+  packages/mcp-canvas:
+    dependencies:
+      '@flowstate/core':
+        specifier: workspace:*
+        version: link:../core
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.25.2(hono@4.11.4)(zod@4.3.5)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.29
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.29)
+
   packages/mcp-gcal:
     dependencies:
       '@flowstate/core':

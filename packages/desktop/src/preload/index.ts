@@ -46,9 +46,9 @@ const flowstateAPI = {
     getCredentials: (service: string) => ipcRenderer.invoke('auth:getCredentials', service),
     removeCredentials: (service: string) => ipcRenderer.invoke('auth:removeCredentials', service),
 
-    // API token (for Notion Internal Integration, etc.)
-    storeApiToken: (service: string, apiToken: string) =>
-      ipcRenderer.invoke('auth:storeApiToken', service, apiToken),
+    // API token (for Notion Internal Integration, Canvas LMS, etc.)
+    storeApiToken: (service: string, apiToken: string, additionalData?: Record<string, string>) =>
+      ipcRenderer.invoke('auth:storeApiToken', service, apiToken, additionalData),
 
     // Event listener for API token success
     onApiTokenSuccess: (callback: (event: unknown) => void) => {

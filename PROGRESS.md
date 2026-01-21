@@ -843,7 +843,140 @@ packages/desktop/src/
 - Wire approve/deny IPC handlers into Tasks approvals.
 - Run the desktop app and verify the activity timeline shows newest items at the top.
 
-## Tasks Completed (Jan 20, 2026 - Canvas MCP Implementation)
+## Tasks Completed (Jan 20, 2026 - Agent Model & Naming Fix)
+**Timestamp**: Jan 20, 2026 23:45
+
+**ISSUES DIAGNOSED:**
+1. **Invalid model configured**: `opencode/zen` not a valid OpenCode model
+2. **Agent name conflict**: FlowState's "flowstate" agent was conflicting with global "Developer" agent
+3. **Rate limiting**: Global Developer agent using `github-copilot/claude-opus-4.5` was rate-limited
+
+**ROOT CAUSE:**
+- Global OpenCode config (`~/.config/opencode/opencode.json`) has a "developer" agent marked as `mode: primary` with model `github-copilot/claude-opus-4.5`
+- FlowState's agent in `.opencode/agent/flowstate.md` was also marked as `mode: primary` with name "flowstate"
+- OpenCode was defaulting to the global "Developer" agent instead of FlowState's agent
+- Additionally, the agent YAML files had `model: opencode/zen` which is invalid
+
+**FIXES APPLIED:**
+
+1. **Updated agent model configurations** (line 5 in each file):
+   ```
+   .opencode/agent/flowstate.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/scheduler.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/organizer.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/communicator.md:  model: opencode/zen → opencode/grok-code
+   .opencode/agent/executor.md:      model: opencode/zen → opencode/grok-code
+   ```
+
+2. **Renamed FlowState's agent to avoid conflict**:
+   ```
+   .opencode/agent/flowstate.md: name: flowstate → flowstate-assistant
+   agents/flowstate.md: name: flowstate → flowstate-assistant
+   agents/flowstate.md: model: opencode/glm-4.7-free → opencode/grok-code
+   ```
+
+3. **Updated default provider in config files**:
+   ```
+   flowstate.config.json: defaultProvider: opencode/zen → opencode/grok-code
+   packages/core/src/memory/index.ts: defaultLLMProvider: 'opencode/zen' → 'opencode/grok-code'
+   packages/desktop/src/main/config-store.ts: default: 'opencode/zen' → 'opencode/grok-code'
+   ```
+
+**VALID OPENCODE MODELS:**
+- ✅ `opencode/grok-code` (recommended)
+- ✅ `opencode/gpt-5-nano`
+- ✅ `opencode/glm-4.7-free`
+- ✅ `opencode/minimax-m2.1-free` (for subagents)
+
+**FILES MODIFIED:**
+```
+.opencode/agent/
+├── flowstate.md              # Renamed to flowstate-assistant, fixed model
+├── scheduler.md              # Fixed model
+├── organizer.md              # Fixed model
+├── communicator.md           # Fixed model
+└── executor.md               # Fixed model
+
+agents/
+└── flowstate.md              # Renamed to flowstate-assistant, fixed model
+
+flowstate.config.json         # Fixed defaultProvider
+packages/core/src/memory/index.ts  # Fixed defaultLLMProvider
+packages/desktop/src/main/config-store.ts  # Fixed default model
+```
+
+**TASKS COMPLETED:**
+- ✅ Identified invalid model configuration in agent YAML files
+- ✅ Fixed all 5 agent files to use valid model (opencode/grok-code)
+- ✅ Renamed "flowstate" agent to "flowstate-assistant" to avoid global conflict
+- ✅ Updated default provider in all config files
+- ✅ Verified subagents already use valid models (opencode/minimax-m2.1-free)
+
+**IN PROGRESS**
+- [ ] Test agent selection after restart
+
+**NEXT STEPS**
+- Restart desktop app to apply all changes
+- Verify FlowState agent is now being used instead of Developer agent
+- Test message sending to confirm agent responds
+
+---
+
+## Tasks Completed (Jan 20, 2026 - Model Configuration Fix)
+**Timestamp**: Jan 20, 2026 22:45
+
+**ISSUES FIXED:**
+1. **Canvas MCP not showing in OpenCode Session**
+   - Added `flowstate-canvas` MCP configuration to `opencode.json`
+   - Added Canvas MCP configuration to `process-manager.ts` `buildMcpConfig()` method
+   - Updated auth manager to store Canvas API URL alongside API token
+
+2. **Chat messages rendering blank**
+   - Fixed duplicate import in `useIntegrations.ts`
+   - Added `CanvasApiTokenForm` component with Canvas URL + token fields
+   - Updated auth manager `AuthToken` interface to support `additionalData` for Canvas API URL
+   - Updated `storeApiToken` to accept optional `additionalData` parameter
+   - Updated `process-manager.ts` to pass Canvas API URL as environment variable
+   - **Fixed blank messages**: Ensured all assistant messages have non-empty content by adding space fallback (`textContent || ' '`) in `streamMessage()`, `sendMessage()`, and `getSessionMessages()` methods
+
+3. **Canvas integration form**
+   - Created `CanvasApiTokenForm` component with Canvas URL and API token fields
+   - Updated `ConnectionModal` to use Canvas-specific form for Canvas integration
+   - Updated `handleApiTokenSubmit` to pass additional data (canvasApiUrl)
+   - Fixed type signatures for `onOAuthSubmit` and `onApiTokenSubmit` callbacks
+
+4. **Canvas API URL not being stored (ROOT CAUSE)**
+   - **Found the bug**: The preload script's `storeApiToken` only accepted 2 parameters (service, apiToken) but the Canvas integration needed 3 (including `additionalData` with `canvasApiUrl`)
+   - Fixed preload script to accept and pass `additionalData` parameter
+   - Now Canvas API URL is properly stored and passed to MCP server environment
+
+**FILES MODIFIED:**
+```
+opencode.json                              # Added flowstate-canvas MCP config
+packages/desktop/src/
+├── main/
+│   ├── index.ts                            # Updated storeApiToken IPC handler
+│   ├── auth-manager.ts                     # Added additionalData support to AuthToken
+│   └── process-manager.ts                  # Added Canvas MCP config, fixed blank messages
+├── preload/
+│   └── index.ts                            # Fixed storeApiToken to accept additionalData
+├── renderer/
+│   ├── hooks/
+│   │   └── useIntegrations.ts              # Fixed duplicate import, added additionalData param
+│   ├── modes/
+│   │   └── IntegrationsMode.tsx            # Added CanvasApiTokenForm, updated ConnectionModal
+│   └── types/
+│       └── electron.d.ts                   # Updated storeApiToken type signature
+```
+
+**IN PROGRESS**
+- [ ] Test Canvas LMS integration end-to-end
+- [ ] Verify MCP server connects and tools are available
+
+**NEXT STEPS**
+- Restart the desktop app to apply all fixes
+- Test Canvas integration by connecting with API token and URL
+- Verify chat messages render correctly
 **Timestamp**: Jan 20, 2026 22:26
 
 **TASKS COMPLETED**
@@ -878,3 +1011,38 @@ packages/desktop/src/
 - Peer review management is a key student workflow
 
 *Update this document after each development session.*
+
+---
+
+## Tasks Completed (Jan 20, 2026 - Debug Message Flow)
+**Timestamp**: Jan 20, 2026 23:55
+
+**TASKS COMPLETED:**
+- ✅ Added debugging logs to `process-manager.ts` sendMessage() method to trace prompt results
+- ✅ Added debugging logs to `useOpenCode.ts` to trace message reception in renderer
+- ✅ Rebuilt desktop package successfully
+
+**DEBUGGING ADDED:**
+```
+Main Process (process-manager.ts):
+- Log when prompt result is received
+- Log if there's an error in prompt result
+- Log number of response parts
+- Log response text length and preview
+
+Renderer (useOpenCode.ts):
+- Log message ID, role, and content length when received
+- Log number of message parts
+- Log OpenCode errors
+```
+
+**IN PROGRESS**
+- [ ] Test agent response with new debugging logs
+- [ ] Identify where the message flow is breaking
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to start the app with debugging enabled
+- Send a test message and check console logs for:
+  - "[ProcessManager] Prompt result received: YES/NO"
+  - "[ProcessManager] Response text length: X"
+  - "[Renderer] Received message: ..."

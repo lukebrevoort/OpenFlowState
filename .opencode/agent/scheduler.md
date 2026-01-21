@@ -2,7 +2,7 @@
 name: scheduler
 description: Calendar and scheduling specialist
 mode: subagent
-model: opencode/zen
+model: opencode/grok-code
 temperature: 0.2
 tools:
   gcal_*: true

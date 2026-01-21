@@ -49,7 +49,8 @@ export function useOpenCode() {
 
     // Handle incoming messages
     const removeMessageListener = window.flowstate.opencode.onMessage((message: OpenCodeMessage) => {
-      console.log('Received message:', message);
+      console.log('[Renderer] Received message:', message.id, 'role:', message.role, 'content length:', message.content?.length);
+      console.log('[Renderer] Message parts:', message.parts?.length);
       addAssistantMessage(message);
     });
 
@@ -64,7 +65,7 @@ export function useOpenCode() {
 
     // Handle errors
     const removeErrorListener = window.flowstate.opencode.onError((err: OpenCodeError) => {
-      console.error('OpenCode error:', err);
+      console.error('[Renderer] OpenCode error:', err);
       setError(err.error);
     });
 
@@ -131,21 +132,27 @@ export function useOpenCode() {
    * Send a message to OpenCode
    */
   const sendMessage = useCallback(async (content: string) => {
+    console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
 
     if (activeTask && activeTask.status === 'running') {
+      console.log('[Renderer] Task already running, blocking message');
       setError('Another task is already running for this conversation.');
       return { success: false, error: 'Task already running' };
     }
 
     // Add user message to store immediately
+    console.log('[Renderer] Adding user message to store');
     addUserMessage(content);
 
     try {
       // Send to OpenCode (response comes via events)
+      console.log('[Renderer] Calling window.flowstate.opencode.send()...');
       const result = await window.flowstate.opencode.send(content);
+      console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
+        console.error('[Renderer] OpenCode returned error:', result.error);
         setError(result.error);
         // Add error message as assistant response
         addAssistantMessage({

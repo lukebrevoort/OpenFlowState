@@ -42,7 +42,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     string,
     McpServerStatus
   > | null>(null);
-  const [activitySteps, setActivitySteps] = useState<ReturnType<typeof initialActivitySteps>>([]);
+  const [activitySteps, setActivitySteps] = useState<
+    ReturnType<typeof initialActivitySteps>
+  >([]);
   const [activityIndex, setActivityIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
@@ -101,7 +103,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     if (!window.flowstate?.opencode?.onEvent) return undefined;
 
     const removeEvent = window.flowstate.opencode.onEvent((event) => {
-      if (status !== 'thinking') return;
+      if (status !== "thinking") return;
       const step = stepFromOpenCodeEvent(event);
       if (!step) return;
       setActivitySteps((prev) => mergeActivityStep(prev, step));
@@ -468,9 +470,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 )}
                 <div className="text-sm leading-relaxed">
                   {message.role === "user" ? (
-                    <span className="whitespace-pre-wrap">
-                      {message.content}
-                    </span>
+                    <span className="text-secondary">{message.content}</span>
                   ) : (
                     <AssistantMessageContent message={message} />
                   )}
@@ -478,7 +478,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 <div
                   className={`text-xs mt-2 ${
                     message.role === "user"
-                      ? "text-primary-foreground/70"
+                      ? "text-secondary-foreground"
                       : "text-muted-foreground"
                   }`}
                 >

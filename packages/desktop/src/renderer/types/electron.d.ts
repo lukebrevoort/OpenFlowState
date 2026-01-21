@@ -172,8 +172,8 @@ export interface FlowstateAPI {
     getCredentials: (service: string) => Promise<ClientCredentials | null>;
     removeCredentials: (service: string) => Promise<void>;
 
-    // API token (for Notion Internal Integration, etc.)
-    storeApiToken: (service: string, apiToken: string) => Promise<{ success: boolean }>;
+    // API token (for Notion Internal Integration, Canvas LMS, etc.)
+    storeApiToken: (service: string, apiToken: string, additionalData?: Record<string, string>) => Promise<{ success: boolean }>;
     onApiTokenSuccess: (callback: (event: ApiTokenSuccessEvent) => void) => () => void;
   };
 

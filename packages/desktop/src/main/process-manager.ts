@@ -200,6 +200,25 @@ class ProcessManager {
       console.log('[ProcessManager] System MCP configured');
     }
 
+    // Canvas LMS MCP (API token auth)
+    const canvasToken = await authManager.getToken('canvas');
+    const canvasPath = this.verifyMcpServer(packagesDir, 'mcp-canvas');
+    if (canvasToken && canvasPath) {
+      mcpConfig['flowstate-canvas'] = {
+        type: 'local',
+        command: ['node', canvasPath],
+        environment: {
+          CANVAS_API_TOKEN: canvasToken.accessToken,
+          CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
+        },
+        enabled: true,
+        timeout: 10000,
+      };
+      console.log('[ProcessManager] Canvas LMS MCP configured with token');
+    } else if (canvasToken && !canvasPath) {
+      console.error('[ProcessManager] Canvas token found but MCP server not built!');
+    }
+
     console.log('[ProcessManager] Final MCP config keys:', Object.keys(mcpConfig));
     return mcpConfig;
   }
@@ -437,22 +456,35 @@ class ProcessManager {
         },
       });
 
+      console.log('[ProcessManager] Prompt result received:', result.data ? 'YES' : 'NO');
       if (result.error) {
+        console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
         throw new Error(`Prompt failed: ${JSON.stringify(result.error)}`);
+      }
+
+      if (!result.data) {
+        console.error('[ProcessManager] No data in prompt result!');
+        throw new Error('No data in prompt result');
       }
 
       // Extract text content from parts
       const parts = result.data?.parts ?? [];
+      console.log('[ProcessManager] Response parts count:', parts.length);
       const textContent = parts
         .filter((p: { type: string }) => p.type === 'text')
         .map((p: { type: string; text?: string }) => p.text || '')
         .join('') || '';
 
+      console.log('[ProcessManager] Response text length:', textContent.length);
+      if (textContent.length > 0) {
+        console.log('[ProcessManager] Response preview:', textContent.substring(0, 100));
+      }
+
       // Send the complete message to renderer
       const assistantMessage = {
         id: (result.data as { info?: { id?: string } })?.info?.id || Date.now().toString(),
         role: 'assistant' as const,
-        content: textContent,
+        content: textContent || ' ',
         timestamp: new Date().toISOString(),
         parts: parts,
       };
@@ -503,6 +535,7 @@ class ProcessManager {
 
     try {
       // Send the prompt
+      console.log('[ProcessManager] Calling session.prompt()...');
       const result = await this.instance.client.session.prompt({
         path: { id: this.activeSessionId! },
         body: {
@@ -511,16 +544,29 @@ class ProcessManager {
         },
       });
 
+      console.log('[ProcessManager] session.prompt() returned:', result.data ? 'YES' : 'NO');
       if (result.error) {
+        console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
         throw new Error(`Prompt failed: ${JSON.stringify(result.error)}`);
+      }
+
+      if (!result.data) {
+        console.error('[ProcessManager] No data in prompt result!');
+        throw new Error('No data in prompt result');
       }
 
       // Extract text content from parts
       const parts = result.data?.parts ?? [];
+      console.log('[ProcessManager] Response parts count:', parts.length);
       const textContent = parts
         .filter((p: { type: string }) => p.type === 'text')
         .map((p: { type: string; text?: string }) => p.text || '')
         .join('') || '';
+
+      console.log('[ProcessManager] Response text length:', textContent.length);
+      if (textContent.length > 0) {
+        console.log('[ProcessManager] Response preview:', textContent.substring(0, 100));
+      }
 
       this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
 
@@ -528,12 +574,14 @@ class ProcessManager {
       const assistantMessage = {
         id: (result.data as { info?: { id?: string } })?.info?.id || Date.now().toString(),
         role: 'assistant' as const,
-        content: textContent,
+        content: textContent || ' ',
         timestamp: new Date().toISOString(),
         parts: parts,
       };
 
+      console.log('[ProcessManager] Sending message to renderer:', assistantMessage.id, 'content length:', assistantMessage.content.length);
       webContents.send('opencode:message', assistantMessage);
+      console.log('[ProcessManager] Message sent to renderer successfully');
       webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
 
     } catch (error) {
@@ -651,10 +699,10 @@ class ProcessManager {
       return (result.data as Array<{ info: { id: string; role: string; createdAt?: string; sessionId?: string }; parts: Array<{ type: string; text?: string }> }>).map((msg) => ({
         id: msg.info.id,
         role: msg.info.role,
-        content: msg.parts
+        content: (msg.parts
           .filter((p) => p.type === 'text')
           .map((p) => p.text || '')
-          .join(''),
+          .join('')) || ' ',
         timestamp: msg.info.createdAt || new Date().toISOString(),
       }));
     } catch (error) {

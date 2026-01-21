@@ -314,11 +314,11 @@ ipcMain.handle('auth:removeCredentials', async (_event, service: string) => {
 });
 
 /**
- * Store an API token directly (for Notion Internal Integration, etc.)
- */
-ipcMain.handle('auth:storeApiToken', async (_event, service: string, apiToken: string) => {
+  * Store an API token directly (for Notion Internal Integration, etc.)
+  */
+ ipcMain.handle('auth:storeApiToken', async (_event, service: string, apiToken: string, additionalData?: Record<string, string>) => {
   try {
-    await authManager.storeApiToken(service, apiToken);
+    await authManager.storeApiToken(service, apiToken, additionalData);
 
     // Reload MCP config to include the new service
     await processManager.reloadMcpConfig();
@@ -442,7 +442,10 @@ ipcMain.handle('mcp:status', async () => {
  * Send a message to OpenCode and get a response
  */
 ipcMain.handle('opencode:send', async (event, message: string) => {
+  console.log('[IPC] opencode:send called with message length:', message.length);
+  
   if (!processManager.running) {
+    console.error('[IPC] OpenCode not running!');
     return {
       error: 'OpenCode not running',
       content: 'The AI assistant is not available. Please restart the application.',
@@ -452,13 +455,15 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
   try {
     // Get the webContents from the event
     const webContents = event.sender;
+    console.log('[IPC] Calling processManager.streamMessage()...');
 
     // Stream the message (sends events back via IPC)
     await processManager.streamMessage(message, webContents);
 
+    console.log('[IPC] streamMessage completed successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error in opencode:send:', error);
+    console.error('[IPC] Error in opencode:send:', error);
     return {
       error: error instanceof Error ? error.message : String(error),
       content: 'An error occurred while processing your request.',

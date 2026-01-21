@@ -24,7 +24,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
   workingHoursStart: '09:00',
   workingHoursEnd: '17:00',
-  defaultLLMProvider: 'opencode/zen',
+  defaultLLMProvider: 'opencode/grok-code',
   notificationsEnabled: true,
 };
 

@@ -11,7 +11,7 @@
     }
   },
   "preferences": {
-    "defaultProvider": "opencode/zen",
+    "defaultProvider": "opencode/grok-code",
     "progressiveAutonomy": {
       "readOperations": "auto",
       "writeOperations": "approval"

@@ -23,6 +23,8 @@ export interface AuthToken {
   scopes: string[];
   email?: string;
   authMethod: AuthMethod;
+  // Service-specific additional data (e.g., Canvas API URL)
+  additionalData?: Record<string, string>;
 }
 
 export interface ClientCredentials {
@@ -250,15 +252,17 @@ class AuthManager {
     };
   }
 
-  /**
-   * Store an API token directly (for services like Notion Internal Integration)
-   */
-  async storeApiToken(service: string, apiToken: string): Promise<void> {
+/**
+    * Store an API token directly (for services like Notion Internal Integration, Canvas LMS)
+    * Supports additional metadata like Canvas API URL
+    */
+  async storeApiToken(service: string, apiToken: string, additionalData?: Record<string, string>): Promise<void> {
     const token: AuthToken = {
       service,
       accessToken: apiToken,
       scopes: ['all'], // API tokens typically have full access
       authMethod: 'api_token',
+      additionalData,
     };
     await this.storeToken(token);
     console.log(`[Auth] Stored API token for ${service}`);

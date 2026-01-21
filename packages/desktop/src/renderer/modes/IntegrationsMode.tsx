@@ -304,6 +304,109 @@ function ApiTokenForm({
 }
 
 /**
+ * Canvas API Token Form (with Canvas URL field)
+ */
+function CanvasApiTokenForm({
+  onSubmit,
+  isLoading,
+}: {
+  onSubmit: (apiToken: string, apiUrl: string) => void;
+  isLoading: boolean;
+}) {
+  const [apiToken, setApiToken] = useState("");
+  const [apiUrl, setApiUrl] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (apiToken && apiUrl) {
+      onSubmit(apiToken, apiUrl);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Instructions for Canvas LMS */}
+      <div className="p-4 bg-muted/50 rounded-lg border border-border">
+        <h3 className="text-sm font-medium text-foreground mb-2">
+          Canvas LMS Setup
+        </h3>
+        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+          <li>Log in to your Canvas LMS instance</li>
+          <li>Go to Account → Settings</li>
+          <li>Scroll to "Approved Integrations"</li>
+          <li>Click "New Access Token"</li>
+          <li>Copy the generated token</li>
+        </ol>
+        <p className="text-xs text-muted-foreground mt-2">
+          Note: You&apos;ll also need your Canvas instance URL (e.g.,{" "}
+          https://your-school.instructure.com)
+        </p>
+      </div>
+
+      <div>
+        <label
+          htmlFor="canvasApiUrl"
+          className="block text-sm font-medium text-foreground mb-1"
+        >
+          Canvas Instance URL
+        </label>
+        <input
+          id="canvasApiUrl"
+          type="url"
+          value={apiUrl}
+          onChange={(e) => setApiUrl(e.target.value)}
+          placeholder="https://your-school.instructure.com"
+          className="fs-input"
+          required
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          The URL of your Canvas LMS instance
+        </p>
+      </div>
+
+      <div>
+        <label
+          htmlFor="canvasApiToken"
+          className="block text-sm font-medium text-foreground mb-1"
+        >
+          Canvas API Token
+        </label>
+        <input
+          id="canvasApiToken"
+          type="password"
+          value={apiToken}
+          onChange={(e) => setApiToken(e.target.value)}
+          placeholder="Enter your Canvas API token"
+          className="fs-input font-mono text-sm"
+          required
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Generated from Canvas Settings → Approved Integrations
+        </p>
+      </div>
+
+      <button
+        type="submit"
+        className="w-full fs-button-primary flex items-center justify-center gap-2"
+        disabled={isLoading || !apiToken || !apiUrl}
+      >
+        {isLoading ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Connecting...
+          </>
+        ) : (
+          <>
+            <Key className="w-4 h-4" />
+            Connect Canvas LMS
+          </>
+        )}
+      </button>
+    </form>
+  );
+}
+
+/**
  * Connection Modal - Handles both OAuth and API Token flows
  */
 function ConnectionModal({
@@ -315,8 +418,8 @@ function ConnectionModal({
 }: {
   integration: Integration;
   onClose: () => void;
-  onOAuthSubmit: (clientId: string, clientSecret: string) => void;
-  onApiTokenSubmit: (apiToken: string) => void;
+  onOAuthSubmit: (service: string, clientId: string, clientSecret: string) => void;
+  onApiTokenSubmit: (service: string, apiToken: string, additionalData?: Record<string, string>) => void;
   isLoading: boolean;
 }) {
   const [selectedMethod, setSelectedMethod] = useState<AuthMethod | null>(
@@ -367,7 +470,17 @@ function ConnectionModal({
             />
           )}
 
-          {selectedMethod === "api_token" && (
+          {selectedMethod === "api_token" && integration.id === "canvas" && (
+            <CanvasApiTokenForm
+              onSubmit={(apiToken, apiUrl) => {
+                onApiTokenSubmit(integration.id, apiToken, { canvasApiUrl: apiUrl });
+                onClose();
+              }}
+              isLoading={isLoading}
+            />
+          )}
+
+          {selectedMethod === "api_token" && integration.id !== "canvas" && (
             <ApiTokenForm
               onSubmit={(apiToken) => {
                 onApiTokenSubmit(integration.id, apiToken);
@@ -418,9 +531,6 @@ function IntegrationsMode() {
   const [showModal, setShowModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] =
     useState<Integration | null>(null);
-  const [authStatuses, setAuthStatuses] = useState<
-    Record<string, AuthStatus>
-  >({});
 
   useEffect(() => {
     if (!showModal) {
@@ -453,8 +563,8 @@ function IntegrationsMode() {
     await connectOAuth(service, clientId, clientSecret);
   };
 
-  const handleApiTokenSubmit = async (service: string, apiToken: string) => {
-    await connectApiToken(service, apiToken);
+  const handleApiTokenSubmit = async (service: string, apiToken: string, additionalData?: Record<string, string>) => {
+    await connectApiToken(service, apiToken, additionalData);
   };
 
   const handleDisconnect = async (service: string) => {
@@ -464,23 +574,6 @@ function IntegrationsMode() {
   const handleRefresh = () => {
     refresh();
   };
-
-  useEffect(() => {
-    const fetchStatuses = async () => {
-      try {
-        const statuses = await window.flowstate.auth.getAllStatuses();
-        const map: Record<string, AuthStatus> = {};
-        statuses.forEach((status) => {
-          map[status.service] = status;
-        });
-        setAuthStatuses(map);
-      } catch (error) {
-        console.error("Failed to fetch auth statuses:", error);
-      }
-    };
-
-    fetchStatuses();
-  }, [integrations, isLoading, connectingService]);
 
   // Separate integrations
   const officialIntegrations = integrations.filter((i) => i.isOfficial);

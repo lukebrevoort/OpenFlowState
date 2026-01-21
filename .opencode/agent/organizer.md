@@ -2,7 +2,7 @@
 name: organizer
 description: Task and project organization specialist
 mode: subagent
-model: opencode/zen
+model: opencode/grok-code
 temperature: 0.2
 tools:
   notion_*: true
