@@ -72,6 +72,15 @@ export interface CanvasCourse {
   workflow_state: string;
   total_students?: number;
   created_at: string;
+  // Grades included when includeGrades=true
+  enrollments?: Array<{
+    grades?: {
+      current_grade?: string | null;
+      current_score?: number | null;
+      final_grade?: string | null;
+      final_score?: number | null;
+    };
+  }>;
 }
 
 export interface CanvasAssignment {

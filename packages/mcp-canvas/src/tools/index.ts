@@ -311,14 +311,29 @@ export function registerTools(server: Server): void {
             includeGrades: args?.includeGrades as boolean | undefined,
           });
           
-          const formatted = courses.map(course => ({
-            id: course.id,
-            name: course.name,
-            code: course.course_code,
-            state: course.workflow_state,
-            startDate: formatDate(course.start_at),
-            endDate: formatDate(course.end_at),
-          }));
+          const showGrades = args?.includeGrades === true;
+          
+          const formatted = courses.map(course => {
+            const result: Record<string, unknown> = {
+              id: course.id,
+              name: course.name,
+              code: course.course_code,
+              state: course.workflow_state,
+              startDate: formatDate(course.start_at),
+              endDate: formatDate(course.end_at),
+            };
+            
+            // Surface grades when requested
+            if (showGrades && course.enrollments?.[0]?.grades) {
+              const grades = course.enrollments[0].grades;
+              result.currentGrade = grades.current_grade ?? 'N/A';
+              result.currentScore = grades.current_score !== null ? `${grades.current_score}%` : 'N/A';
+              result.finalGrade = grades.final_grade ?? 'N/A';
+              result.finalScore = grades.final_score !== null ? `${grades.final_score}%` : 'N/A';
+            }
+            
+            return result;
+          });
           
           return {
             content: [
