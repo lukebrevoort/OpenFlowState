@@ -268,7 +268,7 @@ class AuthManager {
     await this.initialize();
     
     // Define all supported services
-    const services = ['notion', 'gmail', 'gcal'];
+    const services = ['notion', 'gmail', 'gcal', 'canvas'];
     const statuses: AuthStatus[] = [];
     
     for (const service of services) {
