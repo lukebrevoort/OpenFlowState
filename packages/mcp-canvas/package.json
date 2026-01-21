@@ -1,0 +1,42 @@
+{
+  "name": "@flowstate/mcp-canvas",
+  "version": "0.1.0",
+  "description": "Canvas LMS MCP server for FlowState - assignments, courses, and grades for students",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "mcp-canvas": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@flowstate/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "canvas",
+    "lms",
+    "education",
+    "flowstate",
+    "productivity",
+    "student"
+  ],
+  "license": "MIT"
+}
