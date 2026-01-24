@@ -116,17 +116,9 @@ export function useOpenCode() {
     };
   }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus]);
 
-  useEffect(() => {
-    if (activeTask?.status === 'completed' && activeTask.summary && !activeTask.summarySent) {
-      addAssistantMessage({
-        id: `summary-${Date.now()}`,
-        role: 'assistant',
-        content: activeTask.summary,
-        timestamp: new Date().toISOString(),
-      });
-      updateActiveTask({ summarySent: true });
-    }
-  }, [activeTask, addAssistantMessage, updateActiveTask]);
+  // Note: We intentionally do not auto-inject task summaries into chat.
+  // The chat response already arrives via `opencode:message`, and injecting the
+  // timeline-derived summary creates duplicate assistant messages.
 
   /**
    * Send a message to OpenCode

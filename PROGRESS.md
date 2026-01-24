@@ -1046,3 +1046,44 @@ Renderer (useOpenCode.ts):
   - "[ProcessManager] Prompt result received: YES/NO"
   - "[ProcessManager] Response text length: X"
   - "[Renderer] Received message: ..."
+
+---
+
+## Tasks Completed (Jan 23, 2026 - OpenCode Silent Failure Fix)
+**Timestamp**: Jan 23, 2026 10:30
+
+**TASKS COMPLETED**
+- ✅ Fixed TUI agent selection by updating `start:tui` to use `flowstate-assistant`.
+- ✅ Forced Desktop OpenCode prompts to use `flowstate-assistant` so sessions no longer fall back to a global default agent/model.
+- ✅ Surfaced OpenCode `session.*` retry states as timeline errors so rate limits/quota issues are visible instead of looking like a hang.
+
+**IN PROGRESS**
+- [ ] Validate on OpenCode v1.1.34 with both TUI and Desktop flows.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and send a simple prompt ("hello") to confirm responses return.
+- Run `pnpm start:tui` and confirm the FlowState agent is selected.
+
+---
+
+## Tasks Completed (Jan 23, 2026 - Duplicate Messages + Task Promotion Fix)
+**Timestamp**: Jan 23, 2026 11:10
+
+**TASKS COMPLETED**
+- ✅ Stopped auto-promoting every chat request into a Task (only emit task lifecycle events if promotion criteria was met).
+- ✅ Removed timeline-derived task summary injection into chat to prevent duplicate assistant messages (and truncation).
+- ✅ Added defensive message de-duping by message id in the chat store.
+- ✅ Adjusted Tasks screen so completed tasks no longer remain in the "Active Task" card.
+
+**IN PROGRESS**
+- [ ] Validate behavior on both a fast chat prompt and a long-running MCP/tool prompt.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Send "hello" and confirm: one assistant message, no task handoff.
+- Trigger a tool-heavy request and confirm: task handoff appears only when promoted.

@@ -49,6 +49,27 @@ const extractDetail = (data: OpenCodeEventPayload) => {
   return undefined;
 };
 
+const formatRetryDetail = (data: OpenCodeEventPayload) => {
+  const candidates = [data.message, data.error, data.reason, data.summary];
+  let message: string | undefined;
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      message = candidate.trim();
+      break;
+    }
+  }
+
+  const next = typeof data.next === 'number' ? data.next : undefined;
+  if (!message && !next) return undefined;
+
+  if (message && next) {
+    return clampDetail(`${message} (next retry at ${new Date(next).toISOString()})`);
+  }
+
+  if (message) return clampDetail(message);
+  return clampDetail(`Retry scheduled at ${new Date(next!).toISOString()}`);
+};
+
 const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: string) => {
   const titleCandidates = [data.title, data.action, data.intent, data.summary];
   const summaryCandidates = [data.summary, data.intent, data.action, fallbackDetail];
@@ -164,6 +185,28 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
   }
 
   if (type.startsWith('session.')) {
+    const statusType =
+      typeof sanitizedPayload?.type === 'string'
+        ? sanitizedPayload.type
+        : typeof sanitizedPayload?.status === 'string'
+          ? sanitizedPayload.status
+          : typeof sanitizedPayload?.status === 'object' && sanitizedPayload.status
+            ? ((sanitizedPayload.status as { type?: unknown }).type as string | undefined)
+            : undefined;
+
+    if (statusType === 'retry') {
+      return {
+        event: buildBaseEvent({
+          sessionId,
+          kind: 'error',
+          title: 'Request delayed',
+          detail: formatRetryDetail(sanitizedPayload ?? {}) ?? detail ?? 'Request delayed due to provider retry',
+        }),
+        payload: sanitizedPayload ?? undefined,
+        redacted,
+      };
+    }
+
     return {
       event: buildBaseEvent({
         sessionId,

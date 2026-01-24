@@ -127,7 +127,7 @@ function TasksMode() {
   const sampleTimeline: TimelineEvent[] = useMemo(() => [], []);
 
   const runningTasks: RunningTask[] = useMemo(() => {
-    if (activeTask) {
+    if (activeTask && activeTask.status !== 'completed') {
       const timelineEvents = timeline.length > 0 ? timeline : sampleTimeline;
       const progress = activeTask.progress || deriveProgress(timelineEvents);
       const status = activeTask.status === 'completed'

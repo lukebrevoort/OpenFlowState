@@ -33,6 +33,8 @@ class ProcessManager {
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
 
+  private readonly defaultAgent = 'flowstate-assistant';
+
   constructor() {
     // Handle app shutdown
     app.on('before-quit', async () => {
@@ -451,6 +453,7 @@ class ProcessManager {
       const result = await this.instance.client.session.prompt({
         path: { id: this.activeSessionId! },
         body: {
+          agent: this.defaultAgent,
           system: systemPrompt,
           parts: [{ type: 'text', text: content }],
         },
@@ -539,6 +542,7 @@ class ProcessManager {
       const result = await this.instance.client.session.prompt({
         path: { id: this.activeSessionId! },
         body: {
+          agent: this.defaultAgent,
           system: systemPrompt,
           parts: [{ type: 'text', text: content }],
         },
@@ -797,30 +801,11 @@ class ProcessManager {
       return;
     }
 
+    // If the request never met promotion criteria, do not create Task lifecycle events.
+    // This keeps fast chat responses ("hello") from showing up as stuck tasks.
     if (!state.promoted) {
-      state.promoted = true;
-      const promotion = normalizeOpenCodeEvent(
-        {
-          type: 'task.promoted',
-          properties: {
-            sessionId,
-            taskId: `task-${sessionId}`,
-            summary: state.message ?? detail ?? 'Task promoted from long-running request',
-          },
-        },
-        sessionId
-      );
-      if (promotion) {
-        timelineStore.appendWithPayload({
-          ...promotion.event,
-          redacted: promotion.redacted,
-          payload: promotion.payload,
-        }).then((stored) => {
-          webContents.send('timeline:event', stored);
-        }).catch((error) => {
-          console.warn('[ProcessManager] Failed to persist promotion event:', error);
-        });
-      }
+      this.clearTaskTracking(sessionId);
+      return;
     }
 
     state.completed = true;
