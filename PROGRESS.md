@@ -1127,3 +1127,22 @@ Renderer (useOpenCode.ts):
 **NEXT STEPS**
 - Send "hello" and confirm: one assistant message, no task handoff.
 - Trigger a tool-heavy request and confirm: task handoff appears only when promoted.
+
+---
+
+## Tasks Completed (Jan 25, 2026 - Chat Alignment + Thinking Indicator)
+**Timestamp**: Jan 25, 2026 19:05
+
+**TASKS COMPLETED**
+- ✅ Right-aligned the chat layout to avoid the condensed/centered column.
+- ✅ Added a chat-level thinking indicator for in-progress responses.
+- ✅ Prevented message typing animation from replaying on tab switches.
+
+**IN PROGRESS**
+- [ ] Validate chat alignment and thinking indicator in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and verify the chat panel aligns right with the new indicator.
