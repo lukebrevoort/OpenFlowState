@@ -244,18 +244,18 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const showThinking = status === "thinking" || isLoading;
 
   const ThinkingIndicator = () => (
-    <div className="flex justify-start">
+    <div className="flex justify-end">
       <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl">
         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
           <Sparkles className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium text-primary">FlowState</span>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Thinking</span>
-          <span className="flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse [animation-delay:-0.3s]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse [animation-delay:-0.15s]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-pulse" />
+          <span className="sr-only">Thinking</span>
+          <span className="flex items-center gap-1" aria-hidden="true">
+            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.2s]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.1s]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" />
           </span>
         </div>
       </div>
@@ -378,7 +378,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-shrink-0 px-6 pt-4">
-        <div className="max-w-5xl w-full ml-auto">
+        <div className="max-w-4xl mx-auto">
           <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -475,11 +475,11 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
-        <div className="max-w-5xl w-full ml-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
+        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              className="flex justify-end"
             >
               <div
                 className={`max-w-[70%] rounded-2xl px-4 py-3 ${
@@ -527,7 +527,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
       {handoffTask && (
         <div className="px-6 pb-4">
-          <div className="max-w-5xl w-full ml-auto">
+          <div className="max-w-4xl mx-auto">
             <TaskHandoffCard
               title={handoffTask.title}
               description={handoffTask.description}
@@ -538,7 +538,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-shrink-0 px-6 pb-6">
-        <div className="max-w-5xl w-full ml-auto">
+        <div className="max-w-4xl mx-auto">
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
             <div className="flex items-center gap-3">
               <textarea

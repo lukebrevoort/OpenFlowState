@@ -1146,3 +1146,7 @@ Renderer (useOpenCode.ts):
 
 **NEXT STEPS**
 - Run `pnpm dev:desktop` and verify the chat panel aligns right with the new indicator.
+
+**UPDATE (Jan 25, 2026 19:15)**
+- Adjusted approach: keep the overall chat container centered; right-align chat bubbles only.
+- Updated thinking indicator to a 3-dot bounce animation.
