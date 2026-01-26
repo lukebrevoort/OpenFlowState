@@ -8,6 +8,8 @@
 import { app, BrowserWindow, ipcMain, shell, nativeTheme } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
@@ -15,6 +17,7 @@ import { oauthServer } from './oauth-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execAsync = promisify(exec);
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -464,9 +467,12 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
     return { success: true };
   } catch (error) {
     console.error('[IPC] Error in opencode:send:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const message = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
     return {
-      error: error instanceof Error ? error.message : String(error),
-      content: 'An error occurred while processing your request.',
+      error: message,
+      content: message,
+      errorDetails: opencodeError,
     };
   }
 });
@@ -491,6 +497,24 @@ ipcMain.handle('opencode:restart', async () => {
   } catch (error) {
     console.error('Failed to restart OpenCode:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
+  try {
+    const args = ['models'];
+    if (provider) {
+      args.push(provider);
+    }
+    const { stdout } = await execAsync(`opencode ${args.join(' ')}`);
+    const models = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && line.includes('/') && !line.includes(' '));
+    return Array.from(new Set(models));
+  } catch (error) {
+    console.error('Failed to list OpenCode models:', error);
+    return [];
   }
 });
 
@@ -544,4 +568,3 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
  });
  
  console.log('IPC handlers registered');
-

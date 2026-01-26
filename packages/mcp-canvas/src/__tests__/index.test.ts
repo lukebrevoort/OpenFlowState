@@ -19,10 +19,15 @@ const mockApi = {
   getUpcomingAssignments: vi.fn(),
   getGrades: vi.fn(),
   getSubmission: vi.fn(),
+  getSubmissionDetailed: vi.fn(),
   getAnnouncements: vi.fn(),
   getModules: vi.fn(),
   getModuleItems: vi.fn(),
   getCalendarEvents: vi.fn(),
+  listCourseFiles: vi.fn(),
+  getFile: vi.fn(),
+  downloadFileById: vi.fn(),
+  downloadFileByUrl: vi.fn(),
 };
 
 // Mock the API module before importing tools
@@ -316,6 +321,16 @@ describe('Canvas API Function Tests', () => {
     });
   });
 
+  describe('getSubmissionDetailed', () => {
+    it('should be called with course and assignment ID', async () => {
+      mockApi.getSubmissionDetailed.mockResolvedValue({ id: 1, score: 100 });
+
+      await mockApi.getSubmissionDetailed(123, 456);
+
+      expect(mockApi.getSubmissionDetailed).toHaveBeenCalledWith(123, 456);
+    });
+  });
+
   describe('getAnnouncements', () => {
     it('should be called with course IDs and options', async () => {
       mockApi.getAnnouncements.mockResolvedValue([]);
@@ -357,7 +372,7 @@ describe('Canvas API Function Tests', () => {
   });
 });
 
-describe('Tool Definition Validation', () => {
+  describe('Tool Definition Validation', () => {
   // Helper function to simulate tool registration check
   const validateToolDefinitions = () => {
     const expectedTools = [
@@ -372,13 +387,17 @@ describe('Tool Definition Validation', () => {
       'canvas_list_modules',
       'canvas_get_module_items',
       'canvas_get_calendar',
+      'canvas_list_course_files',
+      'canvas_get_file_info',
+      'canvas_read_file_text',
+      'canvas_read_submission_attachment_text',
     ];
     return expectedTools;
   };
 
-  it('should have exactly 11 tools', () => {
+  it('should have exactly 15 tools', () => {
     const tools = validateToolDefinitions();
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(15);
   });
 
   it('should have all expected tool names', () => {
@@ -395,6 +414,10 @@ describe('Tool Definition Validation', () => {
     expect(tools).toContain('canvas_list_modules');
     expect(tools).toContain('canvas_get_module_items');
     expect(tools).toContain('canvas_get_calendar');
+    expect(tools).toContain('canvas_list_course_files');
+    expect(tools).toContain('canvas_get_file_info');
+    expect(tools).toContain('canvas_read_file_text');
+    expect(tools).toContain('canvas_read_submission_attachment_text');
   });
 
   it('should follow naming convention', () => {

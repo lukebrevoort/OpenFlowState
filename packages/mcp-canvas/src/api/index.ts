@@ -32,6 +32,14 @@ const getCanvasConfig = () => {
   return { token, baseUrl: normalizedUrl };
 };
 
+const resolveUrl = (candidate: string, base: string) => {
+  try {
+    return new URL(candidate, base).toString();
+  } catch {
+    return candidate;
+  }
+};
+
 // Generic fetch wrapper for Canvas API
 async function canvasFetch<T>(
   endpoint: string,
@@ -56,6 +64,26 @@ async function canvasFetch<T>(
   }
 
   return response.json();
+}
+
+// Authenticated fetch for absolute Canvas URLs (used for file downloads).
+async function canvasFetchRaw(
+  url: string,
+  options: RequestInit & { includeAuth?: boolean } = {}
+): Promise<Response> {
+  const { token } = getCanvasConfig();
+  const includeAuth = options.includeAuth !== false;
+  const { includeAuth: _ignored, ...rest } = options;
+
+  return fetch(url, {
+    ...rest,
+    headers: includeAuth
+      ? {
+          Authorization: `Bearer ${token}`,
+          ...(rest.headers ?? {}),
+        }
+      : rest.headers,
+  });
 }
 
 // ============================================================================
@@ -112,6 +140,15 @@ export interface CanvasSubmission {
   missing: boolean;
   excused: boolean;
   attempt: number | null;
+  attachments?: Array<{
+    id: number;
+    filename: string;
+    size?: number;
+    content_type?: string;
+    'content-type'?: string;
+    url?: string;
+    download_url?: string;
+  }>;
 }
 
 export interface CanvasAnnouncement {
@@ -180,6 +217,26 @@ export interface CanvasTodoItem {
   context_name: string;
   html_url: string;
 }
+
+export interface CanvasFile {
+  id: number;
+  display_name: string;
+  filename: string;
+  size: number;
+  content_type?: string;
+  'content-type'?: string;
+  url?: string;
+  download_url?: string;
+  created_at?: string;
+  modified_at?: string;
+}
+
+export type CanvasDownloadedFile = {
+  file: CanvasFile;
+  buffer: Buffer;
+  contentType: string;
+  finalUrl: string;
+};
 
 // ============================================================================
 // API Functions
@@ -385,4 +442,103 @@ export async function getCalendarEvents(options?: {
   params.append('all_events', 'true');
   
   return canvasFetch(`/calendar_events?${params.toString()}`);
+}
+
+// =========================================================================
+// Files + Submissions Attachments
+// =========================================================================
+
+export async function listCourseFiles(courseId: number): Promise<CanvasFile[]> {
+  const params = new URLSearchParams();
+  params.append('per_page', '100');
+  return canvasFetch<CanvasFile[]>(`/courses/${courseId}/files?${params.toString()}`);
+}
+
+export async function getFile(fileId: number): Promise<CanvasFile> {
+  return canvasFetch<CanvasFile>(`/files/${fileId}`);
+}
+
+export async function getSubmissionDetailed(
+  courseId: number,
+  assignmentId: number
+): Promise<CanvasSubmission> {
+  const params = new URLSearchParams();
+  params.append('include[]', 'submission_history');
+  params.append('include[]', 'submission_comments');
+  params.append('include[]', 'rubric_assessment');
+  return canvasFetch<CanvasSubmission>(
+    `/courses/${courseId}/assignments/${assignmentId}/submissions/self?${params.toString()}`
+  );
+}
+
+export async function downloadFileByUrl(
+  fileUrl: string,
+  options?: { maxRedirects?: number }
+): Promise<{ buffer: Buffer; contentType: string; finalUrl: string }> {
+  const { baseUrl } = getCanvasConfig();
+  const maxRedirects = options?.maxRedirects ?? 10;
+  const base = new URL(baseUrl);
+
+  let currentUrl = fileUrl;
+
+  for (let i = 0; i < maxRedirects; i += 1) {
+    const parsed = new URL(currentUrl);
+    const includeAuth = parsed.host === base.host;
+
+    const response = await canvasFetchRaw(currentUrl, {
+      redirect: 'manual',
+      includeAuth,
+    });
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new Error('Canvas file download redirect missing Location header.');
+      }
+      currentUrl = resolveUrl(location, currentUrl);
+      continue;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      if (includeAuth) {
+        const body = await response.text();
+        throw new Error(`Canvas file download unauthorized (${response.status}): ${body}`);
+      }
+      throw new Error(
+        'This file appears to be hosted outside Canvas and requires browser authentication. ' +
+          'Please upload it or paste the relevant text.'
+      );
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Canvas file download failed (${response.status}): ${body}`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+    const arrayBuffer = await response.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuffer),
+      contentType,
+      finalUrl: currentUrl,
+    };
+  }
+
+  throw new Error(`Canvas file download exceeded ${maxRedirects} redirects.`);
+}
+
+export async function downloadFileById(fileId: number): Promise<CanvasDownloadedFile> {
+  const file = await getFile(fileId);
+  const url = file.download_url ?? file.url;
+  if (!url) {
+    throw new Error(`Canvas file ${fileId} has no download URL.`);
+  }
+
+  const downloaded = await downloadFileByUrl(url);
+  return {
+    file,
+    buffer: downloaded.buffer,
+    contentType: file.content_type ?? file['content-type'] ?? downloaded.contentType,
+    finalUrl: downloaded.finalUrl,
+  };
 }

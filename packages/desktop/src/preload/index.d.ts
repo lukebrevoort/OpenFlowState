@@ -45,6 +45,7 @@ declare const flowstateAPI: {
     opencode: {
         send: (message: string) => Promise<any>;
         status: () => Promise<any>;
+        listModels: (provider?: string) => Promise<any>;
         newSession: (title?: string) => Promise<any>;
         listSessions: () => Promise<any>;
         switchSession: (sessionId: string) => Promise<any>;

@@ -11,7 +11,7 @@ export const providerDefinitions: ProviderDefinition[] = [
     id: "opencode",
     name: "OpenCode Zen",
     description: "Quick setup with OpenCode-hosted models.",
-    models: ["opencode/grok-code", "opencode/gpt-5-nano", "opencode/glm-4.7-free"],
+    models: ["opencode/big-pickle", "opencode/gpt-5-nano"],
     badge: "Recommended",
   },
   {

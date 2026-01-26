@@ -431,10 +431,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       {error && (
         <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mx-6 mt-4 flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm text-destructive font-medium">
-              Connection Error
-            </p>
+            <div className="flex-1">
+              <p className="text-sm text-destructive font-medium">
+                Assistant Error
+              </p>
             <p className="text-xs text-muted-foreground">{error}</p>
           </div>
           <button

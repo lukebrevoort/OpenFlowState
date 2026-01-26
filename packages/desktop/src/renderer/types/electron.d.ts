@@ -32,6 +32,13 @@ export interface OpenCodeProgress {
 
 export interface OpenCodeError {
   error: string;
+  message?: string;
+  code?: string;
+  provider?: string;
+  model?: string;
+  status?: number;
+  retryAfter?: number;
+  details?: unknown;
 }
 
 export interface OpenCodeEvent {
@@ -195,11 +202,12 @@ export interface FlowstateAPI {
 
   opencode: {
     // Send a message (triggers streaming response via events)
-    send: (message: string) => Promise<{ success?: boolean; error?: string; content?: string }>;
+    send: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
 
     // Get status
     status: () => Promise<OpenCodeStatus>;
     restart: () => Promise<void>;
+    listModels: (provider?: string) => Promise<string[]>;
 
     // Session management
     newSession: (title?: string) => Promise<{ sessionId: string }>;

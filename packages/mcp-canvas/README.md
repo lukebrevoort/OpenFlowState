@@ -70,6 +70,18 @@ Add the MCP server to your FlowState configuration:
 | `canvas_list_modules` | List course modules/units |
 | `canvas_get_module_items` | Get items within a module |
 | `canvas_get_calendar` | Get calendar events and due dates |
+| `canvas_list_course_files` | List files available in a course |
+| `canvas_get_file_info` | Get file metadata (name, size, type) |
+| `canvas_read_file_text` | Download + extract text from Canvas files (PDF/DOCX) |
+| `canvas_read_submission_attachment_text` | Download + extract text from your submission attachments (PDF/DOCX) |
+
+### File Reading Notes
+
+- Supported types (v1): PDF (`application/pdf`) and DOCX (`application/vnd.openxmlformats-officedocument.wordprocessingml.document`).
+- Limits:
+  - Max file size: 10MB (`CANVAS_MAX_FILE_SIZE_MB`, default 10)
+  - Max extracted text: 150k characters (`CANVAS_MAX_TEXT_CHARS`, default 150000)
+- If a file is hosted outside Canvas (LTI / external tool) and requires browser authentication, the tools will return an error asking the user to upload or paste content.
 
 ## Example Usage with FlowState
 
@@ -87,6 +99,7 @@ Once configured, you can ask FlowState things like:
 - **Read-Only**: This MCP only reads data - it cannot submit assignments or modify anything
 - **No Telemetry**: No data is sent anywhere except to your Canvas instance
 - **Token Control**: You can revoke your token anytime from Canvas Settings
+- **File Safety**: File contents are downloaded in-memory, parsed, and discarded (no persistent storage)
 
 ## Development
 

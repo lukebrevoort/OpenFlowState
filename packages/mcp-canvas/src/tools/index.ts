@@ -11,12 +11,35 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as canvasApi from '../api/index.js';
+import {
+  CANVAS_MAX_FILE_SIZE_BYTES,
+  CANVAS_MAX_REDIRECTS,
+  SUPPORTED_DOCUMENT_TYPES,
+} from '../utils/constants.js';
+import { extractDocumentText } from '../utils/documentParsers.js';
 
 const formatToolError = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message;
   }
   return String(error);
+};
+
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes)) return `${bytes}`;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 2)}${units[idx]}`;
+};
+
+const normalizeContentType = (contentType: string | undefined | null) => {
+  if (!contentType) return 'application/octet-stream';
+  return contentType.split(';')[0].trim().toLowerCase();
 };
 
 // Helper to format dates for display
@@ -286,6 +309,96 @@ const CANVAS_TOOLS = [
       },
     },
   },
+  {
+    name: 'canvas_list_course_files',
+    description: 'List files available in a Canvas course (PDF/DOCX/etc.)',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        courseId: {
+          type: 'number',
+          description: 'The Canvas course ID',
+        },
+      },
+      required: ['courseId'],
+    },
+  },
+  {
+    name: 'canvas_get_file_info',
+    description: 'Get metadata for a Canvas file (name, size, content type)',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fileId: {
+          type: 'number',
+          description: 'The Canvas file ID',
+        },
+      },
+      required: ['fileId'],
+    },
+  },
+  {
+    name: 'canvas_read_file_text',
+    description:
+      'Download a Canvas file and extract its text for the assistant (supports PDF and DOCX).',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fileId: {
+          type: 'number',
+          description: 'The Canvas file ID',
+        },
+      },
+      required: ['fileId'],
+    },
+  },
+  {
+    name: 'canvas_read_submission_attachment_text',
+    description:
+      'Download and extract text from your assignment submission attachment (PDF/DOCX).',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        courseId: {
+          type: 'number',
+          description: 'The Canvas course ID',
+        },
+        assignmentId: {
+          type: 'number',
+          description: 'The assignment ID',
+        },
+        attachmentId: {
+          type: 'number',
+          description: 'Optional attachment id (defaults to first attachment)',
+        },
+      },
+      required: ['courseId', 'assignmentId'],
+    },
+  },
 ];
 
 export function registerTools(server: Server): void {
@@ -471,11 +584,19 @@ export function registerTools(server: Server): void {
         }
 
         case 'canvas_get_submission': {
-          const submission = await canvasApi.getSubmission(
+          const submission = await canvasApi.getSubmissionDetailed(
             args?.courseId as number,
             args?.assignmentId as number
           );
-          
+
+          const attachments = (submission.attachments ?? []).map((attachment) => ({
+            id: attachment.id,
+            filename: attachment.filename,
+            size: attachment.size,
+            sizeHuman: attachment.size ? formatBytes(attachment.size) : undefined,
+            contentType: normalizeContentType(attachment.content_type ?? attachment['content-type']),
+          }));
+
           return {
             content: [
               {
@@ -489,6 +610,7 @@ export function registerTools(server: Server): void {
                   missing: submission.missing,
                   excused: submission.excused,
                   attempt: submission.attempt,
+                  attachments: attachments.length > 0 ? attachments : undefined,
                 }, null, 2),
               },
             ],
@@ -610,6 +732,139 @@ export function registerTools(server: Server): void {
               {
                 type: 'text',
                 text: `${events.length} calendar event(s):\n\n${JSON.stringify(formatted, null, 2)}`,
+              },
+            ],
+          };
+        }
+
+        case 'canvas_list_course_files': {
+          const files = await canvasApi.listCourseFiles(args?.courseId as number);
+
+          const formatted = files.map((file) => ({
+            id: file.id,
+            name: file.display_name,
+            filename: file.filename,
+            size: file.size,
+            sizeHuman: formatBytes(file.size),
+            contentType: normalizeContentType(file.content_type ?? file['content-type']),
+          }));
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `${files.length} file(s):\n\n${JSON.stringify(formatted, null, 2)}`,
+              },
+            ],
+          };
+        }
+
+        case 'canvas_get_file_info': {
+          const file = await canvasApi.getFile(args?.fileId as number);
+          const contentType = normalizeContentType(file.content_type ?? file['content-type']);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    id: file.id,
+                    name: file.display_name,
+                    filename: file.filename,
+                    size: file.size,
+                    sizeHuman: formatBytes(file.size),
+                    contentType,
+                    supported: SUPPORTED_DOCUMENT_TYPES.has(contentType),
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+
+        case 'canvas_read_file_text': {
+          const fileId = args?.fileId as number;
+          const downloaded = await canvasApi.downloadFileById(fileId);
+          const contentType = normalizeContentType(downloaded.contentType);
+
+          if (downloaded.file.size > CANVAS_MAX_FILE_SIZE_BYTES) {
+            throw new Error(
+              `File too large (${formatBytes(downloaded.file.size)}). Limit is ${formatBytes(CANVAS_MAX_FILE_SIZE_BYTES)}.`
+            );
+          }
+
+          if (!SUPPORTED_DOCUMENT_TYPES.has(contentType)) {
+            throw new Error(`Unsupported file type: ${contentType}. Supported: PDF, DOCX.`);
+          }
+
+          const extracted = await extractDocumentText(downloaded.buffer, contentType);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `File: ${downloaded.file.display_name} (${formatBytes(downloaded.file.size)}, ${contentType})\n` +
+                  `Source: ${downloaded.finalUrl}\n\n` +
+                  extracted.text,
+              },
+            ],
+          };
+        }
+
+        case 'canvas_read_submission_attachment_text': {
+          const courseId = args?.courseId as number;
+          const assignmentId = args?.assignmentId as number;
+          const attachmentId = args?.attachmentId as number | undefined;
+          const submission = await canvasApi.getSubmissionDetailed(courseId, assignmentId);
+          const attachments = submission.attachments ?? [];
+          if (attachments.length === 0) {
+            throw new Error('No attachments found on your submission for this assignment.');
+          }
+
+          const attachment =
+            typeof attachmentId === 'number'
+              ? attachments.find((item) => item.id === attachmentId)
+              : attachments[0];
+
+          if (!attachment) {
+            throw new Error(`Attachment ${attachmentId} not found on this submission.`);
+          }
+
+          const url = attachment.download_url ?? attachment.url;
+          if (!url) {
+            throw new Error('Submission attachment has no download URL.');
+          }
+
+          const size = attachment.size ?? 0;
+          if (size && size > CANVAS_MAX_FILE_SIZE_BYTES) {
+            throw new Error(
+              `Attachment too large (${formatBytes(size)}). Limit is ${formatBytes(CANVAS_MAX_FILE_SIZE_BYTES)}.`
+            );
+          }
+
+          const downloaded = await canvasApi.downloadFileByUrl(url, { maxRedirects: CANVAS_MAX_REDIRECTS });
+          const contentType = normalizeContentType(
+            attachment.content_type ?? attachment['content-type'] ?? downloaded.contentType
+          );
+
+          if (!SUPPORTED_DOCUMENT_TYPES.has(contentType)) {
+            throw new Error(`Unsupported attachment type: ${contentType}. Supported: PDF, DOCX.`);
+          }
+
+          const extracted = await extractDocumentText(downloaded.buffer, contentType);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Submission Attachment: ${attachment.filename} (${size ? formatBytes(size) : 'size unknown'}, ${contentType})\n` +
+                  `Source: ${downloaded.finalUrl}\n\n` +
+                  extracted.text,
               },
             ],
           };

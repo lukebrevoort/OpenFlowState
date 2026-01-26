@@ -1049,6 +1049,46 @@ Renderer (useOpenCode.ts):
 
 ---
 
+## Tasks Completed (Jan 24, 2026 - Settings + Error Surfacing)
+**Timestamp**: Jan 24, 2026 14:30
+
+**TASKS COMPLETED**
+- ✅ Wired Settings to persisted config for provider/model/timezone and API keys, with OpenCode restart on changes.
+- ✅ Replaced hardcoded model options with provider definitions to ensure valid model IDs.
+- ✅ Added structured OpenCode error payloads and improved user-facing error messaging in chat.
+
+**IN PROGRESS**
+- [ ] Validate provider/model switching and error banners in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to verify Settings changes restart OpenCode with new models.
+- Trigger a model-not-available error to confirm user-facing copy shows model/provider details.
+
+---
+
+## Tasks Completed (Jan 24, 2026 - Runtime Model Sync)
+**Timestamp**: Jan 24, 2026 15:20
+
+**TASKS COMPLETED**
+- ✅ Added OpenCode model discovery via `opencode models` and surfaced results in Settings.
+- ✅ Simplified Settings to a single model text input with validation against registered models.
+- ✅ Synced agent/config model files on OpenCode start so runtime model changes take effect.
+
+**IN PROGRESS**
+- [ ] Validate model changes update `.opencode` and runtime agent selection without errors.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and save a new model to confirm agent files update before restart.
+- Swap to a deliberately invalid model and confirm the Settings warning prevents save.
+
+---
+
 ## Tasks Completed (Jan 23, 2026 - OpenCode Silent Failure Fix)
 **Timestamp**: Jan 23, 2026 10:30
 

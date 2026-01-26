@@ -99,6 +99,8 @@ const flowstateAPI = {
 
     restart: () => ipcRenderer.invoke('opencode:restart'),
 
+    listModels: (provider?: string) => ipcRenderer.invoke('opencode:listModels', provider),
+
     // Session management
     newSession: (title?: string) => ipcRenderer.invoke('opencode:newSession', title),
     listSessions: () => ipcRenderer.invoke('opencode:listSessions'),

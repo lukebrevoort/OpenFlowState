@@ -11,7 +11,7 @@
     }
   },
   "preferences": {
-    "defaultProvider": "opencode/grok-code",
+    "defaultProvider": "github-copilot/gpt-4.1",
     "progressiveAutonomy": {
       "readOperations": "auto",
       "writeOperations": "approval"

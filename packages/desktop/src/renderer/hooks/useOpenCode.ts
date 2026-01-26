@@ -38,6 +38,48 @@ export function useOpenCode() {
 
   const { setOpenCodeStatus, refreshStatus } = useConfigStore();
 
+  const formatOpenCodeError = useCallback((err: OpenCodeError | string | null | undefined) => {
+    if (!err) return 'OpenCode request failed.';
+    if (typeof err === 'string') return err;
+
+    const baseMessage = err.message ?? err.error ?? 'OpenCode request failed.';
+    const normalizedMessage = baseMessage.toLowerCase();
+    const code = err.code?.toLowerCase();
+    const status = err.status;
+
+    const isRateLimit =
+      code === 'rate_limited' ||
+      status === 429 ||
+      normalizedMessage.includes('rate limit') ||
+      normalizedMessage.includes('too many requests');
+    const isModelUnavailable =
+      code === 'model_not_found' ||
+      code === 'model_unavailable' ||
+      normalizedMessage.includes('model not found') ||
+      normalizedMessage.includes('model unavailable') ||
+      normalizedMessage.includes('no longer available');
+    const isAuth =
+      status === 401 ||
+      normalizedMessage.includes('invalid api key') ||
+      normalizedMessage.includes('unauthorized') ||
+      normalizedMessage.includes('authentication');
+
+    let title = 'Request failed';
+    if (isModelUnavailable) title = 'Model unavailable';
+    if (isRateLimit) title = 'Rate limited';
+    if (isAuth) title = 'Authentication error';
+
+    const detailParts: string[] = [];
+    if (err.model) detailParts.push(`Model: ${err.model}`);
+    if (err.provider && (!err.model || !err.model.startsWith(err.provider))) {
+      detailParts.push(`Provider: ${err.provider}`);
+    }
+    if (err.retryAfter) detailParts.push(`Retry after ${err.retryAfter}s`);
+
+    const suffix = detailParts.length > 0 ? ` (${detailParts.join(', ')})` : '';
+    return `${title}: ${baseMessage}${suffix}`;
+  }, []);
+
   /**
    * Set up event listeners for OpenCode responses
    */
@@ -66,7 +108,7 @@ export function useOpenCode() {
     // Handle errors
     const removeErrorListener = window.flowstate.opencode.onError((err: OpenCodeError) => {
       console.error('[Renderer] OpenCode error:', err);
-      setError(err.error);
+      setError(formatOpenCodeError(err));
     });
 
     // Handle general events
@@ -114,7 +156,7 @@ export function useOpenCode() {
       removeTimelineListener();
       listenersInitialized = false;
     };
-  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus]);
+  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError]);
 
   // Note: We intentionally do not auto-inject task summaries into chat.
   // The chat response already arrives via `opencode:message`, and injecting the
@@ -145,12 +187,13 @@ export function useOpenCode() {
 
       if (result.error) {
         console.error('[Renderer] OpenCode returned error:', result.error);
-        setError(result.error);
+        const formattedError = formatOpenCodeError(result.errorDetails ?? result.error);
+        setError(formattedError);
         // Add error message as assistant response
         addAssistantMessage({
           id: `error-${Date.now()}`,
           role: 'assistant',
-          content: result.content || `Error: ${result.error}`,
+          content: result.content || formattedError,
           timestamp: new Date().toISOString(),
         });
         return { success: false, error: result.error };
@@ -159,10 +202,13 @@ export function useOpenCode() {
       return { success: true };
     } catch (err) {
       console.error('Failed to send message:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send message');
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to send message' };
+      const formattedError = formatOpenCodeError(
+        err instanceof Error ? err.message : 'Failed to send message'
+      );
+      setError(formattedError);
+      return { success: false, error: formattedError };
     }
-  }, [activeTask, addUserMessage, setError, addAssistantMessage]);
+  }, [activeTask, addUserMessage, setError, addAssistantMessage, formatOpenCodeError]);
 
   /**
    * Create a new session

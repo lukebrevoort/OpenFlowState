@@ -1,14 +1,33 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw } from "lucide-react";
+import { useConfig } from "../hooks/useConfig";
 
 export function SettingsPage() {
+  const { config, isLoaded, loadConfig, updateConfig } = useConfig();
   const [timezone, setTimezone] = useState("America/New_York");
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [modelProvider, setModelProvider] = useState("openai");
-  const [modelName, setModelName] = useState("gpt-4");
+  const [modelInput, setModelInput] = useState("");
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [language, setLanguage] = useState("en");
   const [resetStatus, setResetStatus] = useState<"idle" | "done">("idle");
   const resetLabel = resetStatus === "done" ? "Reset" : "Reset now";
+
+  useEffect(() => {
+    if (!isLoaded) {
+      loadConfig().catch((error) => {
+        console.error("Failed to load config", error);
+      });
+    }
+  }, [isLoaded, loadConfig]);
+
+  useEffect(() => {
+    if (!config) return;
+
+    setTimezone(config.preferences.timezone ?? "America/New_York");
+    setModelInput(config.provider.default ?? "");
+  }, [config]);
 
   const handleResetOnboarding = async () => {
     try {
@@ -31,23 +50,75 @@ export function SettingsPage() {
     "Asia/Shanghai",
     "Australia/Sydney",
   ];
+  const normalizedModelInput = modelInput.trim();
+  const hasModelOptions = availableModels.length > 0;
+  const isModelValid = !hasModelOptions || availableModels.includes(normalizedModelInput);
 
-  const modelProviders = [
-    {
-      id: "openai",
-      name: "OpenAI",
-      models: ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
-    },
-    {
-      id: "anthropic",
-      name: "Anthropic",
-      models: ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"],
-    },
-    { id: "google", name: "Google", models: ["gemini-pro", "gemini-ultra"] },
-    { id: "local", name: "Local Model", models: ["llama-2", "mistral"] },
-  ];
+  const handleTimezoneChange = async (nextTimezone: string) => {
+    setTimezone(nextTimezone);
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          timezone: nextTimezone,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update timezone", error);
+    }
+  };
+  const loadModelOptions = async () => {
+    if (!window.flowstate?.opencode?.listModels) return;
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const models = await window.flowstate.opencode.listModels();
+      setAvailableModels(models);
+    } catch (error) {
+      console.error("Failed to load OpenCode models", error);
+      setModelsError("Unable to load models. Try refreshing.");
+    } finally {
+      setModelsLoading(false);
+    }
+  };
 
-  const selectedProvider = modelProviders.find((p) => p.id === modelProvider);
+  useEffect(() => {
+    loadModelOptions().catch(() => {});
+  }, []);
+
+  const handleModelSave = async () => {
+    if (!config) return;
+    const nextModel = normalizedModelInput;
+    if (!nextModel || !isModelValid) return;
+    if (config.provider.default === nextModel) return;
+
+    try {
+      await updateConfig({
+        provider: {
+          default: nextModel,
+          apiKeys: config.provider.apiKeys ?? {},
+        },
+      });
+      await window.flowstate.opencode.restart();
+    } catch (error) {
+      console.error("Failed to update model selection", error);
+    }
+  };
+
+  const handleProviderSetup = async () => {
+    try {
+      if (typeof window.flowstate.app.openTerminal === "function") {
+        await window.flowstate.app.openTerminal("opencode auth login");
+      } else {
+        await window.flowstate.app.openExternal(
+          `terminal://${encodeURIComponent("opencode auth login")}`
+        );
+      }
+    } catch (error) {
+      console.error("Failed to open provider setup", error);
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
@@ -74,7 +145,7 @@ export function SettingsPage() {
                 </label>
                 <select
                   value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
+                  onChange={(e) => handleTimezoneChange(e.target.value)}
                   className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   {timezones.map((tz) => (
@@ -166,61 +237,59 @@ export function SettingsPage() {
             <div className="space-y-6">
               <div>
                 <label className="text-sm text-foreground mb-2 block">
-                  Model Provider
+                  Model ID
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {modelProviders.map((provider) => (
-                    <button
-                      key={provider.id}
-                      onClick={() => {
-                        setModelProvider(provider.id);
-                        setModelName(provider.models[0]);
-                      }}
-                      className={`px-4 py-3 rounded-lg border-2 transition-all duration-300 ease-in-out text-sm ${
-                        modelProvider === provider.id
-                          ? "border-primary bg-primary/10 text-foreground"
-                          : "border-border text-foreground/70 hover:border-border/60 hover:text-foreground"
-                      }`}
-                    >
-                      {provider.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm text-foreground mb-2 block">
-                  Model
-                </label>
-                <select
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {selectedProvider?.models.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm text-foreground mb-2 block">
-                  API Key
-                </label>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
-                    type="password"
-                    placeholder="sk-..."
-                    className="flex-1 px-4 py-2 rounded-lg bg-input-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    type="text"
+                    value={modelInput}
+                    onChange={(e) => setModelInput(e.target.value)}
+                    placeholder="opencode/gpt-5-nano"
+                    list="opencode-model-options"
+                    className="flex-1 min-w-[240px] px-4 py-2 rounded-lg bg-input-background border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  <button className="px-4 py-2 rounded-lg border border-border bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm shadow-sm">
+                  <button
+                    onClick={handleModelSave}
+                    className="px-4 py-2 rounded-lg border border-border bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm shadow-sm"
+                    disabled={!config || !normalizedModelInput || !isModelValid}
+                  >
                     Save
                   </button>
+                  <button
+                    onClick={loadModelOptions}
+                    className="px-4 py-2 rounded-lg border border-border bg-card text-foreground hover:bg-secondary transition-all duration-300 ease-in-out text-sm shadow-sm"
+                    disabled={modelsLoading}
+                  >
+                    {modelsLoading ? "Refreshing..." : "Refresh models"}
+                  </button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Your API key is stored securely and never shared
+                <datalist id="opencode-model-options">
+                  {availableModels.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {modelsError ??
+                    (hasModelOptions
+                      ? `${availableModels.length} models available from OpenCode.`
+                      : "Run 'opencode models' to register providers and models.")}
+                </div>
+                {!isModelValid && (
+                  <p className="mt-2 text-xs text-destructive">
+                    That model isn't configured. Choose one from your OpenCode models list.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={handleProviderSetup}
+                  className="px-4 py-2 rounded-lg border border-border bg-card text-foreground hover:bg-secondary transition-all duration-300 ease-in-out text-sm shadow-sm"
+                >
+                  Reconnect providers
+                </button>
+                <p className="text-xs text-muted-foreground">
+                  Runs <span className="font-mono">opencode auth login</span> so you can add providers again.
                 </p>
               </div>
             </div>

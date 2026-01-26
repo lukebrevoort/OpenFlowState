@@ -12,6 +12,7 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
@@ -20,6 +21,104 @@ import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
+
+type OpenCodeErrorPayload = {
+  error: string;
+  message?: string;
+  code?: string;
+  provider?: string;
+  model?: string;
+  status?: number;
+  retryAfter?: number;
+  details?: unknown;
+};
+
+const parseErrorDetails = (message: string): Record<string, unknown> | null => {
+  const trimmed = message.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      return JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  const match = trimmed.match(/Prompt failed:\s*(\{[\s\S]*\})/);
+  if (match?.[1]) {
+    try {
+      return JSON.parse(match[1]) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+};
+
+const extractErrorRecord = (raw: unknown): Record<string, unknown> | null => {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  if (raw instanceof Error) {
+    return parseErrorDetails(raw.message);
+  }
+
+  return raw as Record<string, unknown>;
+};
+
+const buildOpenCodeError = (
+  raw: unknown,
+  context?: { model?: string; provider?: string }
+): OpenCodeErrorPayload => {
+  const errorRecord = extractErrorRecord(raw) ?? (raw instanceof Error ? parseErrorDetails(raw.message) : null);
+  const messageFromRecord =
+    typeof errorRecord?.message === 'string'
+      ? errorRecord.message
+      : typeof errorRecord?.error === 'string'
+        ? errorRecord.error
+        : undefined;
+  const fallbackMessage =
+    typeof raw === 'string'
+      ? raw
+      : raw instanceof Error
+        ? raw.message
+        : errorRecord
+          ? JSON.stringify(errorRecord)
+          : 'OpenCode request failed.';
+  const message = messageFromRecord ?? fallbackMessage;
+  const details = errorRecord ?? parseErrorDetails(message) ?? undefined;
+  const model =
+    typeof details?.model === 'string'
+      ? details.model
+      : context?.model;
+  const inferredProvider = model ? model.split('/')[0] : undefined;
+  const provider =
+    typeof details?.provider === 'string'
+      ? details.provider
+      : inferredProvider ?? context?.provider;
+  const code = typeof details?.code === 'string' ? details.code : undefined;
+  const status = typeof details?.status === 'number' ? details.status : undefined;
+  const retryAfter =
+    typeof details?.retryAfter === 'number'
+      ? details.retryAfter
+      : typeof details?.retry_after === 'number'
+        ? details.retry_after
+        : typeof details?.retry_after_ms === 'number'
+          ? Math.ceil(details.retry_after_ms / 1000)
+          : undefined;
+
+  return {
+    error: message,
+    message,
+    code,
+    provider,
+    model,
+    status,
+    retryAfter,
+    details,
+  };
+};
 
 class ProcessManager {
   private instance: OpenCodeInstance | null = null;
@@ -87,6 +186,78 @@ class ProcessManager {
     console.log('[ProcessManager] MCP packages dir:', packagesDir);
     
     return packagesDir;
+  }
+
+  private getRepoRoot(): string {
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+    const appPath = app.getAppPath();
+
+    if (!isDev) {
+      return appPath;
+    }
+
+    const isDistMain = appPath.endsWith(`${path.sep}dist${path.sep}main`);
+    const packagesDir = isDistMain
+      ? path.resolve(appPath, '../../..')
+      : path.resolve(appPath, '..');
+    return path.resolve(packagesDir, '..');
+  }
+
+  private async updateAgentModelFiles(model: string): Promise<void> {
+    const repoRoot = this.getRepoRoot();
+    const agentPaths = [
+      path.join(repoRoot, '.opencode', 'agent', 'flowstate.md'),
+      path.join(repoRoot, 'agents', 'flowstate.md'),
+    ];
+
+    for (const agentPath of agentPaths) {
+      try {
+        if (!fs.existsSync(agentPath)) {
+          continue;
+        }
+        const raw = await fsPromises.readFile(agentPath, 'utf8');
+        const lines = raw.split('\n');
+        const firstDelimiter = lines.indexOf('---');
+        const secondDelimiter = lines.indexOf('---', firstDelimiter + 1);
+        if (firstDelimiter === -1 || secondDelimiter === -1) {
+          continue;
+        }
+
+        let updated = false;
+        for (let i = firstDelimiter + 1; i < secondDelimiter; i += 1) {
+          if (lines[i].trim().startsWith('model:')) {
+            lines[i] = `model: ${model}`;
+            updated = true;
+            break;
+          }
+        }
+
+        if (!updated) {
+          lines.splice(secondDelimiter, 0, `model: ${model}`);
+          updated = true;
+        }
+
+        if (updated) {
+          await fsPromises.writeFile(agentPath, lines.join('\n'));
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to update agent model file:', agentPath, error);
+      }
+    }
+
+    const configPath = path.join(repoRoot, 'flowstate.config.json');
+    try {
+      if (fs.existsSync(configPath)) {
+        const rawConfig = await fsPromises.readFile(configPath, 'utf8');
+        const config = JSON.parse(rawConfig) as { preferences?: { defaultProvider?: string } };
+        if (config.preferences) {
+          config.preferences.defaultProvider = model;
+          await fsPromises.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+        }
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to update flowstate.config.json', error);
+    }
   }
 
   /**
@@ -237,6 +408,9 @@ class ProcessManager {
     console.log('Starting OpenCode server...');
 
     try {
+      const selectedModel = configStore.get()?.provider.default ?? 'opencode/grok-code';
+      await this.updateAgentModelFiles(selectedModel);
+
       // Build MCP configuration with auth tokens
       const mcpConfig = await this.buildMcpConfig();
       console.log('[ProcessManager] MCP servers configured:', Object.keys(mcpConfig));
@@ -244,7 +418,6 @@ class ProcessManager {
 
       // Start OpenCode (both server and client)
       // Using port 0 lets the OS assign an available port
-      const selectedModel = configStore.get()?.provider.default ?? 'opencode/grok-code';
       console.log('[ProcessManager] Using OpenCode model:', selectedModel);
       this.instance = await createOpencode({
         hostname: '127.0.0.1',
@@ -462,7 +635,12 @@ class ProcessManager {
       console.log('[ProcessManager] Prompt result received:', result.data ? 'YES' : 'NO');
       if (result.error) {
         console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
-        throw new Error(`Prompt failed: ${JSON.stringify(result.error)}`);
+        const errorPayload = buildOpenCodeError(result.error, {
+          model: configStore.get()?.provider.default,
+        });
+        const thrown = new Error(errorPayload.error);
+        (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+        throw thrown;
       }
 
       if (!result.data) {
@@ -504,14 +682,16 @@ class ProcessManager {
       };
     } catch (error) {
       console.error('Error sending message:', error);
-      
+
+      const errorPayload =
+        (error as Error & { opencode?: OpenCodeErrorPayload }).opencode ??
+        buildOpenCodeError(error, { model: configStore.get()?.provider.default });
+
       if (webContents) {
         webContents.send('opencode:progress', { status: 'error', sessionId: this.activeSessionId });
-        webContents.send('opencode:error', { 
-          error: error instanceof Error ? error.message : String(error) 
-        });
+        webContents.send('opencode:error', errorPayload);
       }
-      
+
       throw error;
     }
   }
@@ -551,7 +731,12 @@ class ProcessManager {
       console.log('[ProcessManager] session.prompt() returned:', result.data ? 'YES' : 'NO');
       if (result.error) {
         console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
-        throw new Error(`Prompt failed: ${JSON.stringify(result.error)}`);
+        const errorPayload = buildOpenCodeError(result.error, {
+          model: configStore.get()?.provider.default,
+        });
+        const thrown = new Error(errorPayload.error);
+        (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+        throw thrown;
       }
 
       if (!result.data) {
@@ -590,9 +775,10 @@ class ProcessManager {
 
     } catch (error) {
       console.error('Error in streamMessage:', error);
-      webContents.send('opencode:error', { 
-        error: error instanceof Error ? error.message : String(error) 
-      });
+      const errorPayload =
+        (error as Error & { opencode?: OpenCodeErrorPayload }).opencode ??
+        buildOpenCodeError(error, { model: configStore.get()?.provider.default });
+      webContents.send('opencode:error', errorPayload);
       webContents.send('opencode:progress', { status: 'error', sessionId: this.activeSessionId });
       throw error;
     }
