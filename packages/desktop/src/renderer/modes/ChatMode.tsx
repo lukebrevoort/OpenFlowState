@@ -244,7 +244,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const showThinking = status === "thinking" || isLoading;
 
   const ThinkingIndicator = () => (
-    <div className="flex justify-end">
+    <div className="flex justify-start">
       <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl">
         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
           <Sparkles className="w-4 h-4 text-primary" />
@@ -253,9 +253,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="sr-only">Thinking</span>
           <span className="flex items-center gap-1" aria-hidden="true">
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.2s]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.1s]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce [animation-delay:-0.2s]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce [animation-delay:-0.1s]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce" />
           </span>
         </div>
       </div>
@@ -479,7 +479,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           {messages.map((message) => (
             <div
               key={message.id}
-              className="flex justify-end"
+              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={`max-w-[70%] rounded-2xl px-4 py-3 ${
