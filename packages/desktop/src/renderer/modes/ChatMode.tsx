@@ -244,7 +244,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const showThinking = status === "thinking" || isLoading;
 
   const ThinkingIndicator = () => (
-    <div className="flex justify-start">
+    <div className="w-full flex justify-start">
       <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl">
         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
           <Sparkles className="w-4 h-4 text-primary" />
@@ -378,7 +378,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-shrink-0 px-6 pt-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -475,11 +475,11 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
-        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
+        <div className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`w-full flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={`max-w-[70%] rounded-2xl px-4 py-3 ${
@@ -498,7 +498,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 )}
                 <div className="text-sm leading-relaxed">
                   {message.role === "user" ? (
-                    <span className="text-secondary">{message.content}</span>
+                    <span className="whitespace-pre-wrap break-words text-secondary">
+                      {message.content}
+                    </span>
                   ) : (
                     <AssistantMessageContent message={message} />
                   )}
@@ -527,7 +529,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
       {handoffTask && (
         <div className="px-6 pb-4">
-          <div className="max-w-4xl mx-auto">
+          <div className="w-full max-w-4xl mx-auto">
             <TaskHandoffCard
               title={handoffTask.title}
               description={handoffTask.description}
@@ -538,7 +540,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-shrink-0 px-6 pb-6">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
             <div className="flex items-center gap-3">
               <textarea
