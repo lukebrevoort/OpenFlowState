@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 import { Send, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
 import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
@@ -33,11 +34,159 @@ const getTypingStepSize = (contentLength: number) => {
   if (contentLength < 700) return 10;
   return 14;
 };
+
+const MAX_INPUT_HEIGHT = 128;
+
+const renderMessageParts = (parts?: Message["parts"]) => {
+  if (!parts || parts.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {parts.map((part, index) => (
+        <span
+          key={`${part.type}-${index}`}
+          className="flex items-center gap-1 rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
+        >
+          <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
+            {part.type.replace(/_/g, " ")}
+          </span>
+          {part.text && (
+            <span className="text-[11px] opacity-80">
+              {part.text.length > 40
+                ? `${part.text.slice(0, 40)}…`
+                : part.text}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+const formatContent = (content: string) => {
+  const parts = content.split(/(```[\s\S]*?```)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("```")) {
+      const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
+      return (
+        <pre
+          key={index}
+          className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
+        >
+          <code>{code}</code>
+        </pre>
+      );
+    }
+
+    const lines = part.split("\n");
+
+    return (
+      <span key={index}>
+        {lines.map((line, lineIndex) => {
+          if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
+            return (
+              <div key={lineIndex} className="flex gap-2 my-1">
+                <span className="text-primary">•</span>
+                <span
+                  className="text-foreground"
+                  dangerouslySetInnerHTML={{
+                    __html: line
+                      .replace(/^[•-]\s*/, "")
+                      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
+                  }}
+                />
+              </div>
+            );
+          }
+
+          return (
+            <span key={lineIndex}>
+              <span
+                className="text-foreground"
+                dangerouslySetInnerHTML={{
+                  __html: line.replace(
+                    /\*\*(.*?)\*\*/g,
+                    "<strong>$1</strong>",
+                  ),
+                }}
+              />
+              {lineIndex < lines.length - 1 && <br />}
+            </span>
+          );
+        })}
+      </span>
+    );
+  });
+};
+
+const AssistantMessageContent = ({
+  message,
+  animatedMessagesRef,
+}: {
+  message: Message;
+  animatedMessagesRef: MutableRefObject<Set<string>>;
+}) => {
+  const shouldAnimate = !animatedMessagesRef.current.has(message.id);
+  const [visibleText, setVisibleText] = useState(
+    shouldAnimate ? "" : message.content,
+  );
+  const [isComplete, setIsComplete] = useState(!shouldAnimate);
+
+  useEffect(() => {
+    if (!shouldAnimate) {
+      setVisibleText(message.content);
+      setIsComplete(true);
+      return;
+    }
+
+    let currentIndex = 0;
+    const step = getTypingStepSize(message.content.length);
+    let timeoutId: number | null = null;
+
+    const tick = () => {
+      currentIndex = Math.min(message.content.length, currentIndex + step);
+      setVisibleText(message.content.slice(0, currentIndex));
+
+      if (currentIndex < message.content.length) {
+        timeoutId = window.setTimeout(tick, 22);
+      } else {
+        setIsComplete(true);
+        animatedMessagesRef.current.add(message.id);
+      }
+    };
+
+    tick();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [message.content, message.id, shouldAnimate, animatedMessagesRef]);
+
+  if (!isComplete) {
+    return (
+      <span className="whitespace-pre-wrap">
+        {visibleText}
+        <span className="inline-block w-2 animate-pulse text-primary">▍</span>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {formatContent(message.content)}
+      {renderMessageParts(message.parts)}
+    </>
+  );
+};
 /**
  * ChatMode - Primary chat interface for natural language interaction with OpenCode
  */
 function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [mcpStatus, setMcpStatus] = useState<Record<
     string,
     McpServerStatus
@@ -51,15 +200,13 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const animatedMessagesRef = useRef(new Set<string>());
   const initialMessagesRef = useRef(false);
 
-  const {
-    messages,
-    isLoading,
-    status,
-    error,
-    currentSessionId,
-    handoffTask,
-    timeline,
-  } = useChatStore();
+  const messages = useChatStore((state) => state.messages);
+  const isLoading = useChatStore((state) => state.isLoading);
+  const status = useChatStore((state) => state.status);
+  const error = useChatStore((state) => state.error);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const handoffTask = useChatStore((state) => state.handoffTask);
+  const timeline = useChatStore((state) => state.timeline);
   const { sendMessage, checkStatus, refreshTimeline } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
@@ -72,6 +219,17 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     messages.forEach((message) => animatedMessagesRef.current.add(message.id));
     initialMessagesRef.current = true;
   }, [messages]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, MAX_INPUT_HEIGHT);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > MAX_INPUT_HEIGHT ? "auto" : "hidden";
+  }, [input]);
 
   useEffect(() => {
     checkStatus();
@@ -215,37 +373,11 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     0,
   );
 
-  const renderMessageParts = (parts?: Message["parts"]) => {
-    if (!parts || parts.length === 0) return null;
-
-    return (
-      <div className="mt-3 flex flex-wrap gap-2">
-        {parts.map((part, index) => (
-          <span
-            key={`${part.type}-${index}`}
-            className="flex items-center gap-1 rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
-          >
-            <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
-              {part.type.replace(/_/g, " ")}
-            </span>
-            {part.text && (
-              <span className="text-[11px] opacity-80">
-                {part.text.length > 40
-                  ? `${part.text.slice(0, 40)}…`
-                  : part.text}
-              </span>
-            )}
-          </span>
-        ))}
-      </div>
-    );
-  };
-
   const showThinking = status === "thinking" || isLoading;
 
   const ThinkingIndicator = () => (
     <div className="w-full flex justify-start">
-      <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl">
+      <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl shadow-sm">
         <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
           <Sparkles className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium text-primary">FlowState</span>
@@ -262,118 +394,6 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     </div>
   );
 
-  const AssistantMessageContent = ({ message }: { message: Message }) => {
-    const shouldAnimate = !animatedMessagesRef.current.has(message.id);
-    const [visibleText, setVisibleText] = useState(
-      shouldAnimate ? "" : message.content,
-    );
-    const [isComplete, setIsComplete] = useState(!shouldAnimate);
-
-    useEffect(() => {
-      if (!shouldAnimate) {
-        setVisibleText(message.content);
-        setIsComplete(true);
-        return;
-      }
-
-      let currentIndex = 0;
-      const step = getTypingStepSize(message.content.length);
-      let timeoutId: number | null = null;
-
-      const tick = () => {
-        currentIndex = Math.min(message.content.length, currentIndex + step);
-        setVisibleText(message.content.slice(0, currentIndex));
-
-        if (currentIndex < message.content.length) {
-          timeoutId = window.setTimeout(tick, 22);
-        } else {
-          setIsComplete(true);
-          animatedMessagesRef.current.add(message.id);
-        }
-      };
-
-      tick();
-
-      return () => {
-        if (timeoutId) {
-          window.clearTimeout(timeoutId);
-        }
-      };
-    }, [message.content, message.id, shouldAnimate]);
-
-    if (!isComplete) {
-      return (
-        <span className="whitespace-pre-wrap">
-          {visibleText}
-          <span className="inline-block w-2 animate-pulse text-primary">▍</span>
-        </span>
-      );
-    }
-
-    return (
-      <>
-        {formatContent(message.content)}
-        {renderMessageParts(message.parts)}
-      </>
-    );
-  };
-
-  const formatContent = (content: string) => {
-    const parts = content.split(/(```[\s\S]*?```)/g);
-
-    return parts.map((part, index) => {
-      if (part.startsWith("```")) {
-        const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
-        return (
-          <pre
-            key={index}
-            className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
-          >
-            <code>{code}</code>
-          </pre>
-        );
-      }
-
-      const lines = part.split("\n");
-
-      return (
-        <span key={index}>
-          {lines.map((line, lineIndex) => {
-            if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
-              return (
-                <div key={lineIndex} className="flex gap-2 my-1">
-                  <span className="text-primary">•</span>
-                  <span
-                    className="text-foreground"
-                    dangerouslySetInnerHTML={{
-                      __html: line
-                        .replace(/^[•-]\s*/, "")
-                        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-                    }}
-                  />
-                </div>
-              );
-            }
-
-            return (
-              <span key={lineIndex}>
-                <span
-                  className="text-foreground"
-                  dangerouslySetInnerHTML={{
-                    __html: line.replace(
-                      /\*\*(.*?)\*\*/g,
-                      "<strong>$1</strong>",
-                    ),
-                  }}
-                />
-                {lineIndex < lines.length - 1 && <br />}
-              </span>
-            );
-          })}
-        </span>
-      );
-    });
-  };
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -502,7 +522,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                       {message.content}
                     </span>
                   ) : (
-                    <AssistantMessageContent message={message} />
+                    <AssistantMessageContent
+                      message={message}
+                      animatedMessagesRef={animatedMessagesRef}
+                    />
                   )}
                 </div>
                 <div
@@ -542,15 +565,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       <div className="flex-shrink-0 px-6 pb-6">
         <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-end gap-3">
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Type your message..."
                 rows={1}
                 disabled={isLoading}
-                className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 disabled:opacity-50"
+                className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 overflow-y-auto disabled:opacity-50"
                 style={{ minHeight: "24px" }}
               />
               <button
