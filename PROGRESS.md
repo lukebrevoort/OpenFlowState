@@ -1127,3 +1127,80 @@ Renderer (useOpenCode.ts):
 **NEXT STEPS**
 - Send "hello" and confirm: one assistant message, no task handoff.
 - Trigger a tool-heavy request and confirm: task handoff appears only when promoted.
+
+---
+
+## Tasks Completed (Jan 25, 2026 - Chat Alignment + Thinking Indicator)
+**Timestamp**: Jan 25, 2026 19:05
+
+**TASKS COMPLETED**
+- ✅ Right-aligned the chat layout to avoid the condensed/centered column.
+- ✅ Added a chat-level thinking indicator for in-progress responses.
+- ✅ Prevented message typing animation from replaying on tab switches.
+
+**IN PROGRESS**
+- [ ] Validate chat alignment and thinking indicator in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and verify the chat panel aligns right with the new indicator.
+
+**UPDATE (Jan 25, 2026 19:15)**
+- Adjusted approach: keep the overall chat container centered; right-align chat bubbles only.
+- Updated thinking indicator to a 3-dot bounce animation.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Chat Loading UI Polish)
+**Timestamp**: Jan 28, 2026 14:15
+
+**TASKS COMPLETED**
+- ✅ Enhanced the chat loading indicator with clearer status copy and skeleton lines.
+- ✅ Surfaced the current activity title/detail inside the loading bubble for better feedback.
+
+**IN PROGRESS**
+- [ ] Validate the updated loading UI in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and send a prompt to confirm the new processing state reads clearly.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Simplified Thinking Indicator)
+**Timestamp**: Jan 28, 2026 14:22
+
+**TASKS COMPLETED**
+- ✅ Simplified the chat loading UI to just the three bouncing dots.
+
+**IN PROGRESS**
+- [ ] Validate the simplified indicator in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm the dots-only indicator feels clear.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Chat Input Auto-Expand + Flicker Reduction)
+**Timestamp**: Jan 28, 2026 14:40
+
+**TASKS COMPLETED**
+- ✅ Added textarea auto-grow with upward expansion and internal scroll cap.
+- ✅ Reduced loading-time flicker by stabilizing assistant message rendering and narrowing chat store subscriptions.
+
+**IN PROGRESS**
+- [ ] Validate long-input behavior and message loading stability in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and type a multi-line prompt to confirm the input grows upward.
+- Send a tool-heavy prompt and verify the response no longer flickers during loading.

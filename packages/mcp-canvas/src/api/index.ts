@@ -40,6 +40,112 @@ const resolveUrl = (candidate: string, base: string) => {
   }
 };
 
+const DEFAULT_PER_PAGE = Number(process.env.CANVAS_DEFAULT_PER_PAGE || '100');
+const MAX_PAGES = Number(process.env.CANVAS_MAX_PAGES || '25');
+const MAX_LIST_ITEMS = Number(process.env.CANVAS_MAX_LIST_ITEMS || '2500');
+
+const parseNextLink = (linkHeader: string | null) => {
+  if (!linkHeader) return null;
+
+  const entries = linkHeader
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const entry of entries) {
+    const parts = entry.split(';').map((part) => part.trim());
+    if (parts.length === 0) continue;
+
+    const urlPart = parts[0];
+    const match = urlPart.match(/^<(.+)>$/);
+    const url = match?.[1];
+    if (!url) continue;
+
+    const relPart = parts.find((part) => part.startsWith('rel='));
+    const rel = relPart?.slice(4).replace(/^"|"$/g, '');
+    if (rel === 'next') return url;
+  }
+
+  return null;
+};
+
+const ensurePerPage = (url: URL, perPage: number) => {
+  if (!url.searchParams.has('per_page')) {
+    url.searchParams.set('per_page', String(perPage));
+  }
+};
+
+async function canvasFetchResponse(url: string, options: RequestInit = {}) {
+  const { token } = getCanvasConfig();
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Canvas API error (${response.status}): ${errorText}`);
+  }
+
+  return response;
+}
+
+async function canvasFetchAllPages<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  paging?: {
+    perPage?: number;
+    maxPages?: number;
+    maxItems?: number;
+  }
+): Promise<T[]> {
+  const { baseUrl } = getCanvasConfig();
+
+  const perPage = paging?.perPage ?? DEFAULT_PER_PAGE;
+  const maxPages = paging?.maxPages ?? MAX_PAGES;
+  const maxItems = paging?.maxItems ?? MAX_LIST_ITEMS;
+
+  const initialUrl = new URL(`${baseUrl}/api/v1${endpoint}`);
+  ensurePerPage(initialUrl, perPage);
+
+  let nextUrl: string | null = initialUrl.toString();
+  const results: T[] = [];
+
+  for (let page = 0; page < maxPages && nextUrl; page += 1) {
+    const response = await canvasFetchResponse(nextUrl, options);
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error(
+        `Canvas API pagination expected an array response for ${endpoint}`
+      );
+    }
+
+    results.push(...(data as T[]));
+
+    if (results.length > maxItems) {
+      throw new Error(
+        `Canvas API pagination exceeded ${maxItems} items (endpoint: ${endpoint}). Narrow your query.`
+      );
+    }
+
+    nextUrl = parseNextLink(response.headers.get('link'));
+  }
+
+  if (nextUrl) {
+    throw new Error(
+      `Canvas API pagination exceeded ${maxPages} pages (endpoint: ${endpoint}). Narrow your query.`
+    );
+  }
+
+  return results;
+}
+
 // Generic fetch wrapper for Canvas API
 async function canvasFetch<T>(
   endpoint: string,
@@ -261,8 +367,8 @@ export async function getCourses(options?: {
   
   const queryString = params.toString();
   const endpoint = `/courses${queryString ? `?${queryString}` : ''}`;
-  
-  return canvasFetch<CanvasCourse[]>(endpoint);
+
+  return canvasFetchAllPages<CanvasCourse>(endpoint);
 }
 
 /**
@@ -294,8 +400,8 @@ export async function getAssignments(
   
   const queryString = params.toString();
   const endpoint = `/courses/${courseId}/assignments${queryString ? `?${queryString}` : ''}`;
-  
-  return canvasFetch<CanvasAssignment[]>(endpoint);
+
+  return canvasFetchAllPages<CanvasAssignment>(endpoint);
 }
 
 /**
@@ -314,7 +420,7 @@ export async function getAssignment(
  * Get upcoming assignments across all courses
  */
 export async function getUpcomingAssignments(): Promise<CanvasTodoItem[]> {
-  return canvasFetch<CanvasTodoItem[]>('/users/self/todo');
+  return canvasFetchAllPages<CanvasTodoItem>('/users/self/todo');
 }
 
 /**
@@ -335,7 +441,7 @@ export async function getSubmission(
 export async function getCourseSubmissions(
   courseId: number
 ): Promise<CanvasSubmission[]> {
-  return canvasFetch<CanvasSubmission[]>(
+  return canvasFetchAllPages<CanvasSubmission>(
     `/courses/${courseId}/students/submissions?student_ids[]=self`
   );
 }
@@ -369,14 +475,14 @@ export async function getAnnouncements(
     params.append('active_only', 'true');
   }
   
-  return canvasFetch<CanvasAnnouncement[]>(`/announcements?${params.toString()}`);
+  return canvasFetchAllPages<CanvasAnnouncement>(`/announcements?${params.toString()}`);
 }
 
 /**
  * Get modules for a course
  */
 export async function getModules(courseId: number): Promise<CanvasModule[]> {
-  return canvasFetch<CanvasModule[]>(`/courses/${courseId}/modules`);
+  return canvasFetchAllPages<CanvasModule>(`/courses/${courseId}/modules`);
 }
 
 /**
@@ -386,7 +492,7 @@ export async function getModuleItems(
   courseId: number,
   moduleId: number
 ): Promise<CanvasModuleItem[]> {
-  return canvasFetch<CanvasModuleItem[]>(
+  return canvasFetchAllPages<CanvasModuleItem>(
     `/courses/${courseId}/modules/${moduleId}/items`
   );
 }
@@ -395,7 +501,7 @@ export async function getModuleItems(
  * Get grades for all enrolled courses
  */
 export async function getGrades(): Promise<CanvasGrade[]> {
-  const enrollments = await canvasFetch<CanvasEnrollment[]>(
+  const enrollments = await canvasFetchAllPages<CanvasEnrollment>(
     '/users/self/enrollments?type[]=StudentEnrollment&include[]=grades'
   );
   
@@ -425,6 +531,16 @@ export async function getCalendarEvents(options?: {
   context_code: string;
   html_url: string;
 }>> {
+  type CanvasCalendarEvent = {
+    id: number;
+    title: string;
+    start_at: string;
+    end_at: string;
+    type: string;
+    context_code: string;
+    html_url: string;
+  };
+
   const params = new URLSearchParams();
   
   if (options?.startDate) {
@@ -440,8 +556,10 @@ export async function getCalendarEvents(options?: {
   }
   
   params.append('all_events', 'true');
-  
-  return canvasFetch(`/calendar_events?${params.toString()}`);
+
+  return canvasFetchAllPages<CanvasCalendarEvent>(
+    `/calendar_events?${params.toString()}`
+  );
 }
 
 // =========================================================================
@@ -449,9 +567,7 @@ export async function getCalendarEvents(options?: {
 // =========================================================================
 
 export async function listCourseFiles(courseId: number): Promise<CanvasFile[]> {
-  const params = new URLSearchParams();
-  params.append('per_page', '100');
-  return canvasFetch<CanvasFile[]>(`/courses/${courseId}/files?${params.toString()}`);
+  return canvasFetchAllPages<CanvasFile>(`/courses/${courseId}/files`, {}, { perPage: 100 });
 }
 
 export async function getFile(fileId: number): Promise<CanvasFile> {
