@@ -1,30 +1,82 @@
-import { Settings, HelpCircle } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Menu, X } from 'lucide-react';
 
-/**
- * TitleBar - macOS-style title bar with traffic light spacing
- */
-function TitleBar() {
+interface TitleBarProps {
+  isSidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  showHomeButton: boolean;
+  onNavigateHome: () => void;
+  onNavigateSettings: () => void;
+  navigation?: ReactNode;
+}
+
+function TitleBar({
+  isSidebarOpen,
+  onToggleSidebar,
+  showHomeButton,
+  onNavigateHome,
+  onNavigateSettings,
+  navigation,
+}: TitleBarProps) {
   return (
-    <div className="titlebar-drag h-12 bg-card border-b border-border flex items-center justify-between px-4">
-      <div className="w-20" />
-
-      <h1 className="text-sm font-semibold text-foreground">FlowState</h1>
-
-      <div className="titlebar-no-drag flex items-center gap-2">
+    <header className="fs-titlebar" role="banner">
+      <div className="titlebar-no-drag flex items-center gap-4">
         <button
-          className="p-2 rounded-lg hover:bg-secondary transition-colors"
-          title="Settings"
+          type="button"
+          onClick={onToggleSidebar}
+          className="fs-icon-button"
+          aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
         >
-          <Settings className="w-4 h-4 text-muted-foreground" />
+          {isSidebarOpen ? (
+            <X className="w-5 h-5 text-foreground" />
+          ) : (
+            <Menu className="w-5 h-5 text-foreground" />
+          )}
         </button>
+
         <button
-          className="p-2 rounded-lg hover:bg-secondary transition-colors"
-          title="Help"
+          type="button"
+          onClick={onNavigateHome}
+          className="titlebar-no-drag flex items-center gap-3 transition-opacity duration-300 ease-in-out hover:opacity-80"
+          aria-label="Go to Home"
         >
-          <HelpCircle className="w-4 h-4 text-muted-foreground" />
+          <div
+            className="w-8 h-8 rounded-xl border flex items-center justify-center"
+            style={{
+              borderColor: 'var(--fs-line)',
+              backgroundColor: 'color-mix(in srgb, var(--fs-surface-1) 55%, transparent)',
+              boxShadow: 'var(--fs-shadow-sm)',
+            }}
+            aria-hidden="true"
+          >
+            <span
+              className="text-sm text-foreground"
+              style={{ fontFamily: 'var(--fs-font-display)' }}
+            >
+              F
+            </span>
+          </div>
+          <h1 className="text-lg text-foreground" style={{ fontFamily: 'var(--fs-font-display)' }}>
+            FlowState
+          </h1>
         </button>
       </div>
-    </div>
+
+      <div className="titlebar-no-drag flex items-center justify-center">
+        {navigation}
+      </div>
+
+      <div className="titlebar-no-drag flex items-center gap-2">
+        {showHomeButton && (
+          <button type="button" onClick={onNavigateHome} className="fs-pill-button">
+            Home
+          </button>
+        )}
+        <button type="button" onClick={onNavigateSettings} className="fs-pill-button">
+          Settings
+        </button>
+      </div>
+    </header>
   );
 }
 

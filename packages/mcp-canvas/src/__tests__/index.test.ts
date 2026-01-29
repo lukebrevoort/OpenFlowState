@@ -1,381 +1,201 @@
 /**
  * @flowstate/mcp-canvas Test Suite
- * 
- * Tests for Canvas LMS MCP server tools and API client.
- * Uses direct function calls to test tool logic without mocking MCP internals.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
-// Mock the API module
-const mockConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+const ORIGINAL_ENV = { ...process.env };
 
-// Mock canvasApi module with all functions
-const mockApi = {
-  getCourses: vi.fn(),
-  getCourse: vi.fn(),
-  getAssignments: vi.fn(),
-  getAssignment: vi.fn(),
-  getUpcomingAssignments: vi.fn(),
-  getGrades: vi.fn(),
-  getSubmission: vi.fn(),
-  getSubmissionDetailed: vi.fn(),
-  getAnnouncements: vi.fn(),
-  getModules: vi.fn(),
-  getModuleItems: vi.fn(),
-  getCalendarEvents: vi.fn(),
-  listCourseFiles: vi.fn(),
-  getFile: vi.fn(),
-  downloadFileById: vi.fn(),
-  downloadFileByUrl: vi.fn(),
+const makeHeaders = (values: Record<string, string>) => ({
+  get: (key: string) => values[key.toLowerCase()] ?? null,
+});
+
+const makeResponse = (
+  data: unknown,
+  options?: { url?: string; status?: number; headers?: Record<string, string> }
+) => {
+  const headersLower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(options?.headers ?? {})) headersLower[k.toLowerCase()] = v;
+
+  const status = options?.status ?? 200;
+
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    url: options?.url ?? 'https://canvas.example.com/api/v1/test',
+    headers: makeHeaders(headersLower),
+    json: async () => data,
+    text: async () => (typeof data === 'string' ? data : JSON.stringify(data)),
+  } as any;
 };
 
-// Mock the API module before importing tools
-vi.mock('../api/index.js', () => mockApi);
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  vi.unstubAllGlobals();
+  vi.resetModules();
+});
 
-describe('Canvas API Client Type Tests', () => {
-  describe('CanvasCourse type', () => {
-    it('should accept valid course data', () => {
-      const course = {
-        id: 1,
-        name: 'Introduction to Computer Science',
-        course_code: 'CS 101',
-        enrollment_term_id: 1,
-        start_at: '2026-01-01T00:00:00Z',
-        end_at: '2026-05-15T00:00:00Z',
-        workflow_state: 'available',
-        created_at: '2026-01-01T00:00:00Z',
-      };
-      
-      expect(course.id).toBe(1);
-      expect(course.name).toBe('Introduction to Computer Science');
-      expect(course.workflow_state).toBe('available');
-    });
+describe('Canvas auth mode selection', () => {
+  it('uses bearer token by default when CANVAS_API_TOKEN is set', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+    delete process.env.CANVAS_AUTH_MODE;
 
-    it('should accept null dates', () => {
-      const course = {
-        id: 1,
-        name: 'Test',
-        course_code: 'TEST',
-        enrollment_term_id: 1,
-        start_at: null,
-        end_at: null,
-        workflow_state: 'available',
-        created_at: '2026-01-01T00:00:00Z',
-      };
-      
-      expect(course.start_at).toBeNull();
-      expect(course.end_at).toBeNull();
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      expect(url).toContain('/api/v1/users/self/todo');
+      expect(init?.headers?.Authorization).toBe('Bearer secret-token');
+      return makeResponse([], { headers: { 'content-type': 'application/json' }, url });
     });
+    vi.stubGlobal('fetch', fetchMock as any);
 
-    it('should accept enrollments with grades', () => {
-      const course = {
-        id: 1,
-        name: 'Test Course',
-        course_code: 'TEST',
-        enrollment_term_id: 1,
-        start_at: null,
-        end_at: null,
-        workflow_state: 'available',
-        created_at: '2026-01-01T00:00:00Z',
-        enrollments: [{
-          grades: {
-            current_grade: 'A',
-            current_score: 95,
-            final_grade: null,
-            final_score: null,
-          },
-        }],
-      };
-      
-      expect(course.enrollments?.[0]?.grades?.current_grade).toBe('A');
-      expect(course.enrollments?.[0]?.grades?.current_score).toBe(95);
-    });
+    const api = await import('../api/index.js');
+    await api.getUpcomingAssignments();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
-  describe('CanvasAssignment type', () => {
-    it('should accept valid assignment data', () => {
-      const assignment = {
-        id: 1,
-        name: 'Homework 1',
-        description: 'Solve problems 1-10',
-        due_at: '2026-01-25T23:59:00Z',
-        unlock_at: null,
-        lock_at: null,
-        points_possible: 100,
-        course_id: 1,
-        submission_types: ['online_text_entry', 'online_url'],
-        has_submitted_submissions: false,
-        html_url: 'https://canvas.example.com/assignments/1',
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-      };
-      
-      expect(assignment.points_possible).toBe(100);
-      expect(assignment.submission_types).toHaveLength(2);
-      expect(assignment.has_submitted_submissions).toBe(false);
+  it('falls back to browser auth when no token is set but storage state is present', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-canvas-'));
+    const storageStatePath = path.join(tmp, 'storage_state.json');
+    await fs.writeFile(
+      storageStatePath,
+      JSON.stringify({
+        cookies: [
+          { name: 'canvas_session', value: 'session123', domain: 'canvas.example.com', path: '/' },
+        ],
+      }),
+      'utf8'
+    );
+
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    delete process.env.CANVAS_AUTH_MODE;
+    delete process.env.CANVAS_API_TOKEN;
+    process.env.CANVAS_STORAGE_STATE_PATH = storageStatePath;
+
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Cookie).toContain('canvas_session=session123');
+      expect(init?.headers?.Authorization).toBeUndefined();
+      return makeResponse([], {
+        headers: { 'content-type': 'application/json' },
+        url: 'https://canvas.example.com/api/v1/users/self/todo',
+      });
     });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await api.getUpcomingAssignments();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
-  describe('CanvasGrade type', () => {
-    it('should accept valid grade data', () => {
-      const grade = {
-        course_id: 1,
-        course_name: 'CS 101',
-        current_grade: 'A',
-        current_score: 95,
-        final_grade: null,
-        final_score: null,
-      };
-      
-      expect(grade.current_score).toBe(95);
-      expect(grade.final_score).toBeNull();
-    });
+  it('uses Cookie header when CANVAS_AUTH_MODE=browser', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-canvas-'));
+    const storageStatePath = path.join(tmp, 'storage_state.json');
+    await fs.writeFile(
+      storageStatePath,
+      JSON.stringify({
+        cookies: [
+          { name: 'canvas_session', value: 'session123', domain: 'canvas.example.com', path: '/' },
+          { name: '_csrf_token', value: 'csrf456', domain: 'canvas.example.com', path: '/' },
+        ],
+      }),
+      'utf8'
+    );
 
-    it('should accept empty grades', () => {
-      const grade = {
-        course_id: 1,
-        course_name: 'CS 101',
-        current_grade: null,
-        current_score: null,
-        final_grade: null,
-        final_score: null,
-      };
-      
-      expect(grade.current_grade).toBeNull();
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_AUTH_MODE = 'browser';
+    process.env.CANVAS_STORAGE_STATE_PATH = storageStatePath;
+    delete process.env.CANVAS_API_TOKEN;
+
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Cookie).toContain('canvas_session=session123');
+      expect(init?.headers?.Authorization).toBeUndefined();
+      return makeResponse([], {
+        headers: { 'content-type': 'application/json' },
+        url: 'https://canvas.example.com/api/v1/users/self/todo',
+      });
     });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await api.getUpcomingAssignments();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
-  describe('CanvasSubmission type', () => {
-    it('should accept valid submission data', () => {
-      const submission = {
-        id: 1,
-        assignment_id: 1,
-        user_id: 1,
-        submitted_at: '2026-01-24T22:00:00Z',
-        score: 95,
-        grade: 'A',
-        grade_matches_current_submission: true,
-        workflow_state: 'submitted',
-        late: false,
-        missing: false,
-        excused: false,
-        attempt: 1,
-      };
-      
-      expect(submission.score).toBe(95);
-      expect(submission.late).toBe(false);
-    });
+  it('honors CANVAS_AUTH_MODE=token even if browser storage state is present', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_AUTH_MODE = 'token';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+    process.env.CANVAS_STORAGE_STATE_PATH = '/tmp/does-not-matter.json';
 
-    it('should accept late submission', () => {
-      const submission = {
-        id: 1,
-        assignment_id: 1,
-        user_id: 1,
-        submitted_at: '2026-01-26T01:00:00Z',
-        score: 85,
-        grade: 'B',
-        grade_matches_current_submission: true,
-        workflow_state: 'submitted',
-        late: true,
-        missing: false,
-        excused: false,
-        attempt: 1,
-      };
-      
-      expect(submission.late).toBe(true);
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Authorization).toBe('Bearer secret-token');
+      expect(init?.headers?.Cookie).toBeUndefined();
+      return makeResponse([], { headers: { 'content-type': 'application/json' } });
     });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await api.getUpcomingAssignments();
   });
 
-  describe('CanvasAnnouncement type', () => {
-    it('should accept valid announcement data', () => {
-      const announcement = {
-        id: 1,
-        title: 'Exam Schedule Change',
-        message: 'The midterm exam has been rescheduled to Feb 5th.',
-        posted_at: '2026-01-15T10:00:00Z',
-        author: { id: 1, display_name: 'Professor Smith' },
-        context_code: 'course_1',
-      };
-      
-      expect(announcement.author.display_name).toBe('Professor Smith');
-    });
+  it('throws a helpful error when token auth is selected but token is missing', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_AUTH_MODE = 'token';
+    delete process.env.CANVAS_API_TOKEN;
+
+    const api = await import('../api/index.js');
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/CANVAS_API_TOKEN/);
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/CANVAS_AUTH_MODE=browser/);
   });
 
-  describe('CanvasModule type', () => {
-    it('should accept valid module data', () => {
-      const module = {
-        id: 1,
-        name: 'Week 1: Introduction',
-        position: 1,
-        unlock_at: null,
-        require_sequential_progress: false,
-        items_count: 5,
-        state: 'started',
-      };
-      
-      expect(module.items_count).toBe(5);
-      expect(module.state).toBe('started');
-    });
+  it('throws a helpful error when no auth is configured (no token, no browser storage)', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    delete process.env.CANVAS_AUTH_MODE;
+    delete process.env.CANVAS_API_TOKEN;
+    delete process.env.CANVAS_STORAGE_STATE_PATH;
+
+    const api = await import('../api/index.js');
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/CANVAS_API_TOKEN/);
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/CANVAS_AUTH_MODE=browser/);
   });
 
-  describe('CanvasModuleItem type', () => {
-    it('should accept valid module item data', () => {
-      const item = {
-        id: 1,
-        module_id: 1,
-        title: 'Lecture 1: Introduction',
-        position: 1,
-        type: 'Page',
-        content_id: 123,
-        html_url: 'https://canvas.example.com/pages/123',
-        completion_requirement: {
-          type: 'marked',
-          completed: false,
-        },
-      };
-      
-      expect(item.type).toBe('Page');
-      expect(item.completion_requirement?.completed).toBe(false);
+  it('redacts secrets from error bodies', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+    delete process.env.CANVAS_AUTH_MODE;
+
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return makeResponse('server blew up: Bearer secret-token canvas_session=session123', {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      });
     });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await expect(api.getUpcomingAssignments()).rejects.not.toThrow(/secret-token/);
+    await expect(api.getUpcomingAssignments()).rejects.not.toThrow(/session123/);
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/REDACTED/);
+  });
+
+  it('throws a helpful error when browser auth is selected but storage state is missing', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_AUTH_MODE = 'browser';
+    process.env.CANVAS_STORAGE_STATE_PATH = path.join(os.tmpdir(), 'nope-does-not-exist.json');
+    delete process.env.CANVAS_API_TOKEN;
+
+    const api = await import('../api/index.js');
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/storage state/i);
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/canvas_auth_browser_login/);
   });
 });
 
-describe('Canvas API Function Tests', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('getCourses', () => {
-    it('should be called with correct parameters', async () => {
-      mockApi.getCourses.mockResolvedValue([
-        { id: 1, name: 'CS 101', course_code: 'CS101' },
-      ]);
-      
-      const result = await mockApi.getCourses({ enrollmentState: 'active' });
-      
-      expect(mockApi.getCourses).toHaveBeenCalledWith({ enrollmentState: 'active' });
-      expect(result).toHaveLength(1);
-    });
-
-    it('should handle undefined parameters', async () => {
-      mockApi.getCourses.mockResolvedValue([]);
-      
-      await mockApi.getCourses({});
-      
-      expect(mockApi.getCourses).toHaveBeenCalledWith({});
-    });
-  });
-
-  describe('getCourse', () => {
-    it('should be called with course ID', async () => {
-      mockApi.getCourse.mockResolvedValue({ id: 123, name: 'CS 101' });
-      
-      await mockApi.getCourse(123);
-      
-      expect(mockApi.getCourse).toHaveBeenCalledWith(123);
-    });
-  });
-
-  describe('getAssignments', () => {
-    it('should be called with course ID and options', async () => {
-      mockApi.getAssignments.mockResolvedValue([]);
-      
-      await mockApi.getAssignments(123, { orderBy: 'due_at' });
-      
-      expect(mockApi.getAssignments).toHaveBeenCalledWith(123, { orderBy: 'due_at' });
-    });
-  });
-
-  describe('getUpcomingAssignments', () => {
-    it('should be called without parameters', async () => {
-      mockApi.getUpcomingAssignments.mockResolvedValue([]);
-      
-      await mockApi.getUpcomingAssignments();
-      
-      expect(mockApi.getUpcomingAssignments).toHaveBeenCalled();
-    });
-  });
-
-  describe('getGrades', () => {
-    it('should be called without parameters', async () => {
-      mockApi.getGrades.mockResolvedValue([]);
-      
-      await mockApi.getGrades();
-      
-      expect(mockApi.getGrades).toHaveBeenCalled();
-    });
-  });
-
-  describe('getSubmission', () => {
-    it('should be called with course and assignment ID', async () => {
-      mockApi.getSubmission.mockResolvedValue({ id: 1, score: 100 });
-      
-      await mockApi.getSubmission(123, 456);
-      
-      expect(mockApi.getSubmission).toHaveBeenCalledWith(123, 456);
-    });
-  });
-
-  describe('getSubmissionDetailed', () => {
-    it('should be called with course and assignment ID', async () => {
-      mockApi.getSubmissionDetailed.mockResolvedValue({ id: 1, score: 100 });
-
-      await mockApi.getSubmissionDetailed(123, 456);
-
-      expect(mockApi.getSubmissionDetailed).toHaveBeenCalledWith(123, 456);
-    });
-  });
-
-  describe('getAnnouncements', () => {
-    it('should be called with course IDs and options', async () => {
-      mockApi.getAnnouncements.mockResolvedValue([]);
-      
-      await mockApi.getAnnouncements([1, 2, 3], { startDate: '2026-01-01' });
-      
-      expect(mockApi.getAnnouncements).toHaveBeenCalledWith([1, 2, 3], { startDate: '2026-01-01' });
-    });
-  });
-
-  describe('getModules', () => {
-    it('should be called with course ID', async () => {
-      mockApi.getModules.mockResolvedValue([]);
-      
-      await mockApi.getModules(123);
-      
-      expect(mockApi.getModules).toHaveBeenCalledWith(123);
-    });
-  });
-
-  describe('getModuleItems', () => {
-    it('should be called with course and module ID', async () => {
-      mockApi.getModuleItems.mockResolvedValue([]);
-      
-      await mockApi.getModuleItems(123, 456);
-      
-      expect(mockApi.getModuleItems).toHaveBeenCalledWith(123, 456);
-    });
-  });
-
-  describe('getCalendarEvents', () => {
-    it('should be called with date options', async () => {
-      mockApi.getCalendarEvents.mockResolvedValue([]);
-      
-      await mockApi.getCalendarEvents({ startDate: '2026-01-01', endDate: '2026-01-31' });
-      
-      expect(mockApi.getCalendarEvents).toHaveBeenCalledWith({ startDate: '2026-01-01', endDate: '2026-01-31' });
-    });
-  });
-});
-
-  describe('Tool Definition Validation', () => {
-  // Helper function to simulate tool registration check
-  const validateToolDefinitions = () => {
+describe('Tool Definition Validation', () => {
+  it('lists the expected tool names (smoke test)', () => {
     const expectedTools = [
+      'canvas_auth_browser_login',
       'canvas_list_courses',
       'canvas_get_course',
       'canvas_list_assignments',
@@ -392,55 +212,7 @@ describe('Canvas API Function Tests', () => {
       'canvas_read_file_text',
       'canvas_read_submission_attachment_text',
     ];
-    return expectedTools;
-  };
-
-  it('should have exactly 15 tools', () => {
-    const tools = validateToolDefinitions();
-    expect(tools).toHaveLength(15);
-  });
-
-  it('should have all expected tool names', () => {
-    const tools = validateToolDefinitions();
-    
-    expect(tools).toContain('canvas_list_courses');
-    expect(tools).toContain('canvas_get_course');
-    expect(tools).toContain('canvas_list_assignments');
-    expect(tools).toContain('canvas_get_assignment');
-    expect(tools).toContain('canvas_get_upcoming');
-    expect(tools).toContain('canvas_get_grades');
-    expect(tools).toContain('canvas_get_submission');
-    expect(tools).toContain('canvas_list_announcements');
-    expect(tools).toContain('canvas_list_modules');
-    expect(tools).toContain('canvas_get_module_items');
-    expect(tools).toContain('canvas_get_calendar');
-    expect(tools).toContain('canvas_list_course_files');
-    expect(tools).toContain('canvas_get_file_info');
-    expect(tools).toContain('canvas_read_file_text');
-    expect(tools).toContain('canvas_read_submission_attachment_text');
-  });
-
-  it('should follow naming convention', () => {
-    const tools = validateToolDefinitions();
-    
-    for (const tool of tools) {
-      expect(tool).toMatch(/^canvas_/);
-    }
-  });
-});
-
-describe('Error Handling', () => {
-  it('should handle API errors', async () => {
-    const errorMessage = 'Canvas API error (401): Unauthorized';
-    mockApi.getCourses.mockRejectedValue(new Error(errorMessage));
-    
-    await expect(mockApi.getCourses({})).rejects.toThrow(errorMessage);
-  });
-
-  it('should handle network errors', async () => {
-    const networkError = new Error('Failed to fetch');
-    mockApi.getCourse.mockRejectedValue(networkError);
-    
-    await expect(mockApi.getCourse(123)).rejects.toThrow('Failed to fetch');
+    expect(expectedTools).toHaveLength(16);
+    for (const name of expectedTools) expect(name).toMatch(/^canvas_/);
   });
 });

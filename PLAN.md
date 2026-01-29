@@ -36,6 +36,7 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 > "Cowork uses the same agentic architecture that powers Claude Code, now accessible within Claude Desktop. Instead of responding to prompts one at a time, Claude can take on complex, multi-step tasks and execute them on your behalf."
 
 **Where FlowState differs:**
+
 - **Open Source**: Not locked to a $200/month Claude Max plan
 - **Model Agnostic**: Bring your own API keys, use any provider
 - **Extensible**: Add any MCP server, not just Anthropic's curated list
@@ -45,13 +46,13 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 
 ## Target Users
 
-| User Type | Description | Primary Use Cases |
-|-----------|-------------|-------------------|
-| **Productivity Enthusiasts** | People who use Notion, calendars, and email heavily | Cross-app task management, inbox organization |
-| **Students** | Managing coursework, deadlines, study schedules | Assignment tracking, study planning |
-| **Busy Professionals** | 100+ emails/day, back-to-back meetings | Email triage, meeting prep, conflict resolution |
-| **Non-Technical Users** | Want AI benefits without the complexity | Guided setup, sensible defaults, beautiful UI |
-| **Power Users** | Comfortable adding custom MCPs | Full extensibility, custom workflows |
+| User Type                    | Description                                         | Primary Use Cases                               |
+| ---------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| **Productivity Enthusiasts** | People who use Notion, calendars, and email heavily | Cross-app task management, inbox organization   |
+| **Students**                 | Managing coursework, deadlines, study schedules     | Assignment tracking, study planning             |
+| **Busy Professionals**       | 100+ emails/day, back-to-back meetings              | Email triage, meeting prep, conflict resolution |
+| **Non-Technical Users**      | Want AI benefits without the complexity             | Guided setup, sensible defaults, beautiful UI   |
+| **Power Users**              | Comfortable adding custom MCPs                      | Full extensibility, custom workflows            |
 
 ---
 
@@ -137,48 +138,48 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 
 ## Decision Log
 
-| Date | Decision | Rationale | Status |
-|------|----------|-----------|--------|
-| Jan 2026 | Build on top of OpenCode (not fork) | Leverage their maintenance, MCP infra, and community | Approved |
-| Jan 2026 | MCP-first architecture | Pluggable integrations, can be used independently | Approved |
-| Jan 2026 | Progressive autonomy model | Auto-read, approval-write for safety | Approved |
-| Jan 2026 | Local-only auth storage | User privacy, no cloud dependency | Approved |
-| Jan 2026 | TypeScript throughout | Consistency with OpenCode SDK | Approved |
-| Jan 2026 | MIT License | Match OpenCode, give back to community | Approved |
-| Jan 2026 | Mac-first for MVP | Simplify scope, add Windows later | Approved |
-| Jan 2026 | Default to OpenCode Zen | Free, zero-friction onboarding | Approved |
-| Jan 2026 | **Desktop App (Electron)** | TUI too complex for non-technical users, Cowork-style UX | **New** |
-| Jan 2026 | **Headless OpenCode** | Run OpenCode silently, control via SDK/API | **New** |
-| Jan 2026 | **Four-Mode UI** | Chat, Tasks, Workflows, Integrations | **New** |
-| Jan 2026 | **Workflows as Commands/Skills** | Use OpenCode's .md-based command system, not JSON | **New** |
-| Jan 2026 | **Claude Desktop-style MCP Config** | Local JSON file for MCP configuration | **New** |
-| Jan 2026 | **Fresh UI Design** | New React UI inspired by FlowState 1.0 aesthetic | **New** |
-| Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen | **New** |
-| Jan 2026 | **Internet Required for MVP** | Optimize for offline later | **New** |
-| Jan 2026 | **Unified Real-Time Timeline** | Single chronological feed (no tabs) for tool calls, approvals, status | **New** |
-| Jan 2026 | **Hybrid Timeline Storage** | SQLite for metadata, disk blobs for payloads ≥10KB | **New** |
-| Jan 2026 | **Smart Metadata Gmail Defaults** | Return snippet + headers + labels by default, full body on-demand | **New** |
-| Jan 2026 | **Redact Secrets Even in Dev Mode** | Always strip tokens/keys; export bundle requires explicit action | **New** |
-| Jan 2026 | **Hybrid Task Promotion** | Agent-led promotion + heuristic escalation; no user override | **New** |
-| Jan 2026 | **Task Summary from Timeline** | Final task summary auto-generated from timeline; last chat message | **New** |
+| Date     | Decision                                | Rationale                                                             | Status   |
+| -------- | --------------------------------------- | --------------------------------------------------------------------- | -------- |
+| Jan 2026 | Build on top of OpenCode (not fork)     | Leverage their maintenance, MCP infra, and community                  | Approved |
+| Jan 2026 | MCP-first architecture                  | Pluggable integrations, can be used independently                     | Approved |
+| Jan 2026 | Progressive autonomy model              | Auto-read, approval-write for safety                                  | Approved |
+| Jan 2026 | Local-only auth storage                 | User privacy, no cloud dependency                                     | Approved |
+| Jan 2026 | TypeScript throughout                   | Consistency with OpenCode SDK                                         | Approved |
+| Jan 2026 | MIT License                             | Match OpenCode, give back to community                                | Approved |
+| Jan 2026 | Mac-first for MVP                       | Simplify scope, add Windows later                                     | Approved |
+| Jan 2026 | Default to OpenCode Zen                 | Free, zero-friction onboarding                                        | Approved |
+| Jan 2026 | **Desktop App (Electron)**              | TUI too complex for non-technical users, Cowork-style UX              | **New**  |
+| Jan 2026 | **Headless OpenCode**                   | Run OpenCode silently, control via SDK/API                            | **New**  |
+| Jan 2026 | **Four-Mode UI**                        | Chat, Tasks, Workflows, Integrations                                  | **New**  |
+| Jan 2026 | **Workflows as Commands/Skills**        | Use OpenCode's .md-based command system, not JSON                     | **New**  |
+| Jan 2026 | **Claude Desktop-style MCP Config**     | Local JSON file for MCP configuration                                 | **New**  |
+| Jan 2026 | **Fresh UI Design**                     | New React UI inspired by FlowState 1.0 aesthetic                      | **New**  |
+| Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen                               | **New**  |
+| Jan 2026 | **Internet Required for MVP**           | Optimize for offline later                                            | **New**  |
+| Jan 2026 | **Unified Real-Time Timeline**          | Single chronological feed (no tabs) for tool calls, approvals, status | **New**  |
+| Jan 2026 | **Hybrid Timeline Storage**             | SQLite for metadata, disk blobs for payloads ≥10KB                    | **New**  |
+| Jan 2026 | **Smart Metadata Gmail Defaults**       | Return snippet + headers + labels by default, full body on-demand     | **New**  |
+| Jan 2026 | **Redact Secrets Even in Dev Mode**     | Always strip tokens/keys; export bundle requires explicit action      | **New**  |
+| Jan 2026 | **Hybrid Task Promotion**               | Agent-led promotion + heuristic escalation; no user override          | **New**  |
+| Jan 2026 | **Task Summary from Timeline**          | Final task summary auto-generated from timeline; last chat message    | **New**  |
 
 ---
 
 ## Technology Stack
 
-| Layer | Technology | Rationale |
-|-------|------------|-----------|
-| **Desktop Framework** | Electron | Cross-platform, leverages existing TypeScript/Node.js code |
-| **UI Framework** | React + TypeScript | Modern, component-based, great ecosystem |
-| **Styling** | Tailwind CSS | Rapid development, consistent design system |
-| **Engine** | OpenCode (Headless) | Proven agentic orchestration, MCP-native |
-| **SDK** | `@opencode-ai/sdk` (TypeScript) | Type-safe, full server API access |
-| **MCP Servers** | TypeScript/Node.js | Matches SDK, excellent MCP tooling ecosystem |
-| **Auth Storage** | Encrypted JSON file | User-controlled, local-first |
-| **Memory/State** | SQLite (local) | Lightweight, queryable, works offline |
-| **Package Manager** | pnpm | Fast, disk-efficient, great monorepo support |
-| **Build System** | Turborepo | Monorepo orchestration, caching |
-| **Electron Builder** | electron-builder | Packaging, distribution, auto-updates |
+| Layer                 | Technology                      | Rationale                                                  |
+| --------------------- | ------------------------------- | ---------------------------------------------------------- |
+| **Desktop Framework** | Electron                        | Cross-platform, leverages existing TypeScript/Node.js code |
+| **UI Framework**      | React + TypeScript              | Modern, component-based, great ecosystem                   |
+| **Styling**           | Tailwind CSS                    | Rapid development, consistent design system                |
+| **Engine**            | OpenCode (Headless)             | Proven agentic orchestration, MCP-native                   |
+| **SDK**               | `@opencode-ai/sdk` (TypeScript) | Type-safe, full server API access                          |
+| **MCP Servers**       | TypeScript/Node.js              | Matches SDK, excellent MCP tooling ecosystem               |
+| **Auth Storage**      | Encrypted JSON file             | User-controlled, local-first                               |
+| **Memory/State**      | SQLite (local)                  | Lightweight, queryable, works offline                      |
+| **Package Manager**   | pnpm                            | Fast, disk-efficient, great monorepo support               |
+| **Build System**      | Turborepo                       | Monorepo orchestration, caching                            |
+| **Electron Builder**  | electron-builder                | Packaging, distribution, auto-updates                      |
 
 ### LLM Provider Strategy
 
@@ -340,6 +341,7 @@ Similar to Claude Desktop's `claude_desktop_config.json`:
 FlowState's visual identity carries forward from [FlowState 1.0](https://github.com/lukebrevoort/flowstate):
 
 **Color Palette** (Warm, earthy tones):
+
 ```json
 {
   "primary": "#8B6B59",
@@ -355,6 +357,7 @@ FlowState's visual identity carries forward from [FlowState 1.0](https://github.
 ```
 
 **Design Principles**:
+
 - Warm, approachable, not clinical
 - Clean visual hierarchy
 - Rounded, soft UI elements
@@ -425,6 +428,7 @@ These are product decisions derived from the current `appmockup/` and Luke's cla
 ### Four Modes
 
 #### 1. Chat Mode
+
 Primary interface for natural language interaction.
 
 ```
@@ -479,6 +483,7 @@ When FlowState wants to do something that requires approval, it shows inline:
 ```
 
 #### 2. Tasks Mode
+
 View and manage long-running background tasks.
 
 ```
@@ -509,6 +514,7 @@ View and manage long-running background tasks.
 ```
 
 #### 3. Workflows Mode
+
 Browse, create, and manage reusable workflows (OpenCode Commands/Skills).
 
 ```
@@ -546,6 +552,7 @@ Browse, create, and manage reusable workflows (OpenCode Commands/Skills).
 ```
 
 **Workflow Editor** (SKILL.md format):
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  Edit Workflow: Inbox Review                     [Save] [X]   │
@@ -577,6 +584,7 @@ Browse, create, and manage reusable workflows (OpenCode Commands/Skills).
 ```
 
 #### 4. Integrations Mode
+
 Connect and manage external services.
 
 ```
@@ -627,6 +635,7 @@ Connect and manage external services.
 ### First Launch Experience
 
 **Step 1: Welcome**
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                                               │
@@ -644,6 +653,7 @@ Connect and manage external services.
 ```
 
 **Step 2: What Apps Do You Use?**
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                                               │
@@ -667,6 +677,7 @@ Connect and manage external services.
 ```
 
 **Step 3: Connect Integrations**
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                                               │
@@ -690,6 +701,7 @@ Connect and manage external services.
 ```
 
 **Step 4: Choose Your AI Provider**
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                                               │
@@ -721,6 +733,7 @@ Connect and manage external services.
 ```
 
 **Step 5: You're Ready! (Wow Moment)**
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                                                               │
@@ -757,12 +770,14 @@ Connect and manage external services.
 ### Official FlowState MCPs
 
 Each integration is a standalone MCP server that can be:
+
 - Developed independently
 - Published to npm
 - Used by anyone (not just FlowState users)
 - Tested in isolation
 
 **Notion MCP Tools**:
+
 | Tool | Description | Autonomy |
 |------|-------------|----------|
 | `notion_search` | Search pages, databases | Auto |
@@ -773,6 +788,7 @@ Each integration is a standalone MCP server that can be:
 | `notion_create_database_entry` | Add database row | Requires Approval |
 
 **Gmail MCP Tools**:
+
 | Tool | Description | Autonomy |
 |------|-------------|----------|
 | `gmail_list` | List emails with filters | Auto |
@@ -785,6 +801,7 @@ Each integration is a standalone MCP server that can be:
 | `gmail_delete` | Delete email | Requires Approval |
 
 **GCal MCP Tools**:
+
 | Tool | Description | Autonomy |
 |------|-------------|----------|
 | `gcal_list_events` | List calendar events | Auto |
@@ -796,6 +813,7 @@ Each integration is a standalone MCP server that can be:
 | `gcal_delete_event` | Delete event | Requires Approval |
 
 **System MCP Tools**:
+
 | Tool | Description | Autonomy |
 |------|-------------|----------|
 | `system_notify` | Send desktop notification | Auto |
@@ -836,6 +854,7 @@ Workflows use OpenCode's Commands/Skills system, defined as Markdown files:
 ### Pre-built Workflows
 
 **`workflows/inbox-review/SKILL.md`**:
+
 ```markdown
 ---
 name: inbox-review
@@ -843,6 +862,7 @@ description: Summarize and organize unread emails, create action items
 ---
 
 ## What you do
+
 - Read all unread emails in my inbox using Gmail MCP
 - Categorize by priority (High, Medium, Low) based on sender and content
 - Summarize each high-priority email in 1-2 sentences
@@ -850,16 +870,20 @@ description: Summarize and organize unread emails, create action items
 - Create Notion tasks for any emails requiring follow-up action
 
 ## Output format
+
 Present a summary with:
+
 - High priority items that need response today
 - Action items with links to created Notion tasks
 - Newsletters that can be safely archived
 
 ## When to use me
+
 Use this workflow at the start of your workday or when returning from time away.
 ```
 
 **`workflows/meeting-prep/SKILL.md`**:
+
 ```markdown
 ---
 name: meeting-prep
@@ -867,6 +891,7 @@ description: Prepare notes and context for your next meeting
 ---
 
 ## What you do
+
 - Check Google Calendar for the next upcoming meeting
 - Look up attendees and recent email threads with them
 - Search Notion for any relevant project pages or notes
@@ -874,17 +899,21 @@ description: Prepare notes and context for your next meeting
 - Create a brief agenda or talking points
 
 ## Output format
+
 Present:
+
 - Meeting details (time, attendees, location/link)
 - Context from recent communications
 - Relevant Notion pages
 - Suggested agenda items
 
 ## When to use me
+
 Use this 10-15 minutes before an important meeting.
 ```
 
 **`workflows/desktop-cleanup/SKILL.md`**:
+
 ```markdown
 ---
 name: desktop-cleanup
@@ -892,18 +921,22 @@ description: Organize files on your desktop into logical folders
 ---
 
 ## What you do
+
 - List all files on the Desktop using System MCP
 - Categorize by file type (Documents, Images, Downloads, etc.)
 - Suggest a folder structure based on content
 - Create folders and move files (with approval)
 
 ## Output format
+
 Show proposed changes before executing:
+
 - New folders to create
 - Files to move and their destinations
 - Files that couldn't be categorized
 
 ## When to use me
+
 Use this when your desktop is cluttered and needs organization.
 ```
 
@@ -917,35 +950,35 @@ Use this when your desktop is cluttered and needs organization.
 
 ### MVP Feature Set (Desktop App v1.0)
 
-| Feature | Description | Priority |
-|---------|-------------|----------|
-| Electron Shell | Four-mode layout (Chat, Tasks, Workflows, Integrations) | P0 |
-| Headless OpenCode | Engine runs in background, controlled via SDK | P0 |
-| Chat Mode | Natural language conversation with streaming | P0 |
-| Integrations Mode | OAuth connect for Notion, Gmail, GCal | P0 |
-| MCP Config File | Claude Desktop-style local config | P0 |
-| Onboarding Flow | Welcome → Apps → Connect → Wow moment | P0 |
-| Notion MCP | Full Notion integration | P0 |
-| Gmail MCP | Full Gmail integration | P0 |
-| GCal MCP | Full Calendar integration | P0 |
-| System MCP | Desktop/file organization | P1 |
-| Tasks Mode | View running/completed tasks | P1 |
-| Workflows Mode | Browse and run pre-built workflows | P1 |
-| One Pre-built Workflow | "Inbox Review" as example | P1 |
-| Approval Flow | Inline approval with notifications | P1 |
-| Provider Selection | Choose LLM provider in onboarding | P1 |
-| FlowState Theme | Warm earthy color palette | P1 |
+| Feature                | Description                                             | Priority |
+| ---------------------- | ------------------------------------------------------- | -------- |
+| Electron Shell         | Four-mode layout (Chat, Tasks, Workflows, Integrations) | P0       |
+| Headless OpenCode      | Engine runs in background, controlled via SDK           | P0       |
+| Chat Mode              | Natural language conversation with streaming            | P0       |
+| Integrations Mode      | OAuth connect for Notion, Gmail, GCal                   | P0       |
+| MCP Config File        | Claude Desktop-style local config                       | P0       |
+| Onboarding Flow        | Welcome → Apps → Connect → Wow moment                   | P0       |
+| Notion MCP             | Full Notion integration                                 | P0       |
+| Gmail MCP              | Full Gmail integration                                  | P0       |
+| GCal MCP               | Full Calendar integration                               | P0       |
+| System MCP             | Desktop/file organization                               | P1       |
+| Tasks Mode             | View running/completed tasks                            | P1       |
+| Workflows Mode         | Browse and run pre-built workflows                      | P1       |
+| One Pre-built Workflow | "Inbox Review" as example                               | P1       |
+| Approval Flow          | Inline approval with notifications                      | P1       |
+| Provider Selection     | Choose LLM provider in onboarding                       | P1       |
+| FlowState Theme        | Warm earthy color palette                               | P1       |
 
 ### Desktop App v1.1 (Post-MVP)
 
-| Feature | Description |
-|---------|-------------|
-| Workflow Builder UI | Visual editor for creating workflows |
+| Feature                 | Description                              |
+| ----------------------- | ---------------------------------------- |
+| Workflow Builder UI     | Visual editor for creating workflows     |
 | Real-time Task Progress | Detailed progress indicators like Cowork |
-| Custom MCP Addition UI | Add MCPs without editing config file |
-| Approval Queue | Batch approve multiple pending actions |
-| Conversation History | Browse and continue past conversations |
-| Keyboard Shortcuts | Power user efficiency |
+| Custom MCP Addition UI  | Add MCPs without editing config file     |
+| Approval Queue          | Batch approve multiple pending actions   |
+| Conversation History    | Browse and continue past conversations   |
+| Keyboard Shortcuts      | Power user efficiency                    |
 
 ### Out of Scope for MVP
 
@@ -960,21 +993,24 @@ Use this when your desktop is cluttered and needs organization.
 
 ## Development Milestones
 
-### Phase 1: Desktop Foundation (Weeks 1-2)
+### Phase 1: Desktop Foundation (Weeks 1-2) - DONE
+
 - [ ] Set up `packages/desktop/` with Electron + React + TypeScript
 - [ ] Implement four-mode layout shell
 - [ ] Port FlowState theme to Tailwind
 - [ ] Create sidebar with placeholder content
 - [ ] Set up Electron main/renderer IPC
 
-### Phase 2: OpenCode Integration (Weeks 3-4)
+### Phase 2: OpenCode Integration (Weeks 3-4) - DONE
+
 - [ ] Implement process manager for headless OpenCode
 - [ ] Create SDK bridge in main process
 - [ ] Build Chat mode with message streaming
 - [ ] Connect to existing MCP servers
 - [ ] Test basic conversation flow
 
-### Phase 3: Integrations & Config (Weeks 5-6)
+### Phase 3: Integrations & Config (Weeks 5-6) - DONE
+
 - [ ] Implement config store (read/write `config.json`)
 - [ ] Build Integrations mode UI
 - [ ] Implement OAuth server for Google services
@@ -982,6 +1018,7 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Test OAuth flow end-to-end
 
 ### Phase 3.5: Mockup Parity & UI Wiring (Week 6-7)
+
 - [ ] Port `appmockup/` theme + layout to `packages/desktop/renderer`
 - [ ] Implement app shell: header, toggleable sidebar, zen background
 - [ ] Implement navigation state (Home, Settings, 4 main modes)
@@ -996,7 +1033,20 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Replace mock data with real adapters incrementally (leave stubs where backend isn’t ready)
 - [ ] Add baseline UX polish: focus states, keyboard nav, window resizing, reduced motion
 
+### 3.75: Implement new Canvas MCP and Workflows (Week 7)
+
+- [] Change current Canvas MCP system to implement a Playwrite version for schools which don't allow token creation.
+- [] Reference /Users/lbrevoort/assignmentTracker for how this works.
+- [] Update Onboarding to include Canvas and this option.
+- [] Update Integrations page to indicate new way of linking canvas MCP together.
+- [] Treat workflows as Opencode Commands that are sent to the running backend
+- [] Create Three Basic Common Cammands for users (Pull Assignments from Canvas, Clean up Desktop, and Read Email and create Drafts)
+- [] Implement on the Workflows page a easy UI for the user to specify what they want to workflow to do in a natural language way.
+- [] Tranform that natrual language into a specific command using opencode
+- [] Test full end to end with Canvas MCP and Workflows
+
 ### Phase 4: Onboarding & Polish (Weeks 7-8)
+
 - [ ] Build complete onboarding flow
 - [ ] Implement provider selection
 - [ ] Create suggested prompts for wow moment
@@ -1004,9 +1054,11 @@ Use this when your desktop is cluttered and needs organization.
 - [ ] Implement Tasks mode (view running tasks)
 
 #### Phase 4 Additions: OpenCode Observability UX — Unified Real-Time Timeline
-> Goal: show users what FlowState is doing *in real time* via a single, chronological activity feed. No tabs—just a live stream of steps, tool calls, and approvals that auto-scrolls as work progresses.
+
+> Goal: show users what FlowState is doing _in real time_ via a single, chronological activity feed. No tabs—just a live stream of steps, tool calls, and approvals that auto-scrolls as work progresses.
 
 **Task Promotion (Hybrid)**:
+
 - Agent can explicitly promote a chat to a Task.
 - FlowState can auto-promote based on heuristics (runtime > 60s, multi-tool chains, multi-step approvals).
 - **MVP constraint**: one active Task per session; new tasks can start after completion.
@@ -1015,29 +1067,39 @@ Use this when your desktop is cluttered and needs organization.
 - Completed task runs end with a **timeline-derived summary**, which becomes the last assistant message in the original chat.
 
 **Task Progress**:
+
 - Percent progress derived from completed steps vs. total steps in the timeline (approvals count as steps).
 - Tasks display current step + progress bar; Chat shows a collapsed current step indicator.
 
 **Timeline Event Schema** (`TimelineEvent`):
+
 ```typescript
 type TimelineEvent = {
-  id: string;                          // UUID
+  id: string; // UUID
   sessionId: string;
-  taskId?: string;                     // if promoted to Task
-  timestamp: number;                   // epoch ms
-  kind: 'phase' | 'tool_call' | 'tool_result' | 'approval_request' | 'approval_response' | 'error' | 'status';
-  title: string;                       // user-friendly label
+  taskId?: string; // if promoted to Task
+  timestamp: number; // epoch ms
+  kind:
+    | "phase"
+    | "tool_call"
+    | "tool_result"
+    | "approval_request"
+    | "approval_response"
+    | "error"
+    | "status";
+  title: string; // user-friendly label
 
-  detail?: string;                     // short description (≤120 chars)
-  toolName?: string;                   // e.g. "gmail_search"
+  detail?: string; // short description (≤120 chars)
+  toolName?: string; // e.g. "gmail_search"
   // For large payloads, store reference instead of inline
-  payloadRef?: string;                 // file path to blob on disk (if ≥10KB)
-  payloadInline?: unknown;             // JSON if <10KB
-  redacted?: boolean;                  // true if secrets were stripped
+  payloadRef?: string; // file path to blob on disk (if ≥10KB)
+  payloadInline?: unknown; // JSON if <10KB
+  redacted?: boolean; // true if secrets were stripped
 };
 ```
 
 **Storage strategy (performance-first)**:
+
 | Data | Location | Reason |
 |------|----------|--------|
 | `TimelineEvent` metadata | SQLite row | Fast queries, pagination |
@@ -1045,16 +1107,18 @@ type TimelineEvent = {
 | Payload ≥ 10 KB | Disk blob (`~/Library/Application Support/FlowState/blobs/<id>.json`) + `payloadRef` | Keeps DB lean; lazy-load on expand |
 
 **Implementation checklist**:
+
 - [ ] Audit OpenCode `client.event.subscribe()` and document all event types we need to capture
-- [ ] Expand `ProcessManager.startEventStream` to forward *all* relevant events (tool.*, permission.*, message.*, session.*, error.*) with redaction of secrets (`/token|secret|key|password|credential|bearer/i`)
+- [ ] Expand `ProcessManager.startEventStream` to forward _all_ relevant events (tool._, permission._, message._, session._, error.\*) with redaction of secrets (`/token|secret|key|password|credential|bearer/i`)
 - [ ] Create `TimelineEventNormalizer` class in main process: raw OpenCode event → `TimelineEvent`
 - [ ] Implement `TimelineStore` (SQLite table + blob dir) with append, query-by-session, and retention (90-day default, configurable)
 - [ ] Build `<ActivityTimeline>` React component: auto-scroll, collapsible in Chat (shows latest step inline), fully expanded in Tasks "Run Details"
 - [ ] Inline approval cards within timeline when `kind === 'approval_request'`
-- [ ] Add "Developer Mode" toggle (Settings): shows raw JSON + full payloads; secrets *still* redacted even in dev mode
+- [ ] Add "Developer Mode" toggle (Settings): shows raw JSON + full payloads; secrets _still_ redacted even in dev mode
 - [ ] Add "Export Debug Bundle" action per run: zips messages + timeline + blobs (with explicit user warning)
 
 **UI behavior**:
+
 ```
 Chat Mode (collapsed):
 ┌─────────────────────────────────────────────────────────┐
@@ -1083,9 +1147,11 @@ Tasks Mode "Run Details": same timeline, always expanded, virtualized for long r
 ---
 
 #### Phase 4 Additions: MCP Efficiency (Gmail-first) — Smart Metadata Defaults
-> Goal: reduce LLM context/token cost by returning lean, structured data by default. Full bodies are fetched *only* on explicit request.
+
+> Goal: reduce LLM context/token cost by returning lean, structured data by default. Full bodies are fetched _only_ on explicit request.
 
 **Default response shape** for `gmail_list` / `gmail_search`:
+
 ```typescript
 // Per message (default detailLevel: 'metadata')
 {
@@ -1104,6 +1170,7 @@ Tasks Mode "Run Details": same timeline, always expanded, virtualized for long r
 ```
 
 **Controlled expansion** via optional params on `gmail_read`:
+
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `detailLevel` | `'ids'` \| `'metadata'` \| `'full'` | `'metadata'` | How much data to return |
@@ -1111,6 +1178,7 @@ Tasks Mode "Run Details": same timeline, always expanded, virtualized for long r
 | `includeHtml` | `boolean` | `false` | Return HTML part if available |
 
 **New tool**: `gmail_get_thread`
+
 ```typescript
 gmail_get_thread({
   threadId: string;
@@ -1120,6 +1188,7 @@ gmail_get_thread({
 ```
 
 **Implementation checklist**:
+
 - [ ] Refactor `gmail_list` / `gmail_search` to use Gmail API `format: 'metadata'` + `fields` param for partial response
 - [ ] Refactor `gmail_read` to accept `detailLevel`, `maxBodyChars`, `includeHtml`; default to metadata-only
 - [ ] Add `gmail_get_thread` tool with `maxMessages` limit
@@ -1131,6 +1200,7 @@ gmail_get_thread({
 **Token savings estimate**: typical inbox scan drops from ~80K tokens (full payloads for 20 emails) to ~4K tokens (metadata only), with selective reads adding ~2K per expanded email.
 
 ### Phase 5: Workflows (Weeks 9-10)
+
 - [ ] Build Workflows mode UI
 - [ ] Create pre-built workflow templates
 - [ ] Implement workflow runner
@@ -1139,6 +1209,7 @@ gmail_get_thread({
 - [ ] Test workflow execution end-to-end
 
 ### Phase 6: Testing & Launch Prep (Weeks 11-12)
+
 - [ ] End-to-end testing
 - [ ] Performance optimization
 - [ ] Create documentation
@@ -1150,21 +1221,21 @@ gmail_get_thread({
 
 ## What We're Salvaging from Existing Code
 
-| Component | Salvageable | How We'll Use It |
-|-----------|-------------|------------------|
-| `@flowstate/mcp-notion` | ✅ Yes | Spawn as child process, unchanged |
-| `@flowstate/mcp-gmail` | ✅ Yes | Spawn as child process, unchanged |
-| `@flowstate/mcp-gcal` | ✅ Yes | Spawn as child process, unchanged |
-| `@flowstate/mcp-system` | ✅ Yes | Spawn as child process, unchanged |
-| `@flowstate/core/auth` | ✅ Yes | Port to Electron main process |
-| `@flowstate/core/memory` | ✅ Yes | Port to Electron main process |
-| `@flowstate/core/notifications` | ✅ Partial | Adapt for Electron native notifications |
-| `@flowstate/core/daemon` | ❌ No | Electron main process replaces daemon |
-| `@flowstate/web-config` | ❌ No | Fresh React UI in desktop package |
-| Agent definitions | ✅ Yes | Copy to desktop package |
-| Theme colors | ✅ Yes | Port to Tailwind theme |
-| FlowState logo | ✅ Yes | Copy to desktop assets |
-| opencode.json | ✅ Partial | Adapt for desktop config format |
+| Component                       | Salvageable | How We'll Use It                        |
+| ------------------------------- | ----------- | --------------------------------------- |
+| `@flowstate/mcp-notion`         | ✅ Yes      | Spawn as child process, unchanged       |
+| `@flowstate/mcp-gmail`          | ✅ Yes      | Spawn as child process, unchanged       |
+| `@flowstate/mcp-gcal`           | ✅ Yes      | Spawn as child process, unchanged       |
+| `@flowstate/mcp-system`         | ✅ Yes      | Spawn as child process, unchanged       |
+| `@flowstate/core/auth`          | ✅ Yes      | Port to Electron main process           |
+| `@flowstate/core/memory`        | ✅ Yes      | Port to Electron main process           |
+| `@flowstate/core/notifications` | ✅ Partial  | Adapt for Electron native notifications |
+| `@flowstate/core/daemon`        | ❌ No       | Electron main process replaces daemon   |
+| `@flowstate/web-config`         | ❌ No       | Fresh React UI in desktop package       |
+| Agent definitions               | ✅ Yes      | Copy to desktop package                 |
+| Theme colors                    | ✅ Yes      | Port to Tailwind theme                  |
+| FlowState logo                  | ✅ Yes      | Copy to desktop assets                  |
+| opencode.json                   | ✅ Partial  | Adapt for desktop config format         |
 
 ---
 
@@ -1196,4 +1267,4 @@ gmail_get_thread({
 
 ---
 
-*This is a living document. Update it as decisions are made and the project evolves.*
+_This is a living document. Update it as decisions are made and the project evolves._

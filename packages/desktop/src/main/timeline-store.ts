@@ -89,15 +89,116 @@ export class TimelineStore {
       );
     `);
 
+    // Best-effort session metadata to support client-side retention filtering.
+    // OpenCode's session.list does not currently expose timestamps here, so we
+    // maintain local activity markers (created_at / last_seen) keyed by session_id.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS session_meta (
+        session_id TEXT PRIMARY KEY,
+        title TEXT,
+        created_at INTEGER NOT NULL,
+        last_seen INTEGER
+      );
+    `);
+
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_timeline_session_time
       ON timeline_events (session_id, timestamp);
     `);
 
     this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_session_meta_last_seen
+      ON session_meta (last_seen);
+    `);
+
+    this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_timeline_task_time
       ON timeline_events (task_id, timestamp);
     `);
+  }
+
+  getRetentionDays(): number {
+    return this.retentionDays;
+  }
+
+  getRetentionCutoffMs(now: number = Date.now()): number {
+    return now - this.retentionDays * 24 * 60 * 60 * 1000;
+  }
+
+  /**
+   * Record session creation and/or update last seen time.
+   * This does not delete anything; it's only used for list-time filtering.
+   */
+  upsertSessionMeta(sessionId: string, fields?: { title?: string; createdAt?: number; lastSeenAt?: number }): void {
+    this.initialize();
+    if (!this.db) return;
+
+    const createdAt = fields?.createdAt ?? Date.now();
+    const lastSeenAt = fields?.lastSeenAt ?? null;
+    const title = fields?.title ?? null;
+
+    this.db
+      .prepare(
+        `
+        INSERT INTO session_meta (session_id, title, created_at, last_seen)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          title = COALESCE(excluded.title, session_meta.title),
+          last_seen = CASE
+            WHEN excluded.last_seen IS NULL THEN session_meta.last_seen
+            WHEN session_meta.last_seen IS NULL THEN excluded.last_seen
+            WHEN excluded.last_seen > session_meta.last_seen THEN excluded.last_seen
+            ELSE session_meta.last_seen
+          END
+        `
+      )
+      .run(sessionId, title, createdAt, lastSeenAt);
+  }
+
+  touchSession(sessionId: string, at: number = Date.now()): void {
+    this.upsertSessionMeta(sessionId, { createdAt: at, lastSeenAt: at });
+  }
+
+  async listKnownSessionIds(): Promise<Set<string>> {
+    this.initialize();
+    if (!this.db) return new Set();
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT DISTINCT session_id AS session_id FROM timeline_events
+        UNION
+        SELECT session_id AS session_id FROM session_meta
+        `
+      )
+      .all() as Array<{ session_id: string }>;
+
+    return new Set(rows.map((r) => r.session_id));
+  }
+
+  async listActiveSessionIdsSince(cutoffMs: number): Promise<Set<string>> {
+    this.initialize();
+    if (!this.db) return new Set();
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT session_id AS session_id
+        FROM session_meta
+        WHERE COALESCE(last_seen, created_at) >= ?
+        UNION
+        SELECT session_id AS session_id
+        FROM (
+          SELECT session_id, MAX(timestamp) AS last_ts
+          FROM timeline_events
+          GROUP BY session_id
+        )
+        WHERE last_ts >= ?
+        `
+      )
+      .all(cutoffMs, cutoffMs) as Array<{ session_id: string }>;
+
+    return new Set(rows.map((r) => r.session_id));
   }
 
   async append(event: TimelineEvent): Promise<void> {

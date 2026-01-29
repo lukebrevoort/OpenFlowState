@@ -343,22 +343,19 @@ class ProcessManager {
       console.error('[ProcessManager] GCal token found but MCP server not built!');
     }
 
-    // Notion MCP
+    // Notion MCP (remote package via npx)
     const notionToken = await authManager.getToken('notion');
-    const notionPath = this.verifyMcpServer(packagesDir, 'mcp-notion');
-    if (notionToken && notionPath) {
-      mcpConfig['flowstate-notion'] = {
+    if (notionToken) {
+      mcpConfig['notion'] = {
         type: 'local',
-        command: ['node', notionPath],
+        command: ['npx', '-y', '@notionhq/notion-mcp-server'],
         environment: {
-          NOTION_ACCESS_TOKEN: notionToken.accessToken,
+          NOTION_TOKEN: notionToken.accessToken,
         },
         enabled: true,
         timeout: 10000,
       };
       console.log('[ProcessManager] Notion MCP configured with token');
-    } else if (notionToken && !notionPath) {
-      console.error('[ProcessManager] Notion token found but MCP server not built!');
     }
 
     // System MCP (no auth needed)

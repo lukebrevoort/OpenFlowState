@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Workflow, Loader2, Clock, Star, Search, Mail, FileText, Smartphone } from 'lucide-react';
+import {
+  MessageSquare,
+  Workflow,
+  Loader2,
+  Clock,
+  Star,
+  Search,
+  Mail,
+  FileText,
+  Smartphone,
+  X,
+} from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
-import flowstateLogo from '../../../assets/flowstate-main-logo.png';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -47,27 +57,57 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
 
   return (
     <div
-      className={`fixed top-3 left-3 h-[calc(100%-1.5rem)] bg-sidebar/90 backdrop-blur-2xl border border-sidebar-border rounded-3xl shadow-[0_24px_60px_rgba(62,47,39,0.18)] transition-all duration-300 ease-in-out z-50 ${
-        isOpen ? 'w-72 translate-x-0' : 'w-72 -translate-x-full'
+      role="navigation"
+      aria-label="Sidebar"
+      aria-hidden={!isOpen}
+      className={`fixed top-0 left-0 h-full w-80 max-w-[calc(100vw-3rem)] bg-sidebar/90 backdrop-blur-2xl border-r border-sidebar-border shadow-[0_24px_60px_rgba(62,47,39,0.18)] transition-transform duration-300 ease-in-out z-50 lg:top-3 lg:left-3 lg:h-[calc(100%-1.5rem)] lg:w-72 lg:border lg:border-sidebar-border lg:rounded-3xl ${
+        isOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
       }`}
     >
       <div className="flex flex-col h-full">
         <div className="px-4 py-4 border-b border-sidebar-border">
-          <div className="flex items-center gap-3">
-            <img src={flowstateLogo} alt="FlowState" className="w-10 h-10" />
-            <div>
-              <h2 className="text-base text-foreground">FlowState</h2>
-              <p className="text-xs text-muted-foreground">Your AI workspace</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-2xl border flex items-center justify-center"
+                style={{
+                  borderColor: 'var(--fs-line)',
+                  backgroundColor: 'color-mix(in srgb, var(--fs-surface-1) 55%, transparent)',
+                  boxShadow: 'var(--fs-shadow-sm)',
+                }}
+                aria-hidden="true"
+              >
+                <span
+                  className="text-base text-foreground"
+                  style={{ fontFamily: 'var(--fs-font-display)' }}
+                >
+                  F
+                </span>
+              </div>
+              <div>
+                <h2 className="text-base text-foreground">FlowState</h2>
+                <p className="text-xs text-muted-foreground">Your AI workspace</p>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="fs-icon-button lg:hidden"
+              aria-label="Close sidebar"
+            >
+              <X className="w-5 h-5 text-foreground" />
+            </button>
           </div>
 
-          <div className="mt-4 flex items-center gap-2 rounded-lg border border-sidebar-border bg-card/60 px-3 py-2">
-            <Search className="w-4 h-4 text-muted-foreground" />
+          <div className="mt-4 relative">
+            <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search conversations"
-              className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+              className="fs-input pl-10"
+              aria-label="Search conversations"
             />
           </div>
         </div>

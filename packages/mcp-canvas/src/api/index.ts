@@ -1,35 +1,231 @@
 /**
  * Canvas LMS API Client
- * 
+ *
  * Lightweight API wrapper for Canvas LMS REST API.
- * Uses user-generated API tokens for authentication.
- * 
+ *
+ * Auth Modes:
+ * - Token: CANVAS_API_TOKEN (default when set)
+ * - Browser session: Playwright login + storage state cookies (for schools that block tokens)
+ *
  * API Documentation: https://canvas.instructure.com/doc/api/
  */
 
-// Canvas API configuration from environment
-const getCanvasConfig = () => {
-  const token = process.env.CANVAS_API_TOKEN;
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+type CanvasAuthMode = 'token' | 'browser' | 'auto';
+
+type CanvasAuth =
+  | {
+      mode: 'token';
+      token: string;
+    }
+  | {
+      mode: 'browser';
+      storageStatePath: string;
+      cookieHeader: string;
+    };
+
+type CanvasConfig = {
+  baseUrl: string;
+  auth: CanvasAuth;
+};
+
+const redactSecretsFromString = (input: string): string => {
+  // Keep this conservative: redact common auth patterns without trying to be perfect.
+  return input
+    .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(canvas_session|_csrf_token|csrf_token|session)=[^;\s]+/gi, '$1=[REDACTED]');
+};
+
+const summarizeBodyForError = (body: string, maxChars = 600): string => {
+  const normalized = body.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  const truncated = normalized.length > maxChars ? `${normalized.slice(0, maxChars)}…` : normalized;
+  return redactSecretsFromString(truncated);
+};
+
+const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '');
+
+const getCanvasBaseUrl = () => {
   const baseUrl = process.env.CANVAS_API_URL || process.env.CANVAS_BASE_URL;
-
-  if (!token) {
-    throw new Error(
-      'CANVAS_API_TOKEN environment variable is required. ' +
-      'Generate a token from Canvas Settings > Approved Integrations > New Access Token.'
-    );
-  }
-
   if (!baseUrl) {
     throw new Error(
       'CANVAS_API_URL or CANVAS_BASE_URL environment variable is required. ' +
-      'Example: https://your-school.instructure.com'
+        'Example: https://your-school.instructure.com'
+    );
+  }
+  return normalizeBaseUrl(baseUrl);
+};
+
+const getRequestedAuthMode = (): CanvasAuthMode | undefined => {
+  const raw = (process.env.CANVAS_AUTH_MODE || '').trim().toLowerCase();
+  if (!raw) return undefined;
+  if (raw === 'token' || raw === 'browser' || raw === 'auto') return raw as CanvasAuthMode;
+  throw new Error(
+    "Invalid CANVAS_AUTH_MODE. Expected 'token', 'browser', or 'auto'."
+  );
+};
+
+const getCanvasToken = async (): Promise<string | undefined> => {
+  const envToken = process.env.CANVAS_API_TOKEN || process.env.CANVAS_TOKEN;
+  if (envToken) return envToken;
+
+  // Fallback to @flowstate/core auth store (aligns with other MCP packages)
+  try {
+    const { auth } = await import('@flowstate/core');
+    const token = await auth.getToken('canvas');
+    if (token?.accessToken) return token.accessToken;
+  } catch {
+    // ignore: core auth not available in standalone mode
+  }
+
+  return undefined;
+};
+
+const cookieDomainMatchesHost = (cookieDomain: string, host: string): boolean => {
+  const normalized = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain;
+  return host === normalized || host.endsWith(`.${normalized}`);
+};
+
+let cookieHeaderCache:
+  | {
+      storageStatePath: string;
+      host: string;
+      mtimeMs: number;
+      cookieHeader: string;
+    }
+  | undefined;
+
+const buildCookieHeaderFromStorageState = async (storageStatePath: string, baseUrl: string) => {
+  const host = new URL(baseUrl).host;
+  let stat: { mtimeMs: number };
+  try {
+    stat = await fs.stat(storageStatePath);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && (error as any).code === 'ENOENT') {
+      throw new Error(
+        `Canvas browser auth requires a Playwright storage state file, but it was not found at: ${storageStatePath}. ` +
+          `Run the 'canvas_auth_browser_login' tool to generate it.`
+      );
+    }
+    throw error;
+  }
+  if (
+    cookieHeaderCache &&
+    cookieHeaderCache.storageStatePath === storageStatePath &&
+    cookieHeaderCache.host === host &&
+    cookieHeaderCache.mtimeMs === stat.mtimeMs
+  ) {
+    return cookieHeaderCache.cookieHeader;
+  }
+
+  let raw: string;
+  try {
+    raw = await fs.readFile(storageStatePath, 'utf8');
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && (error as any).code === 'ENOENT') {
+      throw new Error(
+        `Canvas browser auth requires a Playwright storage state file, but it was not found at: ${storageStatePath}. ` +
+          `Run the 'canvas_auth_browser_login' tool to generate it.`
+      );
+    }
+    throw error;
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid Canvas storage state JSON at: ${storageStatePath}`);
+  }
+
+  const cookies: any[] = Array.isArray(parsed?.cookies) ? parsed.cookies : [];
+  const matched = cookies
+    .filter((c) => c && typeof c.name === 'string' && typeof c.value === 'string')
+    .filter((c) => typeof c.domain === 'string' && cookieDomainMatchesHost(c.domain, host))
+    .filter((c) => typeof c.path === 'string')
+    .map((c) => `${c.name}=${c.value}`)
+    .filter(Boolean);
+
+  if (matched.length === 0) {
+    throw new Error(
+      `Canvas storage state at ${storageStatePath} contains no usable cookies for ${host}. ` +
+        `Re-run 'canvas_auth_browser_login' to refresh the session.`
     );
   }
 
-  // Normalize base URL - remove trailing slash
-  const normalizedUrl = baseUrl.replace(/\/$/, '');
+  const cookieHeader = matched.join('; ');
+  cookieHeaderCache = {
+    storageStatePath,
+    host,
+    mtimeMs: stat.mtimeMs,
+    cookieHeader,
+  };
+  return cookieHeader;
+};
 
-  return { token, baseUrl: normalizedUrl };
+// Canvas API configuration from environment
+const getCanvasConfig = async (): Promise<CanvasConfig> => {
+  const baseUrl = getCanvasBaseUrl();
+  const requestedMode = getRequestedAuthMode();
+
+  const storageStatePath =
+    process.env.CANVAS_STORAGE_STATE_PATH || process.env.CANVAS_PLAYWRIGHT_STORAGE_STATE_PATH;
+
+  const envToken = process.env.CANVAS_API_TOKEN || process.env.CANVAS_TOKEN;
+
+  const mode: CanvasAuthMode =
+    requestedMode ?? (envToken ? 'token' : storageStatePath ? 'browser' : 'token');
+
+  if (mode === 'auto') {
+    if (envToken) {
+      return { baseUrl, auth: { mode: 'token', token: envToken } };
+    }
+
+    if (storageStatePath) {
+      const cookieHeader = await buildCookieHeaderFromStorageState(storageStatePath, baseUrl);
+      return { baseUrl, auth: { mode: 'browser', storageStatePath, cookieHeader } };
+    }
+
+    const token = await getCanvasToken();
+    if (!token) {
+      throw new Error(
+        'Canvas auth mode is auto but no credentials were found. ' +
+          'Set CANVAS_API_TOKEN (or store a token in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and CANVAS_STORAGE_STATE_PATH (then run canvas_auth_browser_login).'
+      );
+    }
+
+    return { baseUrl, auth: { mode: 'token', token } };
+  }
+
+  if (mode === 'token') {
+    const token = envToken ?? (await getCanvasToken());
+    if (!token) {
+      throw new Error(
+        'Canvas token auth is selected but CANVAS_API_TOKEN is not set. ' +
+          "Either set CANVAS_API_TOKEN (or CANVAS_TOKEN, or connect Canvas in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and run the 'canvas_auth_browser_login' tool."
+      );
+    }
+    return { baseUrl, auth: { mode: 'token', token } };
+  }
+
+  if (!storageStatePath) {
+    throw new Error(
+      'Canvas browser auth requires CANVAS_STORAGE_STATE_PATH (path to a Playwright storage state JSON file). ' +
+        "Run the 'canvas_auth_browser_login' tool to generate it."
+    );
+  }
+
+  const cookieHeader = await buildCookieHeaderFromStorageState(storageStatePath, baseUrl);
+  return {
+    baseUrl,
+    auth: {
+      mode: 'browser',
+      storageStatePath,
+      cookieHeader,
+    },
+  };
 };
 
 const resolveUrl = (candidate: string, base: string) => {
@@ -75,21 +271,78 @@ const ensurePerPage = (url: URL, perPage: number) => {
   }
 };
 
+const makeCanvasHttpError = async (
+  response: Response,
+  authMode: CanvasAuth['mode']
+): Promise<Error> => {
+  const contentType = response.headers.get('content-type') || '';
+
+  if (authMode === 'browser') {
+    if (response.status === 401 || response.status === 403) {
+      return new Error(
+        'Canvas browser session is unauthorized or expired. Run the ' +
+          "'canvas_auth_browser_login' tool to refresh your session."
+      );
+    }
+    if (contentType.includes('text/html') || response.url.includes('/login')) {
+      return new Error(
+        'Canvas browser session appears to be expired. Run the ' +
+          "'canvas_auth_browser_login' tool to refresh your session."
+      );
+    }
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    return new Error(
+      `Canvas API unauthorized (${response.status}). Check your token / permissions, or switch to browser auth (CANVAS_AUTH_MODE=browser).`
+    );
+  }
+
+  let body = '';
+  try {
+    body = await response.text();
+  } catch {
+    // ignore
+  }
+
+  const extra = body ? `: ${summarizeBodyForError(body)}` : '';
+  return new Error(`Canvas API error (${response.status})${extra}`);
+};
+
 async function canvasFetchResponse(url: string, options: RequestInit = {}) {
-  const { token } = getCanvasConfig();
+  const { auth } = await getCanvasConfig();
+
+  const authHeaders: Record<string, string> = {};
+  if (auth.mode === 'token') {
+    authHeaders.Authorization = `Bearer ${auth.token}`;
+  } else {
+    authHeaders.Cookie = auth.cookieHeader;
+  }
 
   const response = await fetch(url, {
     ...options,
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...authHeaders,
       ...options.headers,
     },
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Canvas API error (${response.status}): ${errorText}`);
+    throw await makeCanvasHttpError(response, auth.mode);
+  }
+
+  // When using browser-session auth, an expired session often returns HTML or redirects.
+  // Surface a clearer message than a JSON parse failure downstream.
+  const contentType = response.headers.get('content-type') || '';
+  if (
+    auth.mode === 'browser' &&
+    (contentType.includes('text/html') || response.url.includes('/login'))
+  ) {
+    throw new Error(
+      'Canvas browser session appears to be expired. Run the ' +
+        "'canvas_auth_browser_login' tool to refresh your session."
+    );
   }
 
   return response;
@@ -104,7 +357,7 @@ async function canvasFetchAllPages<T>(
     maxItems?: number;
   }
 ): Promise<T[]> {
-  const { baseUrl } = getCanvasConfig();
+  const { baseUrl } = await getCanvasConfig();
 
   const perPage = paging?.perPage ?? DEFAULT_PER_PAGE;
   const maxPages = paging?.maxPages ?? MAX_PAGES;
@@ -151,24 +404,9 @@ async function canvasFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const { token, baseUrl } = getCanvasConfig();
-  
+  const { baseUrl } = await getCanvasConfig();
   const url = `${baseUrl}/api/v1${endpoint}`;
-  
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Canvas API error (${response.status}): ${errorText}`);
-  }
-
+  const response = await canvasFetchResponse(url, options);
   return response.json();
 }
 
@@ -177,19 +415,124 @@ async function canvasFetchRaw(
   url: string,
   options: RequestInit & { includeAuth?: boolean } = {}
 ): Promise<Response> {
-  const { token } = getCanvasConfig();
+  const { auth } = await getCanvasConfig();
   const includeAuth = options.includeAuth !== false;
   const { includeAuth: _ignored, ...rest } = options;
+
+  const authHeaders: Record<string, string> = {};
+  if (includeAuth) {
+    if (auth.mode === 'token') {
+      authHeaders.Authorization = `Bearer ${auth.token}`;
+    } else {
+      authHeaders.Cookie = auth.cookieHeader;
+    }
+  }
 
   return fetch(url, {
     ...rest,
     headers: includeAuth
       ? {
-          Authorization: `Bearer ${token}`,
+          ...authHeaders,
           ...(rest.headers ?? {}),
         }
       : rest.headers,
   });
+}
+
+// ============================================================================
+// Browser Auth Helpers (Playwright)
+// ============================================================================
+
+export async function browserLoginWithPlaywright(options?: {
+  storageStatePath?: string;
+  loginUrl?: string;
+  timeoutMs?: number;
+  headless?: boolean;
+}): Promise<{ storageStatePath: string; userId?: number; userName?: string }> {
+  const baseUrl = getCanvasBaseUrl();
+  const storageStatePath =
+    options?.storageStatePath ||
+    process.env.CANVAS_STORAGE_STATE_PATH ||
+    process.env.CANVAS_PLAYWRIGHT_STORAGE_STATE_PATH;
+
+  if (!storageStatePath) {
+    throw new Error(
+      'Missing CANVAS_STORAGE_STATE_PATH. Provide it as an env var or tool input to save the Playwright storage state.'
+    );
+  }
+
+  const timeoutMs =
+    options?.timeoutMs ??
+    Number(process.env.CANVAS_PLAYWRIGHT_LOGIN_TIMEOUT_MS || '300000');
+
+  const headless =
+    options?.headless ??
+    (process.env.CANVAS_PLAYWRIGHT_HEADLESS || '').trim().toLowerCase() === 'true';
+
+  const loginUrl = options?.loginUrl || process.env.CANVAS_LOGIN_URL || `${baseUrl}/login`;
+
+  const require = createRequire(import.meta.url);
+  let chromium: any;
+  try {
+    const playwright = require('playwright');
+    chromium = playwright?.chromium;
+  } catch {
+    throw new Error(
+      "Playwright is required for browser login but isn't installed. Install it (e.g. `pnpm add -w playwright`) and re-run."
+    );
+  }
+
+  if (!chromium) {
+    throw new Error('Playwright chromium runtime not available.');
+  }
+
+  await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
+
+  const browser = await chromium.launch({ headless });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  try {
+    await page.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+    console.error(
+      `[mcp-canvas] Browser login opened. Complete login in the browser window. Waiting up to ${Math.ceil(
+        timeoutMs / 1000
+      )}s...`
+    );
+
+    const started = Date.now();
+    let lastStatus: number | undefined;
+
+    while (Date.now() - started < timeoutMs) {
+      try {
+        const response = await context.request.get(`${baseUrl}/api/v1/users/self/profile`, {
+          headers: { Accept: 'application/json' },
+        });
+        lastStatus = response.status();
+        if (response.ok()) {
+          const user = await response.json();
+          await context.storageState({ path: storageStatePath });
+          return {
+            storageStatePath,
+            userId: typeof user?.id === 'number' ? user.id : undefined,
+            userName: typeof user?.name === 'string' ? user.name : undefined,
+          };
+        }
+      } catch {
+        // ignore transient errors while user is logging in
+      }
+
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    throw new Error(
+      `Timed out waiting for Canvas login. Last status: ${lastStatus ?? 'unknown'}. ` +
+        `Try again, or set CANVAS_LOGIN_URL if your school uses a custom login page.`
+    );
+  } finally {
+    await context.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+  }
 }
 
 // ============================================================================
@@ -591,7 +934,7 @@ export async function downloadFileByUrl(
   fileUrl: string,
   options?: { maxRedirects?: number }
 ): Promise<{ buffer: Buffer; contentType: string; finalUrl: string }> {
-  const { baseUrl } = getCanvasConfig();
+  const { baseUrl } = await getCanvasConfig();
   const maxRedirects = options?.maxRedirects ?? 10;
   const base = new URL(baseUrl);
 
@@ -617,8 +960,9 @@ export async function downloadFileByUrl(
 
     if (response.status === 401 || response.status === 403) {
       if (includeAuth) {
-        const body = await response.text();
-        throw new Error(`Canvas file download unauthorized (${response.status}): ${body}`);
+        const body = await response.text().catch(() => '');
+        const extra = body ? `: ${summarizeBodyForError(body)}` : '';
+        throw new Error(`Canvas file download unauthorized (${response.status})${extra}`);
       }
       throw new Error(
         'This file appears to be hosted outside Canvas and requires browser authentication. ' +
@@ -627,8 +971,9 @@ export async function downloadFileByUrl(
     }
 
     if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Canvas file download failed (${response.status}): ${body}`);
+      const body = await response.text().catch(() => '');
+      const extra = body ? `: ${summarizeBodyForError(body)}` : '';
+      throw new Error(`Canvas file download failed (${response.status})${extra}`);
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream';

@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { Menu, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatMode from './modes/ChatMode';
 import TasksMode from './modes/TasksMode';
@@ -7,6 +6,7 @@ import WorkflowsMode from './modes/WorkflowsMode';
 import IntegrationsMode from './modes/IntegrationsMode';
 import { HomeScreen } from './components/HomeScreen';
 import { PageNavigation } from './components/PageNavigation';
+import TitleBar from './components/TitleBar';
 import { ZenGarden } from './components/ZenGarden';
 import { SettingsPage } from './components/SettingsPage';
 import { OnboardingFlow } from './components/OnboardingFlow';
@@ -19,13 +19,16 @@ import { providerDefinitions } from './data/providerData';
 import { onboardingWowPrompts } from './data/onboardingData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
 import type { AuthStatus } from './types/electron';
-import flowstateLogo from '../../assets/flowstate-main-logo.png';
 
 export type AppPage = 'home' | 'chat' | 'tasks' | 'workflows' | 'integrations' | 'settings';
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState<AppPage>('home');
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.matchMedia('(min-width: 1024px)').matches;
+  });
   const { setCurrentSessionId, loadMessages } = useChatStore();
   const { config, updateConfig, loadConfig } = useConfigStore();
   const loadIntegrations = useIntegrationsStore((state) => state.loadIntegrations);
@@ -53,6 +56,23 @@ function App() {
     currentPage === 'tasks' ||
     currentPage === 'workflows' ||
     currentPage === 'integrations';
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsSidebarOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isSidebarOpen]);
 
   useEffect(() => {
     if (!isOnboarding) {
@@ -176,55 +196,63 @@ function App() {
 
   const showMainShell = !isOnboarding;
 
-  const mainContent = isOnboarding ? (
-    <OnboardingFlow
-      currentStep={currentStep}
-      onStepChange={setStep}
-      selectedApps={selectedApps}
-      onToggleApp={toggleApp}
-      integrations={integrations}
-      authStatuses={authStatuses}
-      providerOptions={providerOptions}
-      selectedProvider={selectedProvider}
-      selectedModel={selectedModel}
-      onSelectProvider={setProvider}
-      onSelectModel={setModel}
-      onStartProviderSetup={() => {
-        const command = getProviderAuthCommand(selectedProvider);
-        if (typeof window.flowstate.app.openTerminal === 'function') {
-          window.flowstate.app.openTerminal(command);
-        } else {
-          window.flowstate.app.openExternal(
-            `terminal://${encodeURIComponent(command)}`,
-          );
-        }
-        const authUrl = getProviderAuthUrl(selectedProvider);
-        if (authUrl) {
-          window.flowstate.app.openExternal(authUrl);
-        }
-      }}
-      wowPrompts={onboardingWowPrompts}
-      selectedWowPrompt={selectedWowPrompt}
-      onSelectWowPrompt={setSelectedWowPrompt}
-      onFinish={handleOnboardingFinish}
-      onSkipWow={handleOnboardingSkipWow}
-      onConnectIntegration={(integrationId) => {
-        setOnboardingConnect(integrationId);
-      }}
-    />
-  ) : (
-    <div
-      className={`h-full flex flex-col ${
-        isSidebarOpen ? 'translate-x-2' : 'translate-x-0'
-      } transition-transform duration-300 ease-in-out`}
-    >
-       <main className="flex-1 overflow-auto">
+  const navigation = useMemo(() => {
+    if (!isOnMainPage) return null;
+    return (
+      <PageNavigation
+        currentPage={currentPage as 'chat' | 'tasks' | 'workflows' | 'integrations'}
+        onNavigate={(page) => {
+          setCurrentPage(page);
+          if (!isDesktop) setIsSidebarOpen(false);
+        }}
+      />
+    );
+  }, [currentPage, isDesktop, isOnMainPage]);
 
-        <div key={currentPage} className="h-full page-fade-up">
-          {renderPage()}
-        </div>
-      </main>
-    </div>
+  const mainContent = isOnboarding ? (
+    <main className="flex-1 overflow-auto">
+      <OnboardingFlow
+        currentStep={currentStep}
+        onStepChange={setStep}
+        selectedApps={selectedApps}
+        onToggleApp={toggleApp}
+        integrations={integrations}
+        authStatuses={authStatuses}
+        providerOptions={providerOptions}
+        selectedProvider={selectedProvider}
+        selectedModel={selectedModel}
+        onSelectProvider={setProvider}
+        onSelectModel={setModel}
+        onStartProviderSetup={() => {
+          const command = getProviderAuthCommand(selectedProvider);
+          if (typeof window.flowstate.app.openTerminal === 'function') {
+            window.flowstate.app.openTerminal(command);
+          } else {
+            window.flowstate.app.openExternal(
+              `terminal://${encodeURIComponent(command)}`,
+            );
+          }
+          const authUrl = getProviderAuthUrl(selectedProvider);
+          if (authUrl) {
+            window.flowstate.app.openExternal(authUrl);
+          }
+        }}
+        wowPrompts={onboardingWowPrompts}
+        selectedWowPrompt={selectedWowPrompt}
+        onSelectWowPrompt={setSelectedWowPrompt}
+        onFinish={handleOnboardingFinish}
+        onSkipWow={handleOnboardingSkipWow}
+        onConnectIntegration={(integrationId) => {
+          setOnboardingConnect(integrationId);
+        }}
+      />
+    </main>
+  ) : (
+    <main className="flex-1 overflow-auto">
+      <div key={currentPage} className="h-full page-fade-up">
+        {renderPage()}
+      </div>
+    </main>
   );
 
   const handleSelectConversation = async (sessionId: string) => {
@@ -237,8 +265,8 @@ function App() {
 
   return (
     <div className="size-full relative overflow-hidden">
-      <div className="absolute inset-0 bg-background" />
-      <div className="absolute inset-0 ambient-gradient" />
+      <div className="absolute inset-0 bg-background pointer-events-none" />
+      <div className="absolute inset-0 ambient-gradient pointer-events-none" />
 
       <ZenGarden />
 
@@ -250,69 +278,38 @@ function App() {
             onSelectConversation={handleSelectConversation}
           />
 
-          {isSidebarOpen && (
+          {isSidebarOpen && !isDesktop && (
             <div
-              className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-40 transition-opacity duration-300 ease-in-out"
+              className="fixed inset-0 fs-overlay z-40 transition-opacity duration-300 ease-in-out"
               onClick={() => setIsSidebarOpen(false)}
             />
           )}
         </>
       )}
 
-      <div className="relative z-10 h-full flex flex-col">
+      <div
+        className={`relative z-10 h-full flex flex-col transition-all duration-300 ease-out ${
+          showMainShell && isSidebarOpen && isDesktop ? 'pl-80' : 'pl-0'
+        }`}
+      >
         {showMainShell && (
-          <header className="titlebar-drag flex items-center justify-between px-6 pt-6 pb-4 border-b border-border bg-card/60 backdrop-blur-xl min-h-[72px]">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="titlebar-no-drag w-10 h-10 rounded-lg bg-card hover:bg-secondary border border-border flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-[1.06] active:scale-95 shadow-sm"
-                aria-label="Toggle sidebar"
-              >
-                {isSidebarOpen ? (
-                  <X className="w-5 h-5 text-foreground" />
-                ) : (
-                  <Menu className="w-5 h-5 text-foreground" />
-                )}
-              </button>
-
-              <button
-                onClick={() => setCurrentPage('home')}
-                className="titlebar-no-drag flex items-center gap-3 transition-opacity duration-300 ease-in-out hover:opacity-80"
-              >
-                <img src={flowstateLogo} alt="FlowState" className="w-8 h-8" />
-                <h1 className="text-lg text-foreground">FlowState</h1>
-              </button>
-            </div>
-
-            {isOnMainPage && (
-              <div className="titlebar-no-drag flex items-center justify-center">
-                <PageNavigation
-                  currentPage={currentPage as 'chat' | 'tasks' | 'workflows' | 'integrations'}
-                  onNavigate={(page) => setCurrentPage(page)}
-                />
-              </div>
-            )}
-
-            <div className="titlebar-no-drag flex items-center gap-2">
-              {currentPage !== 'home' && (
-                <button
-                  onClick={() => setCurrentPage('home')}
-                  className="px-3 py-2 rounded-lg bg-card hover:bg-secondary border border-border text-sm text-foreground/80 hover:text-foreground transition-all duration-300 ease-in-out shadow-sm hover:shadow-md"
-                >
-                  Home
-                </button>
-              )}
-              <button
-                onClick={() => setCurrentPage('settings')}
-                className="px-3 py-2 rounded-lg bg-card hover:bg-secondary border border-border text-sm text-foreground/80 hover:text-foreground transition-all duration-300 ease-in-out shadow-sm hover:shadow-md"
-              >
-                Settings
-              </button>
-            </div>
-          </header>
+          <TitleBar
+            isSidebarOpen={isSidebarOpen}
+            onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
+            showHomeButton={currentPage !== 'home'}
+            onNavigateHome={() => {
+              setCurrentPage('home');
+              if (!isDesktop) setIsSidebarOpen(false);
+            }}
+            onNavigateSettings={() => {
+              setCurrentPage('settings');
+              if (!isDesktop) setIsSidebarOpen(false);
+            }}
+            navigation={navigation}
+          />
         )}
 
-        <div className="flex-1 flex flex-col overflow-auto">{mainContent}</div>
+        <div className="flex-1 flex flex-col overflow-hidden">{mainContent}</div>
       </div>
     </div>
   );

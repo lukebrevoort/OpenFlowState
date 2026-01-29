@@ -12,8 +12,10 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
+import { timelineStore } from './timeline-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
+import type { IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -482,10 +484,24 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
  */
 ipcMain.handle('opencode:status', async () => {
   try {
-    return { success: true, status: processManager.running };
+    const health = await processManager.healthCheck();
+    return {
+      running: processManager.running,
+      // Back-compat for early renderer builds that expected `status`
+      status: processManager.running,
+      sessionId: processManager.sessionId,
+      healthy: health.healthy,
+      version: health.version,
+    };
   } catch (error) {
     console.error('Failed to get OpenCode status:', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      running: false,
+      status: false,
+      sessionId: null,
+      healthy: false,
+      version: undefined,
+    };
   }
 });
 
@@ -498,6 +514,307 @@ ipcMain.handle('opencode:restart', async () => {
     console.error('Failed to restart OpenCode:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
+});
+
+// ============================================================================
+// Phase 3.5 - Feature-level IPC surfaces (typed via renderer/types/electron.d.ts)
+// ============================================================================
+
+const notImplemented = <T>(feature: string): IpcResult<T> => ({
+  ok: false,
+  error: {
+    code: 'NOT_IMPLEMENTED',
+    message: `${feature} is not available yet.`,
+  },
+});
+
+const DEFAULT_CONVERSATION_TITLE = 'New Conversation';
+
+const normalizeConversationTitle = (title: string): string => {
+  return title.trim().replace(/\s+/g, ' ').toLowerCase();
+};
+
+const parseTitleSuffix = (title: string): { base: string; suffix: number | null } => {
+  const match = /^(.*?)(?:\s\((\d+)\))?$/.exec(title.trim());
+  if (!match) {
+    return { base: title.trim(), suffix: null };
+  }
+
+  const base = (match[1] ?? '').trim();
+  const suffix = match[2] ? Number(match[2]) : null;
+  return { base, suffix: Number.isFinite(suffix) ? suffix : null };
+};
+
+const makeUniqueConversationTitle = (requested: string | undefined, existingTitles: string[]): string => {
+  const initial = (requested ?? '').trim().replace(/\s+/g, ' ');
+  const desired = initial.length ? initial : DEFAULT_CONVERSATION_TITLE;
+
+  const existingNormalized = new Set(existingTitles.map(normalizeConversationTitle));
+  const desiredNorm = normalizeConversationTitle(desired);
+  if (!existingNormalized.has(desiredNorm)) {
+    return desired;
+  }
+
+  const parsed = parseTitleSuffix(desired);
+  const base = parsed.base.length ? parsed.base : DEFAULT_CONVERSATION_TITLE;
+  const baseNorm = normalizeConversationTitle(base);
+
+  const used = new Set<number>();
+  for (const t of existingTitles) {
+    const cleaned = t.trim().replace(/\s+/g, ' ');
+    const { base: b, suffix } = parseTitleSuffix(cleaned);
+    if (normalizeConversationTitle(b) !== baseNorm) {
+      continue;
+    }
+
+    if (suffix && suffix > 0) {
+      used.add(suffix);
+    } else {
+      used.add(1);
+    }
+  }
+
+  for (let n = 2; n < 10_000; n += 1) {
+    if (!used.has(n)) {
+      return `${base} (${n})`;
+    }
+  }
+
+  // Extremely unlikely fallback; keeps behavior deterministic.
+  return `${base} (${Date.now()})`;
+};
+
+const configureTimelineStore = (): void => {
+  // Avoid initializing with DEFAULT_DATA_DIR before ProcessManager has a chance
+  // to point the store at the app userData dir.
+  timelineStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+ipcMain.handle('settings:get', async () => {
+  try {
+    return configStore.get();
+  } catch {
+    return await configStore.load();
+  }
+});
+
+ipcMain.handle('settings:update', async (_event, config: Parameters<typeof configStore.update>[0]) => {
+  await configStore.update(config);
+  return configStore.get();
+});
+
+ipcMain.handle('settings:getTheme', () => {
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+});
+
+ipcMain.handle('settings:getAppInfo', () => {
+  return {
+    name: app.getName(),
+    version: app.getVersion(),
+    platform: process.platform,
+    isDev,
+  };
+});
+
+ipcMain.handle('integrations:listAuthStatuses', async () => {
+  try {
+    return await authManager.getAllStatuses();
+  } catch (error) {
+    console.error('[Integrations] Error getting all statuses:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('integrations:getMcpStatus', async () => {
+  try {
+    return await processManager.getMcpStatus();
+  } catch (error) {
+    console.error('[Integrations] Error getting MCP status:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('integrations:reloadMcp', async () => {
+  try {
+    await processManager.reloadMcpConfig();
+    return { success: true };
+  } catch (error) {
+    console.error('[Integrations] Error reloading MCP config:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle(
+  'integrations:oauthStart',
+  async (_event, service: string, clientId: string, clientSecret: string) => {
+    try {
+      await authManager.storeClientCredentials(service, {
+        clientId,
+        clientSecret,
+      });
+
+      const token = await oauthServer.startOAuth(service, clientId, clientSecret);
+      await processManager.reloadMcpConfig();
+      return token;
+    } catch (error) {
+      console.error(`[Integrations] Error starting OAuth for ${service}:`, error);
+      if (mainWindow?.webContents) {
+        mainWindow.webContents.send('oauth:error', {
+          service,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+  }
+);
+
+ipcMain.handle('integrations:oauthRefresh', async (_event, service: string) => {
+  try {
+    return await oauthServer.refreshToken(service);
+  } catch (error) {
+    console.error(`[Integrations] Error refreshing token for ${service}:`, error);
+    return null;
+  }
+});
+
+ipcMain.handle('integrations:oauthDisconnect', async (_event, service: string) => {
+  try {
+    await oauthServer.disconnect(service);
+    await processManager.reloadMcpConfig();
+    if (mainWindow?.webContents) {
+      mainWindow.webContents.send('oauth:disconnected', { service });
+    }
+  } catch (error) {
+    console.error(`[Integrations] Error disconnecting ${service}:`, error);
+    throw error;
+  }
+});
+
+ipcMain.handle(
+  'integrations:storeApiToken',
+  async (_event, service: string, apiToken: string, additionalData?: Record<string, string>) => {
+    try {
+      await authManager.storeApiToken(service, apiToken, additionalData);
+      await processManager.reloadMcpConfig();
+
+      if (mainWindow?.webContents) {
+        mainWindow.webContents.send('auth:apiTokenSuccess', { service });
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error(`[Integrations] Error storing API token for ${service}:`, error);
+      throw error;
+    }
+  }
+);
+
+ipcMain.handle('chat:sendMessage', async (event, message: string) => {
+  if (!processManager.running) {
+    return {
+      error: 'OpenCode not running',
+      content: 'The AI assistant is not available. Please restart the application.',
+    };
+  }
+
+  try {
+    await processManager.streamMessage(message, event.sender);
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error in chat:sendMessage:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const message = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
+    return {
+      error: message,
+      content: message,
+      errorDetails: opencodeError,
+    };
+  }
+});
+
+ipcMain.handle('chat:getStatus', async () => {
+  const health = await processManager.healthCheck();
+  return {
+    running: processManager.running,
+    status: processManager.running,
+    sessionId: processManager.sessionId,
+    healthy: health.healthy,
+    version: health.version,
+  };
+});
+
+ipcMain.handle('chat:newConversation', async (_event, title?: string) => {
+  if (!processManager.running) {
+    throw new Error('OpenCode not running');
+  }
+
+  const sessions = await processManager.listSessions();
+  const uniqueTitle = makeUniqueConversationTitle(title, sessions.map((s) => s.title));
+  const sessionId = await processManager.createSession(uniqueTitle);
+
+  configureTimelineStore();
+  timelineStore.upsertSessionMeta(sessionId, {
+    title: uniqueTitle,
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+  });
+
+  return { sessionId };
+});
+
+ipcMain.handle('chat:listConversations', async () => {
+  const sessions = await processManager.listSessions();
+  if (!sessions.length) {
+    return sessions;
+  }
+
+  try {
+    configureTimelineStore();
+    const cutoff = timelineStore.getRetentionCutoffMs();
+    const [knownIds, activeIds] = await Promise.all([
+      timelineStore.listKnownSessionIds(),
+      timelineStore.listActiveSessionIdsSince(cutoff),
+    ]);
+
+    return sessions.filter((s) => !knownIds.has(s.id) || activeIds.has(s.id));
+  } catch (error) {
+    console.warn('[IPC] Failed to apply conversation retention filter:', error);
+    return sessions;
+  }
+});
+
+ipcMain.handle('chat:switchConversation', async (_event, sessionId: string) => {
+  await processManager.switchSession(sessionId);
+
+  try {
+    configureTimelineStore();
+    timelineStore.touchSession(sessionId);
+  } catch (error) {
+    console.warn('[IPC] Failed to update conversation last_seen:', error);
+  }
+
+  return { sessionId };
+});
+
+ipcMain.handle('chat:getMessages', async () => {
+  return await processManager.getSessionMessages();
+});
+
+ipcMain.handle('tasks:listRuns', async () => {
+  return notImplemented<TaskRun[]>('tasks:listRuns');
+});
+
+ipcMain.handle('tasks:getActiveRun', async () => {
+  return notImplemented<TaskRun | null>('tasks:getActiveRun');
+});
+
+ipcMain.handle('workflows:list', async () => {
+  return notImplemented<WorkflowDefinition[]>('workflows:list');
+});
+
+ipcMain.handle('workflows:run', async () => {
+  return notImplemented<WorkflowRun>('workflows:run');
 });
 
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
@@ -527,7 +844,17 @@ ipcMain.handle('opencode:newSession', async (_event, title?: string) => {
     throw new Error('OpenCode not running');
   }
 
-  const sessionId = await processManager.createSession(title);
+  const sessions = await processManager.listSessions();
+  const uniqueTitle = makeUniqueConversationTitle(title, sessions.map((s) => s.title));
+  const sessionId = await processManager.createSession(uniqueTitle);
+
+  configureTimelineStore();
+  timelineStore.upsertSessionMeta(sessionId, {
+    title: uniqueTitle,
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+  });
+
   return { sessionId };
 });
 
@@ -535,7 +862,23 @@ ipcMain.handle('opencode:newSession', async (_event, title?: string) => {
  * List all sessions
  */
 ipcMain.handle('opencode:listSessions', async () => {
-  return await processManager.listSessions();
+  const sessions = await processManager.listSessions();
+  if (!sessions.length) {
+    return sessions;
+  }
+
+  try {
+    configureTimelineStore();
+    const cutoff = timelineStore.getRetentionCutoffMs();
+    const [knownIds, activeIds] = await Promise.all([
+      timelineStore.listKnownSessionIds(),
+      timelineStore.listActiveSessionIdsSince(cutoff),
+    ]);
+    return sessions.filter((s) => !knownIds.has(s.id) || activeIds.has(s.id));
+  } catch (error) {
+    console.warn('[IPC] Failed to apply session retention filter:', error);
+    return sessions;
+  }
 });
 
 /**
@@ -543,6 +886,14 @@ ipcMain.handle('opencode:listSessions', async () => {
  */
 ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
   await processManager.switchSession(sessionId);
+
+  try {
+    configureTimelineStore();
+    timelineStore.touchSession(sessionId);
+  } catch (error) {
+    console.warn('[IPC] Failed to update session last_seen:', error);
+  }
+
   return { sessionId };
 });
 
