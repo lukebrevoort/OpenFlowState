@@ -1,8 +1,26 @@
-import { useState } from 'react';
-import { Star, Edit2, Play, MoreVertical, Copy, Trash2, Newspaper, PenLine, BarChart3, Mic, Search, Mail } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Star,
+  Edit2,
+  Play,
+  MoreVertical,
+  Copy,
+  Trash2,
+  Newspaper,
+  PenLine,
+  BarChart3,
+  Mic,
+  Search,
+  Mail,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+} from 'lucide-react';
+import { useWorkflowsStore } from '../stores/workflowsStore';
+import type { WorkflowDefinition } from '../types/electron';
 
 interface Workflow {
-  id: number;
+  id: string;
   name: string;
   description: string;
   icon: typeof Newspaper;
@@ -12,14 +30,54 @@ interface Workflow {
   color: string;
 }
 
+const DEFAULT_PINNED_IDS = new Set(['daily-briefing', 'content-generator', 'research-helper']);
+const CARD_ICONS = [Newspaper, PenLine, BarChart3, Mic, Search, Mail];
+const CARD_COLORS = ['#C87137', '#A5B574', '#3E2F27', '#E8BFA0'];
+const MOCK_BASE_DATE = new Date('2026-01-01T00:00:00.000Z');
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function workflowToCardModel(
+  workflow: WorkflowDefinition,
+  pinnedOverrides: Record<string, boolean>,
+): Workflow {
+  const safeDescription = workflow.description ?? 'No description provided.';
+  const hash = hashString(workflow.id);
+  const pinnedDefault = DEFAULT_PINNED_IDS.has(workflow.id);
+  const isPinned = pinnedOverrides[workflow.id] ?? pinnedDefault;
+  const icon = CARD_ICONS[hash % CARD_ICONS.length] ?? Newspaper;
+  const color = CARD_COLORS[hash % CARD_COLORS.length] ?? '#A5B574';
+  const runCount = 8 + (hash % 240);
+  const daysAgo = hash % 21;
+  const lastRun = new Date(MOCK_BASE_DATE.getTime() - daysAgo * 24 * 60 * 60 * 1000);
+
+  return {
+    id: workflow.id,
+    name: workflow.title,
+    description: safeDescription,
+    icon,
+    isPinned,
+    lastRun,
+    runCount,
+    color,
+  };
+}
+
 function WorkflowCard({
   workflow,
   onTogglePin,
   onEdit,
 }: {
   workflow: Workflow;
-  onTogglePin: (id: number) => void;
-  onEdit: (id: number) => void;
+  onTogglePin: (id: string) => void;
+  onEdit: (id: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -117,81 +175,35 @@ function WorkflowCard({
 }
 
 function WorkflowsMode() {
-  const [workflows, setWorkflows] = useState<Workflow[]>([
-    {
-      id: 1,
-      name: 'Daily Briefing',
-      description: 'Summarize emails, calendar events, and top news each morning',
-      icon: Newspaper,
-      isPinned: true,
-      lastRun: new Date(Date.now() - 86400000),
-      runCount: 147,
-      color: '#C87137',
-    },
-    {
-      id: 2,
-      name: 'Content Generator',
-      description: 'Create blog posts, social media content, and marketing copy',
-      icon: PenLine,
-      isPinned: true,
-      lastRun: new Date(Date.now() - 3600000),
-      runCount: 89,
-      color: '#A5B574',
-    },
-    {
-      id: 3,
-      name: 'Data Analyzer',
-      description: 'Process spreadsheets, generate reports, and identify trends',
-      icon: BarChart3,
-      isPinned: false,
-      lastRun: new Date(Date.now() - 7200000),
-      runCount: 63,
-      color: '#3E2F27',
-    },
-    {
-      id: 4,
-      name: 'Meeting Assistant',
-      description: 'Transcribe meetings, create action items, and send summaries',
-      icon: Mic,
-      isPinned: false,
-      lastRun: new Date(Date.now() - 172800000),
-      runCount: 34,
-      color: '#E8BFA0',
-    },
-    {
-      id: 5,
-      name: 'Research Helper',
-      description: 'Gather information, summarize articles, and compile references',
-      icon: Search,
-      isPinned: true,
-      lastRun: new Date(Date.now() - 259200000),
-      runCount: 128,
-      color: '#A5B574',
-    },
-    {
-      id: 6,
-      name: 'Email Composer',
-      description: 'Draft professional emails, responses, and follow-ups',
-      icon: Mail,
-      isPinned: false,
-      lastRun: new Date(Date.now() - 432000000),
-      runCount: 201,
-      color: '#C87137',
-    },
-  ]);
+  const workflows = useWorkflowsStore((state) => state.workflows);
+  const isLoading = useWorkflowsStore((state) => state.isLoading);
+  const error = useWorkflowsStore((state) => state.error);
+  const reload = useWorkflowsStore((state) => state.reload);
+  const [pinnedOverrides, setPinnedOverrides] = useState<Record<string, boolean>>({});
 
-  const handleTogglePin = (id: number) => {
-    setWorkflows((current) =>
-      current.map((workflow) => (workflow.id === id ? { ...workflow, isPinned: !workflow.isPinned } : workflow))
-    );
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const handleTogglePin = (id: string) => {
+    setPinnedOverrides((current) => {
+      const pinnedDefault = DEFAULT_PINNED_IDS.has(id);
+      const currentPinned = current[id] ?? pinnedDefault;
+      return { ...current, [id]: !currentPinned };
+    });
   };
 
-  const handleEdit = (id: number) => {
+  const handleEdit = (id: string) => {
     console.log('Editing workflow:', id);
   };
 
-  const pinnedWorkflows = workflows.filter((workflow) => workflow.isPinned);
-  const unpinnedWorkflows = workflows.filter((workflow) => !workflow.isPinned);
+  const workflowCards = useMemo(
+    () => workflows.map((workflow) => workflowToCardModel(workflow, pinnedOverrides)),
+    [workflows, pinnedOverrides],
+  );
+
+  const pinnedWorkflows = workflowCards.filter((workflow) => workflow.isPinned);
+  const unpinnedWorkflows = workflowCards.filter((workflow) => !workflow.isPinned);
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
@@ -205,7 +217,68 @@ function WorkflowsMode() {
           </button>
         </div>
 
-        {pinnedWorkflows.length > 0 && (
+        {isLoading && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Loading workflows...</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm animate-pulse"
+                >
+                  <div className="w-14 h-14 rounded-xl bg-muted/50 mb-4" />
+                  <div className="h-4 w-2/3 bg-muted/50 rounded mb-2" />
+                  <div className="h-3 w-full bg-muted/40 rounded mb-2" />
+                  <div className="h-3 w-4/5 bg-muted/40 rounded" />
+                  <div className="mt-5 flex gap-2">
+                    <div className="h-9 flex-1 bg-muted/40 rounded-lg" />
+                    <div className="h-9 w-12 bg-muted/40 rounded-lg" />
+                    <div className="h-9 w-12 bg-muted/40 rounded-lg" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!isLoading && error && (
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-destructive mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-lg text-foreground mb-1">Failed to load workflows</h3>
+                <p className="text-sm text-muted-foreground">{error}</p>
+              </div>
+              <button
+                onClick={() => reload()}
+                className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-300 ease-in-out text-sm shadow-sm flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isLoading && !error && workflowCards.length === 0 && (
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-10 shadow-sm text-center">
+            <div className="w-14 h-14 rounded-2xl bg-muted/50 mx-auto mb-4 flex items-center justify-center">
+              <Star className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <h3 className="text-xl text-foreground mb-2">No workflows yet</h3>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              Create your first workflow to automate recurring tasks across your tools.
+            </p>
+            <button className="mt-6 px-6 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out shadow-md hover:scale-105 active:scale-95">
+              + Create New Workflow
+            </button>
+          </div>
+        )}
+
+        {!isLoading && !error && workflowCards.length > 0 && pinnedWorkflows.length > 0 && (
           <div className="mb-10">
             <div className="flex items-center gap-2 mb-4">
               <Star className="w-5 h-5 fill-current text-[#A5B574]" />
@@ -224,19 +297,21 @@ function WorkflowsMode() {
           </div>
         )}
 
-        <div>
-          <h3 className="text-xl text-foreground mb-4">All Workflows</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {unpinnedWorkflows.map((workflow) => (
-              <WorkflowCard
-                key={workflow.id}
-                workflow={workflow}
-                onTogglePin={handleTogglePin}
-                onEdit={handleEdit}
-              />
-            ))}
+        {!isLoading && !error && workflowCards.length > 0 && (
+          <div>
+            <h3 className="text-xl text-foreground mb-4">All Workflows</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {unpinnedWorkflows.map((workflow) => (
+                <WorkflowCard
+                  key={workflow.id}
+                  workflow={workflow}
+                  onTogglePin={handleTogglePin}
+                  onEdit={handleEdit}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { create } from "zustand";
 import { providerDefinitions } from "../data/providerData";
 
 interface ProviderState {

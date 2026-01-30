@@ -332,16 +332,6 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   };
 
   const statusLabel = statusLabels[status] ?? statusLabels.idle;
-  const statusDotClass =
-    status === "error"
-      ? "bg-destructive"
-      : status === "thinking"
-        ? "bg-[#C87137]"
-        : "bg-[#A5B574]";
-
-  const openCodeLabel = openCodeStatus?.running
-    ? "OpenCode running"
-    : "OpenCode offline";
   const sessionLabel = currentSessionId
     ? `Session ${currentSessionId}`
     : "Session pending";

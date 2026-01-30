@@ -32,7 +32,6 @@ export function useOpenCode() {
     error,
     currentSessionId,
     sessions,
-    timeline,
     activeTask,
   } = useChatStore();
 

@@ -18,7 +18,6 @@ import {
   AuthMethod,
   AuthOption,
 } from "../stores/integrationsStore";
-import type { AuthStatus } from "../types/electron";
 
 /**
  * Auth Method Selector - Choose between OAuth and API Token
