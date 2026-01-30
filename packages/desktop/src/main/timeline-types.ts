@@ -17,6 +17,7 @@ export type TimelineEvent = {
   detail?: string;
   toolName?: string;
   payloadInline?: {
+    requestId?: string;
     title?: string;
     summary?: string;
     body?: string;

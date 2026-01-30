@@ -75,6 +75,7 @@ export interface TimelineEvent {
   detail?: string;
   toolName?: string;
   payloadInline?: {
+    requestId?: string;
     title?: string;
     summary?: string;
     body?: string;
@@ -262,6 +263,10 @@ export interface FlowstateAPI {
   timeline: {
     list: (sessionId: string, limit?: number, offset?: number) => Promise<TimelineEvent[]>;
     resolvePayload: (payloadRef: string) => Promise<unknown | null>;
+  };
+
+  approvals: {
+    reply: (requestId: string, reply: 'once' | 'always' | 'deny') => Promise<{ success: boolean; error?: string }>;
   };
 
   mcp: {

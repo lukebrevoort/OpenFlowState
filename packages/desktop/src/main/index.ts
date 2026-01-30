@@ -15,6 +15,7 @@ import { processManager } from './process-manager.js';
 import { timelineStore } from './timeline-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
+import type { ApprovalReply } from './approval-policy-store.js';
 import type { IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -914,8 +915,26 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
  /**
   * Resolve a timeline payload from blob storage
   */
- ipcMain.handle('timeline:payload', async (_event, payloadRef: string) => {
-   return await processManager.getTimelinePayload(payloadRef);
- });
- 
- console.log('IPC handlers registered');
+  ipcMain.handle('timeline:payload', async (_event, payloadRef: string) => {
+    return await processManager.getTimelinePayload(payloadRef);
+  });
+
+  ipcMain.handle('approvals:reply', async (_event, requestId: string, reply: ApprovalReply) => {
+    if (!requestId || typeof requestId !== 'string') {
+      return { success: false, error: 'Invalid requestId' };
+    }
+
+    if (reply !== 'once' && reply !== 'always' && reply !== 'deny') {
+      return { success: false, error: 'Invalid reply' };
+    }
+
+    try {
+      await processManager.replyApproval(requestId, reply);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  });
+  
+  console.log('IPC handlers registered');

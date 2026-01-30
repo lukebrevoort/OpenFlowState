@@ -5,6 +5,20 @@ import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
 import { useChatStore } from '../stores/chatStore';
 
+type ApprovalPayloadInline = {
+  requestId?: string;
+  title?: string;
+  summary?: string;
+  body?: string;
+  approveLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
+};
+
+const isApprovalPayloadInline = (payload: unknown): payload is ApprovalPayloadInline => {
+  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload);
+};
+
 interface RunningTask {
   id: string;
   title: string;
@@ -127,34 +141,52 @@ function TasksMode() {
   const sampleTimeline: TimelineEvent[] = useMemo(() => [], []);
 
   const runningTasks: RunningTask[] = useMemo(() => {
-    if (activeTask && activeTask.status !== 'completed') {
-      const timelineEvents = timeline.length > 0 ? timeline : sampleTimeline;
-      const progress = activeTask.progress || deriveProgress(timelineEvents);
-      const status = activeTask.status === 'completed'
-        ? 'finalizing'
-        : progress > 0
-          ? 'processing'
-          : 'analyzing';
-
-      return [
-        {
-          id: activeTask.id,
-          title: activeTask.title,
-          description: activeTask.description,
-          status,
-          timeline: timelineEvents,
-          progress,
-        },
-      ];
+    if (!activeTask) {
+      return [];
     }
 
-    return [];
+    if (activeTask.status === 'completed') {
+      return [];
+    }
+
+    const timelineEvents = timeline.length > 0 ? timeline : sampleTimeline;
+    const progress = activeTask.progress || deriveProgress(timelineEvents);
+    const status: RunningTask['status'] = progress > 0 ? 'processing' : 'analyzing';
+
+    return [
+      {
+        id: activeTask.id,
+        title: activeTask.title,
+        description: activeTask.description,
+        status,
+        timeline: timelineEvents,
+        progress,
+      },
+    ];
+
   }, [activeTask, sampleTimeline, timeline]);
 
-  const pendingApprovals = timeline
-    .filter((event) => event.kind === 'approval_request')
-    .map((event) => {
-      const payload = event.payloadInline;
+  const pendingApprovals = useMemo(() => {
+    const responded = new Set(
+      timeline
+        .filter((event) => event.kind === 'approval_response')
+        .map((event) => {
+          const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+          return typeof payload?.requestId === 'string' ? payload.requestId : undefined;
+        })
+        .filter((id): id is string => Boolean(id))
+    );
+
+    return timeline
+      .filter((event) => event.kind === 'approval_request')
+      .map((event) => {
+        const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+        const requestId = typeof payload?.requestId === 'string' ? payload.requestId : undefined;
+
+        if (requestId && responded.has(requestId)) {
+          return null;
+        }
+
       const title =
         typeof payload?.title === 'string'
           ? payload.title
@@ -182,6 +214,7 @@ function TasksMode() {
 
       return {
         id: event.id,
+        requestId,
         title,
         summary,
         body,
@@ -189,7 +222,9 @@ function TasksMode() {
         alwaysApproveLabel,
         denyLabel,
       };
-    });
+      })
+      .filter((approval): approval is NonNullable<typeof approval> => Boolean(approval));
+  }, [timeline]);
 
   const completedTasks: CompletedTask[] = activeTask?.status === 'completed'
     ? [
@@ -241,9 +276,24 @@ function TasksMode() {
                     primaryActionLabel={approval.approveLabel}
                     alwaysApproveLabel={approval.alwaysApproveLabel}
                     denyLabel={approval.denyLabel}
-                    onApprove={() => console.log('Approved', approval.id)}
-                    onAlwaysApprove={() => console.log('Always approve', approval.id)}
-                    onDeny={() => console.log('Denied', approval.id)}
+                    onApprove={() => {
+                      if (!approval.requestId) return;
+                      window.flowstate.approvals.reply(approval.requestId, 'once').catch((error) => {
+                        console.error('Failed to approve request', error);
+                      });
+                    }}
+                    onAlwaysApprove={() => {
+                      if (!approval.requestId) return;
+                      window.flowstate.approvals.reply(approval.requestId, 'always').catch((error) => {
+                        console.error('Failed to always-approve request', error);
+                      });
+                    }}
+                    onDeny={() => {
+                      if (!approval.requestId) return;
+                      window.flowstate.approvals.reply(approval.requestId, 'deny').catch((error) => {
+                        console.error('Failed to deny request', error);
+                      });
+                    }}
                   />
 
               ))}

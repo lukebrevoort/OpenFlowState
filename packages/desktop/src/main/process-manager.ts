@@ -18,6 +18,7 @@ import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
+import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -800,6 +801,18 @@ class ProcessManager {
 
     console.log('Starting OpenCode event stream...');
 
+    const extractRequestId = (properties: unknown): string | undefined => {
+      if (!properties || typeof properties !== 'object') return undefined;
+      const record = properties as Record<string, unknown>;
+      const candidates = [record.requestID, record.requestId, record.request_id, record.id];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return candidate;
+        }
+      }
+      return undefined;
+    };
+
     // Run event stream in background
     (async () => {
       try {
@@ -813,43 +826,60 @@ class ProcessManager {
             break;
           }
 
-            // Type the event
-            const typedEvent = event as { type?: string; properties?: unknown };
+          // Type the event
+          const typedEvent = event as { type?: string; properties?: unknown };
 
-            // Forward relevant events to renderer
-            if (typedEvent.type) {
-              webContents.send('opencode:event', {
-                type: typedEvent.type,
-                data: typedEvent.properties,
-              });
+          // Forward relevant events to renderer
+          if (typedEvent.type) {
+            webContents.send('opencode:event', {
+              type: typedEvent.type,
+              data: typedEvent.properties,
+            });
 
-              const payloadSessionId =
-                typeof typedEvent.properties === 'object' && typedEvent.properties
-                  ? (typedEvent.properties as { sessionId?: string }).sessionId
-                  : undefined;
-              const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
-              const normalized = normalizeOpenCodeEvent(
-                { type: typedEvent.type, properties: typedEvent.properties },
-                sessionId
-              );
-              if (normalized) {
-                const shouldStore = this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId);
-                if (!shouldStore) {
-                  continue;
-                }
-                try {
-                  const stored = await timelineStore.appendWithPayload({
-                    ...normalized.event,
-                    redacted: normalized.redacted,
-                    payload: normalized.payload,
-                  });
-                  webContents.send('timeline:event', stored);
-                  this.trackTaskPromotion(sessionId, normalized.event, webContents);
-                } catch (error) {
-                  console.warn('[ProcessManager] Failed to persist timeline event:', error);
-                }
+            const payloadSessionId =
+              typeof typedEvent.properties === 'object' && typedEvent.properties
+                ? ((typedEvent.properties as { sessionID?: string; sessionId?: string }).sessionID ??
+                    (typedEvent.properties as { sessionID?: string; sessionId?: string }).sessionId)
+                : undefined;
+            const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
+
+            const requestId = extractRequestId(typedEvent.properties);
+            if (requestId && sessionId !== 'unknown-session') {
+              approvalPolicyStore.trackRequest(requestId, sessionId);
+
+              if (typedEvent.type === 'permission.asked' && approvalPolicyStore.isSessionAlwaysApprove(sessionId)) {
+                this.replyApproval(requestId, 'always').catch((error) => {
+                  console.warn('[ProcessManager] Failed to auto-approve permission request:', error);
+                });
               }
             }
+
+            const normalized = normalizeOpenCodeEvent(
+              { type: typedEvent.type, properties: typedEvent.properties },
+              sessionId
+            );
+            if (normalized) {
+              const isApprovalEvent =
+                normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
+              const shouldStore =
+                isApprovalEvent ||
+                (this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
+              if (!shouldStore) {
+                continue;
+              }
+              try {
+                const stored = await timelineStore.appendWithPayload({
+                  ...normalized.event,
+                  redacted: normalized.redacted,
+                  payload: normalized.payload,
+                });
+                webContents.send('timeline:event', stored);
+                this.trackTaskPromotion(sessionId, normalized.event, webContents);
+              } catch (error) {
+                console.warn('[ProcessManager] Failed to persist timeline event:', error);
+              }
+            }
+          }
 
 
         }
@@ -1126,6 +1156,37 @@ class ProcessManager {
       };
     } catch {
       return { healthy: false };
+    }
+  }
+
+  async replyApproval(requestId: string, reply: ApprovalReply): Promise<void> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    if (!requestId || typeof requestId !== 'string') {
+      throw new Error('Invalid approval request id');
+    }
+
+    const mappedReply: 'once' | 'always' | 'reject' = reply === 'deny' ? 'reject' : reply;
+
+    const sessionId = approvalPolicyStore.getSessionIdForRequest(requestId) ?? this.activeSessionId ?? undefined;
+    if (reply === 'always' && sessionId) {
+      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+    }
+
+    const permissionClient = (this.instance.client as unknown as { permission?: { reply: (input: { requestID: string; reply: 'once' | 'always' | 'reject' }) => Promise<{ error?: unknown }> } }).permission;
+    if (!permissionClient) {
+      throw new Error('OpenCode permission API unavailable');
+    }
+
+    const result = await permissionClient.reply({
+      requestID: requestId,
+      reply: mappedReply,
+    });
+
+    if (result.error) {
+      throw new Error(`Failed to reply to approval request: ${JSON.stringify(result.error)}`);
     }
   }
 }

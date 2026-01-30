@@ -7,7 +7,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
-  FlowstateAPI,
+  FlowstateAPI as FlowstateAPIDefinition,
   OpenCodeMessage,
   OpenCodeProgress,
   OpenCodeError,
@@ -25,7 +25,7 @@ type Unsubscribe = () => void;
 /**
  * Exposed API for the renderer process
  */
-const flowstateAPI: FlowstateAPI = {
+const flowstateAPI: FlowstateAPIDefinition = {
   // App information
   app: {
     getInfo: () => ipcRenderer.invoke('app:getInfo'),
@@ -168,6 +168,11 @@ const flowstateAPI: FlowstateAPI = {
       ipcRenderer.invoke('timeline:list', sessionId, limit, offset),
     resolvePayload: (payloadRef: string) =>
       ipcRenderer.invoke('timeline:payload', payloadRef),
+  },
+
+  approvals: {
+    reply: (requestId: string, reply: 'once' | 'always' | 'deny') =>
+      ipcRenderer.invoke('approvals:reply', requestId, reply),
   },
 
   // MCP server management
