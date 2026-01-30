@@ -1,8 +1,12 @@
-import type { ReactNode } from 'react';
-import { Menu, X } from 'lucide-react';
-import type { TimelineEvent } from '../types/electron';
-import { ActivityTimeline } from './ActivityTimeline';
-import StatusPill, { type ZenStatus } from './StatusPill';
+import type { ReactNode } from "react";
+import { Menu, X } from "lucide-react";
+import type { TimelineEvent } from "../types/electron";
+import { ActivityTimeline } from "./ActivityTimeline";
+import StatusPill, { type ZenStatus } from "./StatusPill";
+const flowstateLogo = new URL(
+  "../../../assets/flowstate-main-logo.png",
+  import.meta.url
+).toString();
 
 interface TitleBarProps {
   isSidebarOpen: boolean;
@@ -26,13 +30,13 @@ function TitleBar({
   activityEvents,
 }: TitleBarProps) {
   return (
-    <header className="fs-titlebar" role="banner">
+    <header className="fs-titlebar relative" role="banner">
       <div className="titlebar-no-drag flex items-center gap-4">
         <button
           type="button"
           onClick={onToggleSidebar}
           className="fs-icon-button"
-          aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
         >
           {isSidebarOpen ? (
             <X className="w-5 h-5 text-foreground" />
@@ -50,33 +54,37 @@ function TitleBar({
           <div
             className="w-8 h-8 rounded-xl border flex items-center justify-center"
             style={{
-              borderColor: 'var(--fs-line)',
-              backgroundColor: 'color-mix(in srgb, var(--fs-surface-1) 55%, transparent)',
-              boxShadow: 'var(--fs-shadow-sm)',
+              borderColor: "var(--fs-line)",
+              backgroundColor:
+                "color-mix(in srgb, var(--fs-surface-1) 55%, transparent)",
+              boxShadow: "var(--fs-shadow-sm)",
             }}
             aria-hidden="true"
           >
-            <span
-              className="text-sm text-foreground"
-              style={{ fontFamily: 'var(--fs-font-display)' }}
-            >
-              F
-            </span>
+            <img
+              src={flowstateLogo}
+              alt="FlowState Logo"
+              className="w-6 h-6 object-contain"
+              style={{ fontFamily: "var(--fs-font-display)" }}
+            />
           </div>
-          <h1 className="text-lg text-foreground" style={{ fontFamily: 'var(--fs-font-display)' }}>
+          <h1
+            className="text-lg text-foreground"
+            style={{ fontFamily: "var(--fs-font-display)" }}
+          >
             FlowState
           </h1>
         </button>
       </div>
 
-      <div className="titlebar-no-drag flex items-center justify-center">
+      <div className="titlebar-no-drag absolute left-1/2 -translate-x-1/2 flex items-center justify-center">
         {navigation}
       </div>
 
       <div className="titlebar-no-drag flex items-center gap-2">
         <div className="flex items-center gap-2">
-          <StatusPill status={zenStatus} />
-          <div className="hidden md:block max-w-[420px]">
+          <StatusPill status={zenStatus} className="h-6 px-2 text-[10px]" />
+          <div className="hidden md:block max-w-[260px]">
             <ActivityTimeline
               events={activityEvents}
               collapsed
@@ -89,11 +97,19 @@ function TitleBar({
           </div>
         </div>
         {showHomeButton && (
-          <button type="button" onClick={onNavigateHome} className="fs-pill-button">
+          <button
+            type="button"
+            onClick={onNavigateHome}
+            className="fs-pill-button"
+          >
             Home
           </button>
         )}
-        <button type="button" onClick={onNavigateSettings} className="fs-pill-button">
+        <button
+          type="button"
+          onClick={onNavigateSettings}
+          className="fs-pill-button"
+        >
           Settings
         </button>
       </div>

@@ -121,6 +121,11 @@ const buildOpenCodeError = (
   };
 };
 
+const clampMessage = (value: string, maxLength: number): string => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}…`;
+};
+
 class ProcessManager {
   private instance: OpenCodeInstance | null = null;
   private isRunning: boolean = false;
@@ -1037,6 +1042,21 @@ class ProcessManager {
     // If the request never met promotion criteria, do not create Task lifecycle events.
     // This keeps fast chat responses ("hello") from showing up as stuck tasks.
     if (!state.promoted) {
+      const responseEvent = {
+        id: `status-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        sessionId,
+        timestamp: Date.now(),
+        kind: 'status' as const,
+        title: 'Response sent',
+        detail: detail ? clampMessage(detail, 120) : 'Ready for the next request',
+      };
+
+      timelineStore.appendWithPayload(responseEvent).then((stored) => {
+        webContents.send('timeline:event', stored);
+      }).catch((error) => {
+        console.warn('[ProcessManager] Failed to persist response event:', error);
+      });
+
       this.clearTaskTracking(sessionId);
       return;
     }

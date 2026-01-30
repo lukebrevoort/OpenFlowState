@@ -491,13 +491,13 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
               key={message.id}
               className={`w-full flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              <div
-                className={`max-w-[70%] rounded-2xl px-4 py-3 ${
-                  message.role === "user"
-                    ? "bg-card border border-border text-primary-foreground shadow-sm"
-                    : "bg-card border border-border text-foreground backdrop-blur-xl"
-                }`}
-              >
+                <div
+                  className={`max-w-[70%] rounded-2xl px-4 py-3 ${
+                    message.role === "user"
+                      ? "bg-card border border-border text-foreground shadow-sm"
+                      : "bg-card border border-border text-foreground backdrop-blur-xl"
+                  }`}
+                >
                 {message.role === "assistant" && (
                   <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
                     <Sparkles className="w-4 h-4 text-primary" />
@@ -508,7 +508,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 )}
                 <div className="text-sm leading-relaxed">
                   {message.role === "user" ? (
-                    <span className="whitespace-pre-wrap break-words text-secondary">
+                    <span className="whitespace-pre-wrap break-words text-foreground">
                       {message.content}
                     </span>
                   ) : (
@@ -521,7 +521,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 <div
                   className={`text-xs mt-2 ${
                     message.role === "user"
-                      ? "text-secondary-foreground"
+                      ? "text-foreground/70"
                       : "text-muted-foreground"
                   }`}
                 >

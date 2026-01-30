@@ -129,12 +129,12 @@ export function ActivityTimeline({
   if (variant === 'compact') {
     const Icon = iconByKind[latest.kind] ?? Loader2;
     const tone = colorByKind[latest.kind] ?? 'text-muted-foreground';
-    const shouldSpin = animateIcons && (latest.kind === 'phase' || latest.kind === 'status');
+    const shouldSpin = animateIcons && latest.kind === 'phase';
 
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-1.5">
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-2 py-1">
         <div
-          className={`w-5 h-5 rounded-full bg-muted/50 border border-border flex items-center justify-center ${tone}`}
+          className={`w-4 h-4 rounded-full bg-muted/50 border border-border flex items-center justify-center ${tone}`}
         >
           <Icon
             className={
@@ -144,8 +144,8 @@ export function ActivityTimeline({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {latest.detail ? `${latest.title} — ${latest.detail}` : latest.title}
+          <p className="text-[10px] font-medium text-foreground truncate">
+            {latest.title}
           </p>
         </div>
 
@@ -169,7 +169,7 @@ export function ActivityTimeline({
           const Icon = iconByKind[event.kind] ?? Loader2;
           const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
           const isLast = index === visible.length - 1;
-          const shouldSpin = animateIcons && (event.kind === 'phase' || event.kind === 'status');
+          const shouldSpin = animateIcons && event.kind === 'phase';
           const inline = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
           const isApprovalRequest = event.kind === 'approval_request';
 

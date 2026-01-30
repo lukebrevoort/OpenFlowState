@@ -59,9 +59,14 @@ body,
   --sidebar-ring: rgba(139, 107, 89, 0.45);
 
   /* Typography */
-  --fs-font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
-  --fs-font-display: ui-serif, 'New York', 'Iowan Old Style', Palatino, Georgia, serif;
-  --fs-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  --fs-font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", sans-serif;
+  --fs-font-display:
+    ui-serif, "New York", "Iowan Old Style", Palatino, Georgia, serif;
+  --fs-font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
 
   /* Surfaces & effects */
   --fs-surface-0: var(--background);
@@ -69,9 +74,12 @@ body,
   --fs-surface-2: var(--secondary);
   --fs-surface-glass: color-mix(in srgb, var(--card) 92%, transparent);
   --fs-line: color-mix(in srgb, var(--border) 70%, transparent);
-  --fs-shadow-sm: 0 1px 0 rgba(51, 28, 22, 0.06), 0 8px 22px rgba(51, 28, 22, 0.08);
-  --fs-shadow-md: 0 1px 0 rgba(51, 28, 22, 0.08), 0 14px 34px rgba(51, 28, 22, 0.12);
-  --fs-shadow-lg: 0 1px 0 rgba(51, 28, 22, 0.12), 0 22px 64px rgba(51, 28, 22, 0.18);
+  --fs-shadow-sm:
+    0 1px 0 rgba(51, 28, 22, 0.06), 0 8px 22px rgba(51, 28, 22, 0.08);
+  --fs-shadow-md:
+    0 1px 0 rgba(51, 28, 22, 0.08), 0 14px 34px rgba(51, 28, 22, 0.12);
+  --fs-shadow-lg:
+    0 1px 0 rgba(51, 28, 22, 0.12), 0 22px 64px rgba(51, 28, 22, 0.18);
   --fs-radius-sm: 0.5rem;
   --fs-radius-md: 0.75rem;
   --fs-radius-lg: 1.05rem;
@@ -116,7 +124,8 @@ body,
   }
 
   .fs-emoji {
-    font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+    font-family:
+      "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
   }
 
   /* macOS title bar drag region */
@@ -136,8 +145,16 @@ body,
     min-height: 72px;
     -webkit-app-region: drag;
     background:
-      radial-gradient(circle at 14% 15%, color-mix(in srgb, var(--fs-highlight) 55%, transparent), transparent 55%),
-      linear-gradient(to bottom, color-mix(in srgb, var(--fs-surface-glass) 78%, transparent), color-mix(in srgb, var(--fs-surface-glass) 58%, transparent));
+      radial-gradient(
+        circle at 14% 15%,
+        color-mix(in srgb, var(--fs-highlight) 55%, transparent),
+        transparent 55%
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--fs-surface-glass) 78%, transparent),
+        color-mix(in srgb, var(--fs-surface-glass) 58%, transparent)
+      );
     border-bottom: 1px solid var(--fs-line);
     backdrop-filter: blur(18px) saturate(1.06);
     box-shadow: 0 1px 0 rgba(255, 253, 250, 0.35);
@@ -511,16 +528,5 @@ body,
   50% {
     transform: scale(1.05);
     opacity: 0.7;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
   }
 }
