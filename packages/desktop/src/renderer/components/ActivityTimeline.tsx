@@ -1,5 +1,6 @@
 import { CheckCircle2, Loader2, AlertTriangle, Wrench, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import type { TimelineEvent } from '../types/electron';
+import { ApprovalCard } from './ApprovalCard';
 
 const formatTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {
@@ -37,7 +38,35 @@ interface ActivityTimelineProps {
   variant?: 'default' | 'compact';
   showTimestamp?: boolean;
   animateIcons?: boolean;
+  onApprove?: (event: TimelineEvent) => void;
+  onAlwaysApprove?: (event: TimelineEvent) => void;
+  onDeny?: (event: TimelineEvent) => void;
 }
+
+type ApprovalInlinePayload = {
+  title?: string;
+  summary?: string;
+  body?: string;
+  approveLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
+};
+
+const isApprovalInlinePayload = (value: unknown): value is ApprovalInlinePayload => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const maybe = value as Record<string, unknown>;
+  return (
+    'title' in maybe ||
+    'summary' in maybe ||
+    'body' in maybe ||
+    'approveLabel' in maybe ||
+    'alwaysApproveLabel' in maybe ||
+    'denyLabel' in maybe
+  );
+};
 
 export function ActivityTimeline({
   events,
@@ -49,6 +78,9 @@ export function ActivityTimeline({
   variant = 'default',
   showTimestamp = true,
   animateIcons = true,
+  onApprove,
+  onAlwaysApprove,
+  onDeny,
 }: ActivityTimelineProps) {
   if (!events || events.length === 0) {
     if (variant === 'compact') {
@@ -83,6 +115,16 @@ export function ActivityTimeline({
     ? deduped.slice(0, maxItems)
     : deduped.slice(0, maxItemsExpanded);
   const latest = visible[0];
+
+  const logFallback = (action: string, event: TimelineEvent) => {
+    // eslint-disable-next-line no-console
+    console.log(`[timeline] ${action}`, event);
+  };
+
+  const handleApprove = (event: TimelineEvent) => (onApprove ? onApprove(event) : logFallback('approve', event));
+  const handleAlwaysApprove = (event: TimelineEvent) =>
+    onAlwaysApprove ? onAlwaysApprove(event) : logFallback('always_approve', event);
+  const handleDeny = (event: TimelineEvent) => (onDeny ? onDeny(event) : logFallback('deny', event));
 
   if (variant === 'compact') {
     const Icon = iconByKind[latest.kind] ?? Loader2;
@@ -128,6 +170,8 @@ export function ActivityTimeline({
           const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
           const isLast = index === visible.length - 1;
           const shouldSpin = animateIcons && (event.kind === 'phase' || event.kind === 'status');
+          const inline = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
+          const isApprovalRequest = event.kind === 'approval_request';
 
           return (
             <div key={event.id} className="flex items-start gap-3">
@@ -161,6 +205,22 @@ export function ActivityTimeline({
                   <span className="mt-2 inline-flex items-center rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
                     {event.toolName}
                   </span>
+                )}
+
+                {isApprovalRequest && (
+                  <div className="mt-3">
+                    <ApprovalCard
+                      title={inline?.title ?? event.title}
+                      summary={inline?.summary ?? event.detail ?? 'This action requires your approval.'}
+                      body={inline?.body ?? ''}
+                      primaryActionLabel={inline?.approveLabel}
+                      alwaysApproveLabel={inline?.alwaysApproveLabel}
+                      denyLabel={inline?.denyLabel}
+                      onApprove={() => handleApprove(event)}
+                      onAlwaysApprove={() => handleAlwaysApprove(event)}
+                      onDeny={() => handleDeny(event)}
+                    />
+                  </div>
                 )}
               </div>
             </div>
