@@ -110,15 +110,15 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
   {
     id: 'canvas',
     name: 'Canvas LMS',
-    description: 'Assignments, grades, and course materials for students',
+    description: 'Assignments, grades, and course materials (token or browser login)',
     icon: '📚',
     status: 'disconnected',
     isOfficial: true,
     authOptions: [
       {
         method: 'api_token',
-        label: 'Canvas API Token',
-        description: 'Generate a token from Canvas Settings > Approved Integrations',
+        label: 'Canvas Connection',
+        description: 'Connect with an API token or a browser session (no token) using a storage state file',
       },
     ],
   },

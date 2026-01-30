@@ -303,44 +303,138 @@ function ApiTokenForm({
 }
 
 /**
- * Canvas API Token Form (with Canvas URL field)
+ * Canvas Connection Form
+ *
+ * Supports:
+ * - API Token auth
+ * - Browser Login auth (no token) via Playwright storage state
  */
-function CanvasApiTokenForm({
+function CanvasConnectionForm({
   onSubmit,
   isLoading,
 }: {
-  onSubmit: (apiToken: string, apiUrl: string) => void;
+  onSubmit: (apiToken: string, additionalData: Record<string, string>) => void;
   isLoading: boolean;
 }) {
-  const [apiToken, setApiToken] = useState("");
+  const [authMode, setAuthMode] = useState<"token" | "browser">("token");
   const [apiUrl, setApiUrl] = useState("");
+  const [apiToken, setApiToken] = useState("");
+  const [storageStatePath, setStorageStatePath] = useState("");
+
+  const canSubmit =
+    apiUrl.trim().length > 0 &&
+    (authMode === "token"
+      ? apiToken.trim().length > 0
+      : storageStatePath.trim().length > 0);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (apiToken && apiUrl) {
-      onSubmit(apiToken, apiUrl);
+
+    if (!canSubmit) return;
+
+    if (authMode === "browser") {
+      onSubmit("", {
+        canvasApiUrl: apiUrl.trim(),
+        canvasAuthMode: "browser",
+        canvasStorageStatePath: storageStatePath.trim(),
+      });
+      return;
     }
+
+    onSubmit(apiToken.trim(), {
+      canvasApiUrl: apiUrl.trim(),
+      canvasAuthMode: "token",
+    });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Instructions for Canvas LMS */}
-      <div className="p-4 bg-muted/50 rounded-lg border border-border">
-        <h3 className="text-sm font-medium text-foreground mb-2">
-          Canvas LMS Setup
-        </h3>
-        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-          <li>Log in to your Canvas LMS instance</li>
-          <li>Go to Account → Settings</li>
-          <li>Scroll to "Approved Integrations"</li>
-          <li>Click "New Access Token"</li>
-          <li>Copy the generated token</li>
-        </ol>
-        <p className="text-xs text-muted-foreground mt-2">
-          Note: You&apos;ll also need your Canvas instance URL (e.g.,{" "}
-          https://your-school.instructure.com)
-        </p>
+      {/* Inline auth mode selector */}
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-foreground">
+          Canvas authentication
+        </label>
+        <div className="grid grid-cols-1 gap-2">
+          <button
+            type="button"
+            onClick={() => setAuthMode("token")}
+            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
+              authMode === "token"
+                ? "border-primary bg-primary/10"
+                : "border-border hover:border-primary/50"
+            }`}
+          >
+            <Key className="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">API Token</p>
+              <p className="text-xs text-muted-foreground">
+                Paste a Canvas access token from Account Settings.
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAuthMode("browser")}
+            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
+              authMode === "browser"
+                ? "border-primary bg-primary/10"
+                : "border-border hover:border-primary/50"
+            }`}
+          >
+            <Shield className="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">
+                Browser Login (No token)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Use a Playwright storage state file created by the Canvas MCP tool
+                <span className="font-mono"> canvas_auth_browser_login</span>.
+              </p>
+            </div>
+          </button>
+        </div>
       </div>
+
+      {/* Instructions */}
+      {authMode === "token" ? (
+        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+          <h3 className="text-sm font-medium text-foreground mb-2">
+            Canvas API Token Setup
+          </h3>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Log in to your Canvas LMS instance</li>
+            <li>Go to Account → Settings</li>
+            <li>Scroll to "Approved Integrations"</li>
+            <li>Click "New Access Token"</li>
+            <li>Copy the generated token</li>
+          </ol>
+        </div>
+      ) : (
+        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+          <h3 className="text-sm font-medium text-foreground mb-2">
+            Browser Login Setup
+          </h3>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>
+              Run the Canvas MCP tool{' '}
+              <span className="font-mono">canvas_auth_browser_login</span>
+            </li>
+            <li>
+              Complete the login in the opened browser window (including MFA if
+              needed)
+            </li>
+            <li>
+              Save the generated storage state file somewhere on disk
+              (recommended: app config directory)
+            </li>
+            <li>Paste the absolute path to that file below</li>
+          </ol>
+          <p className="text-xs text-muted-foreground mt-2">
+            This avoids storing a token and uses your browser session instead.
+          </p>
+        </div>
+      )}
 
       <div>
         <label
@@ -363,31 +457,55 @@ function CanvasApiTokenForm({
         </p>
       </div>
 
-      <div>
-        <label
-          htmlFor="canvasApiToken"
-          className="block text-sm font-medium text-foreground mb-1"
-        >
-          Canvas API Token
-        </label>
-        <input
-          id="canvasApiToken"
-          type="password"
-          value={apiToken}
-          onChange={(e) => setApiToken(e.target.value)}
-          placeholder="Enter your Canvas API token"
-          className="fs-input font-mono text-sm"
-          required
-        />
-        <p className="text-xs text-muted-foreground mt-1">
-          Generated from Canvas Settings → Approved Integrations
-        </p>
-      </div>
+      {authMode === "token" ? (
+        <div>
+          <label
+            htmlFor="canvasApiToken"
+            className="block text-sm font-medium text-foreground mb-1"
+          >
+            Canvas API Token
+          </label>
+          <input
+            id="canvasApiToken"
+            type="password"
+            value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+            placeholder="Enter your Canvas API token"
+            className="fs-input font-mono text-sm"
+            required
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Generated from Canvas Settings → Approved Integrations
+          </p>
+        </div>
+      ) : (
+        <div>
+          <label
+            htmlFor="canvasStorageStatePath"
+            className="block text-sm font-medium text-foreground mb-1"
+          >
+            Storage State Path
+          </label>
+          <input
+            id="canvasStorageStatePath"
+            type="text"
+            value={storageStatePath}
+            onChange={(e) => setStorageStatePath(e.target.value)}
+            placeholder="/Users/you/.flowstate/canvas.storage.json"
+            className="fs-input font-mono text-sm"
+            required
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Absolute path to the file created by{' '}
+            <span className="font-mono">canvas_auth_browser_login</span>
+          </p>
+        </div>
+      )}
 
       <button
         type="submit"
         className="w-full fs-button-primary flex items-center justify-center gap-2"
-        disabled={isLoading || !apiToken || !apiUrl}
+        disabled={isLoading || !canSubmit}
       >
         {isLoading ? (
           <>
@@ -396,7 +514,11 @@ function CanvasApiTokenForm({
           </>
         ) : (
           <>
-            <Key className="w-4 h-4" />
+            {authMode === "token" ? (
+              <Key className="w-4 h-4" />
+            ) : (
+              <Shield className="w-4 h-4" />
+            )}
             Connect Canvas LMS
           </>
         )}
@@ -470,9 +592,9 @@ function ConnectionModal({
           )}
 
           {selectedMethod === "api_token" && integration.id === "canvas" && (
-            <CanvasApiTokenForm
-              onSubmit={(apiToken, apiUrl) => {
-                onApiTokenSubmit(integration.id, apiToken, { canvasApiUrl: apiUrl });
+            <CanvasConnectionForm
+              onSubmit={(apiToken, additionalData) => {
+                onApiTokenSubmit(integration.id, apiToken, additionalData);
                 onClose();
               }}
               isLoading={isLoading}

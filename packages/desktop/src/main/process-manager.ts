@@ -378,21 +378,34 @@ class ProcessManager {
       console.log('[ProcessManager] System MCP configured');
     }
 
-    // Canvas LMS MCP (API token auth)
+    // Canvas LMS MCP (token or browser session auth)
     const canvasToken = await authManager.getToken('canvas');
     const canvasPath = this.verifyMcpServer(packagesDir, 'mcp-canvas');
     if (canvasToken && canvasPath) {
+      const canvasAuthMode = canvasToken.additionalData?.canvasAuthMode;
+      const useBrowserAuth = canvasAuthMode === 'browser';
+
       mcpConfig['flowstate-canvas'] = {
         type: 'local',
         command: ['node', canvasPath],
         environment: {
-          CANVAS_API_TOKEN: canvasToken.accessToken,
           CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
+          CANVAS_AUTH_MODE: useBrowserAuth ? 'browser' : 'token',
+          ...(useBrowserAuth
+            ? {
+                CANVAS_STORAGE_STATE_PATH:
+                  canvasToken.additionalData?.canvasStorageStatePath || '',
+              }
+            : {
+                CANVAS_API_TOKEN: canvasToken.accessToken,
+              }),
         },
         enabled: true,
         timeout: 10000,
       };
-      console.log('[ProcessManager] Canvas LMS MCP configured with token');
+      console.log(
+        `[ProcessManager] Canvas LMS MCP configured (${useBrowserAuth ? 'browser' : 'token'} auth)`
+      );
     } else if (canvasToken && !canvasPath) {
       console.error('[ProcessManager] Canvas token found but MCP server not built!');
     }
