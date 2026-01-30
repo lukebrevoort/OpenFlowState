@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Star,
   Edit2,
@@ -181,6 +181,17 @@ function WorkflowsMode() {
   const reload = useWorkflowsStore((state) => state.reload);
   const [pinnedOverrides, setPinnedOverrides] = useState<Record<string, boolean>>({});
 
+  const [builderIntent, setBuilderIntent] = useState('');
+  const [builderPreview, setBuilderPreview] = useState<string | null>(null);
+  const [builderError, setBuilderError] = useState<string | null>(null);
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+  const builderIntentRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const keyHint = useMemo(() => {
+    if (typeof navigator === 'undefined') return 'Ctrl';
+    return navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl';
+  }, []);
+
   useEffect(() => {
     reload();
   }, [reload]);
@@ -195,6 +206,60 @@ function WorkflowsMode() {
 
   const handleEdit = (id: string) => {
     console.log('Editing workflow:', id);
+  };
+
+  const buildPreviewStub = (intent: string) => {
+    const title = intent
+      .split(/\s+/)
+      .slice(0, 7)
+      .join(' ')
+      .replace(/[\r\n]+/g, ' ')
+      .trim();
+    const safeTitle = title.length > 0 ? title : 'Untitled workflow';
+    const normalizedIntent = intent.replace(/\s+/g, ' ').trim();
+    const escapedIntent = intent.replace(/"/g, '\\"');
+    const escapedCommandIntent = normalizedIntent.replace(/"/g, '\\"');
+
+    return [
+      '---',
+      'kind: workflow',
+      `title: "Draft: ${safeTitle}"`,
+      `intent: "${escapedIntent}"`,
+      '---',
+      '',
+      '# Generated command preview (stub)',
+      `opencode workflow run --from-intent "${escapedCommandIntent}"`,
+      '',
+      '# Proposed steps',
+      '- interpret: intent',
+      '- choose: tools',
+      '- execute: with approvals',
+    ].join('\n');
+  };
+
+  const handleGeneratePreview = async () => {
+    const trimmed = builderIntent.trim();
+    if (!trimmed) {
+      setBuilderError('Describe what you want to automate first.');
+      setBuilderPreview(null);
+      builderIntentRef.current?.focus();
+      return;
+    }
+
+    setBuilderError(null);
+    setIsGeneratingPreview(true);
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    setBuilderPreview(buildPreviewStub(trimmed));
+    setIsGeneratingPreview(false);
+  };
+
+  const handleRunPreview = () => {
+    if (!builderPreview) return;
+    try {
+      (window as any).flowstate?.opencode?.send?.(builderPreview);
+    } catch (err) {
+      console.log('Preview run (stub):', builderPreview, err);
+    }
   };
 
   const workflowCards = useMemo(
@@ -215,6 +280,99 @@ function WorkflowsMode() {
           <button className="px-6 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out shadow-md hover:scale-105 active:scale-95">
             + Create New Workflow
           </button>
+        </div>
+
+        <div className="mb-10 bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <PenLine className="w-5 h-5 text-muted-foreground" />
+                <h3 className="text-xl text-foreground">Build a workflow</h3>
+              </div>
+              <p className="text-sm text-muted-foreground mt-1">
+                Describe what you want in plain English. We&apos;ll generate a command preview you can run.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <label htmlFor="workflow-builder-intent" className="text-sm text-foreground">
+                What should this workflow do?
+              </label>
+              <div className="mt-2">
+                <textarea
+                  id="workflow-builder-intent"
+                  ref={builderIntentRef}
+                  value={builderIntent}
+                  onChange={(event) => {
+                    setBuilderIntent(event.target.value);
+                    if (builderError) setBuilderError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                      event.preventDefault();
+                      handleGeneratePreview();
+                    }
+                  }}
+                  placeholder="e.g. Every morning, summarize my calendar and inbox, then post highlights into Notion"
+                  className="w-full min-h-[120px] resize-y rounded-xl bg-background/40 border border-border px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  aria-invalid={builderError ? 'true' : 'false'}
+                  aria-describedby={builderError ? 'workflow-builder-error' : 'workflow-builder-help'}
+                />
+                <p id="workflow-builder-help" className="mt-2 text-xs text-muted-foreground">
+                  Tip: press {keyHint}+Enter to generate.
+                </p>
+                {builderError && (
+                  <div
+                    id="workflow-builder-error"
+                    role="alert"
+                    className="mt-3 flex items-start gap-2 text-sm text-destructive"
+                  >
+                    <AlertCircle className="w-4 h-4 mt-0.5" />
+                    <span>{builderError}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleGeneratePreview}
+                  disabled={isGeneratingPreview}
+                  className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 disabled:opacity-60 disabled:cursor-not-allowed text-foreground transition-all duration-300 ease-in-out text-sm shadow-sm flex items-center gap-2"
+                >
+                  {isGeneratingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenLine className="w-4 h-4" />}
+                  Generate
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRunPreview}
+                  disabled={!builderPreview}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-300 ease-in-out text-sm shadow-sm flex items-center gap-2"
+                >
+                  <Play className="w-4 h-4" />
+                  Run
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-background/30 overflow-hidden">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <p className="text-sm text-foreground">Preview</p>
+                <p className="text-xs text-muted-foreground">Stubbed (NL -&gt; command ships next)</p>
+              </div>
+              <div className="p-4">
+                {builderPreview ? (
+                  <pre className="text-xs sm:text-sm font-mono text-foreground whitespace-pre-wrap break-words">
+                    {builderPreview}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Generate a preview to see what would run.</p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
 
         {isLoading && (
