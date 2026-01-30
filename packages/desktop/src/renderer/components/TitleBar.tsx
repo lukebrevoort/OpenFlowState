@@ -1,5 +1,8 @@
 import type { ReactNode } from 'react';
 import { Menu, X } from 'lucide-react';
+import type { TimelineEvent } from '../types/electron';
+import { ActivityTimeline } from './ActivityTimeline';
+import StatusPill, { type ZenStatus } from './StatusPill';
 
 interface TitleBarProps {
   isSidebarOpen: boolean;
@@ -8,6 +11,8 @@ interface TitleBarProps {
   onNavigateHome: () => void;
   onNavigateSettings: () => void;
   navigation?: ReactNode;
+  zenStatus: ZenStatus;
+  activityEvents: TimelineEvent[];
 }
 
 function TitleBar({
@@ -17,6 +22,8 @@ function TitleBar({
   onNavigateHome,
   onNavigateSettings,
   navigation,
+  zenStatus,
+  activityEvents,
 }: TitleBarProps) {
   return (
     <header className="fs-titlebar" role="banner">
@@ -67,6 +74,20 @@ function TitleBar({
       </div>
 
       <div className="titlebar-no-drag flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          <StatusPill status={zenStatus} />
+          <div className="hidden md:block max-w-[420px]">
+            <ActivityTimeline
+              events={activityEvents}
+              collapsed
+              maxItems={1}
+              variant="compact"
+              emptyMessage="No activity"
+              showTimestamp={false}
+              animateIcons={false}
+            />
+          </div>
+        </div>
         {showHomeButton && (
           <button type="button" onClick={onNavigateHome} className="fs-pill-button">
             Home

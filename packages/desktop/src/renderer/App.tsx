@@ -10,6 +10,7 @@ import TitleBar from './components/TitleBar';
 import { ZenGarden } from './components/ZenGarden';
 import { SettingsPage } from './components/SettingsPage';
 import { OnboardingFlow } from './components/OnboardingFlow';
+import type { ZenStatus } from './components/StatusPill';
 import { useChatStore } from './stores/chatStore';
 import { useConfigStore } from './stores/configStore';
 import { useIntegrationsStore } from './stores/integrationsStore';
@@ -29,8 +30,15 @@ function App() {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
   });
-  const { setCurrentSessionId, loadMessages } = useChatStore();
-  const { config, updateConfig, loadConfig } = useConfigStore();
+  const setCurrentSessionId = useChatStore((state) => state.setCurrentSessionId);
+  const loadMessages = useChatStore((state) => state.loadMessages);
+  const chatStatus = useChatStore((state) => state.status);
+  const timeline = useChatStore((state) => state.timeline);
+
+  const config = useConfigStore((state) => state.config);
+  const updateConfig = useConfigStore((state) => state.updateConfig);
+  const loadConfig = useConfigStore((state) => state.loadConfig);
+  const openCodeStatus = useConfigStore((state) => state.openCodeStatus);
   const loadIntegrations = useIntegrationsStore((state) => state.loadIntegrations);
   const {
     currentStep,
@@ -196,6 +204,13 @@ function App() {
 
   const showMainShell = !isOnboarding;
 
+  const zenStatus = useMemo<ZenStatus>(() => {
+    if (chatStatus === 'error') return 'error';
+    if (openCodeStatus && (!openCodeStatus.running || !openCodeStatus.healthy)) return 'error';
+    if (chatStatus === 'thinking') return 'thinking';
+    return 'ready';
+  }, [chatStatus, openCodeStatus]);
+
   const navigation = useMemo(() => {
     if (!isOnMainPage) return null;
     return (
@@ -306,6 +321,8 @@ function App() {
               if (!isDesktop) setIsSidebarOpen(false);
             }}
             navigation={navigation}
+            zenStatus={zenStatus}
+            activityEvents={timeline}
           />
         )}
 

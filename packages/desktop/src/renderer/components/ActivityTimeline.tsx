@@ -35,6 +35,8 @@ interface ActivityTimelineProps {
   maxItemsExpanded?: number;
   emptyMessage?: string;
   variant?: 'default' | 'compact';
+  showTimestamp?: boolean;
+  animateIcons?: boolean;
 }
 
 export function ActivityTimeline({
@@ -45,10 +47,19 @@ export function ActivityTimeline({
   maxItemsExpanded = 20,
   emptyMessage = 'No activity yet',
   variant = 'default',
+  showTimestamp = true,
+  animateIcons = true,
 }: ActivityTimelineProps) {
   if (!events || events.length === 0) {
     if (variant === 'compact') {
-      return <div className="text-xs text-muted-foreground">{emptyMessage}</div>;
+      return (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-1.5">
+          <div className="w-5 h-5 rounded-full bg-muted/50 border border-border flex items-center justify-center">
+            <span className="h-2 w-2 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+          </div>
+          <p className="text-[11px] text-muted-foreground truncate">{emptyMessage}</p>
+        </div>
+      );
     }
 
     return (
@@ -76,6 +87,7 @@ export function ActivityTimeline({
   if (variant === 'compact') {
     const Icon = iconByKind[latest.kind] ?? Loader2;
     const tone = colorByKind[latest.kind] ?? 'text-muted-foreground';
+    const shouldSpin = animateIcons && (latest.kind === 'phase' || latest.kind === 'status');
 
     return (
       <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-1.5">
@@ -84,9 +96,7 @@ export function ActivityTimeline({
         >
           <Icon
             className={
-              latest.kind === 'phase' || latest.kind === 'status'
-                ? 'w-3 h-3 animate-spin'
-                : 'w-3 h-3'
+              shouldSpin ? 'w-3 h-3 animate-spin' : 'w-3 h-3'
             }
           />
         </div>
@@ -97,9 +107,11 @@ export function ActivityTimeline({
           </p>
         </div>
 
-        <span className="text-[10px] text-muted-foreground tabular-nums">
-          {formatTime(latest.timestamp)}
-        </span>
+        {showTimestamp && (
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {formatTime(latest.timestamp)}
+          </span>
+        )}
       </div>
     );
   }
@@ -115,6 +127,7 @@ export function ActivityTimeline({
           const Icon = iconByKind[event.kind] ?? Loader2;
           const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
           const isLast = index === visible.length - 1;
+          const shouldSpin = animateIcons && (event.kind === 'phase' || event.kind === 'status');
 
           return (
             <div key={event.id} className="flex items-start gap-3">
@@ -124,9 +137,7 @@ export function ActivityTimeline({
                 >
                   <Icon
                     className={
-                      event.kind === 'phase' || event.kind === 'status'
-                        ? 'w-4 h-4 animate-spin'
-                        : 'w-4 h-4'
+                      shouldSpin ? 'w-4 h-4 animate-spin' : 'w-4 h-4'
                     }
                   />
                 </div>
@@ -142,7 +153,9 @@ export function ActivityTimeline({
                       <p className="text-xs text-muted-foreground mt-1">{event.detail}</p>
                     )}
                   </div>
-                  <span className="text-xs text-muted-foreground">{formatTime(event.timestamp)}</span>
+                  {showTimestamp && (
+                    <span className="text-xs text-muted-foreground">{formatTime(event.timestamp)}</span>
+                  )}
                 </div>
                 {event.toolName && (
                   <span className="mt-2 inline-flex items-center rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">

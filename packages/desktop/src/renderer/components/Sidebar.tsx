@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   MessageSquare,
   Workflow,
@@ -23,6 +23,10 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const { sessions, currentSessionId, setSessions } = useChatStore();
 
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const lastActiveElementRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     const fetchSessions = async () => {
       try {
@@ -35,6 +39,48 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
 
     fetchSessions();
   }, [setSessions]);
+
+  useEffect(() => {
+    const sidebarEl = sidebarRef.current;
+    if (!sidebarEl) return;
+
+    if (!isOpen) {
+      sidebarEl.setAttribute('inert', '');
+      return;
+    }
+
+    sidebarEl.removeAttribute('inert');
+
+    const active = document.activeElement;
+    lastActiveElementRef.current = active instanceof HTMLElement ? active : null;
+
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+
+    return () => {
+      sidebarEl.setAttribute('inert', '');
+      const lastActive = lastActiveElementRef.current;
+      if (!lastActive) return;
+      if (!document.contains(lastActive)) return;
+      if (sidebarEl.contains(lastActive)) return;
+      requestAnimationFrame(() => {
+        lastActive.focus();
+      });
+    };
+  }, [isOpen]);
+
+  const getFocusableElements = (container: HTMLElement) => {
+    const candidates = container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+
+    return Array.from(candidates).filter((el) => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      return true;
+    });
+  };
 
   const filteredSessions = useMemo(() => {
     if (!searchTerm.trim()) return sessions;
@@ -57,9 +103,36 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
 
   return (
     <div
+      ref={sidebarRef}
       role="navigation"
-      aria-label="Sidebar"
+      aria-labelledby="fs-sidebar-title"
       aria-hidden={!isOpen}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (!isOpen) return;
+        if (e.key !== 'Tab') return;
+        const sidebarEl = sidebarRef.current;
+        if (!sidebarEl) return;
+        const focusable = getFocusableElements(sidebarEl);
+        if (focusable.length === 0) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+
+        if (e.shiftKey) {
+          if (active === first || active === sidebarEl) {
+            e.preventDefault();
+            last.focus();
+          }
+          return;
+        }
+
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }}
       className={`fixed top-0 left-0 h-full w-80 max-w-[calc(100vw-3rem)] bg-sidebar/90 backdrop-blur-2xl border-r border-sidebar-border shadow-[0_24px_60px_rgba(62,47,39,0.18)] transition-transform duration-300 ease-in-out z-50 lg:top-3 lg:left-3 lg:h-[calc(100%-1.5rem)] lg:w-72 lg:border lg:border-sidebar-border lg:rounded-3xl ${
         isOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
       }`}
@@ -85,7 +158,9 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
                 </span>
               </div>
               <div>
-                <h2 className="text-base text-foreground">FlowState</h2>
+                <h2 id="fs-sidebar-title" className="text-base text-foreground">
+                  FlowState
+                </h2>
                 <p className="text-xs text-muted-foreground">Your AI workspace</p>
               </div>
             </div>
@@ -93,7 +168,7 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
             <button
               type="button"
               onClick={onClose}
-              className="fs-icon-button lg:hidden"
+              className="fs-icon-button"
               aria-label="Close sidebar"
             >
               <X className="w-5 h-5 text-foreground" />
@@ -103,6 +178,7 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
           <div className="mt-4 relative">
             <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
             <input
+              ref={searchInputRef}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search conversations"
