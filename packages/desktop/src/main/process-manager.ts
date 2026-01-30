@@ -204,6 +204,13 @@ class ProcessManager {
     return path.resolve(packagesDir, '..');
   }
 
+  /**
+   * Directory used for workspace-scoped OpenCode operations (find, command list, etc.)
+   */
+  getProjectDirectory(): string {
+    return this.getRepoRoot();
+  }
+
   private async updateAgentModelFiles(model: string): Promise<void> {
     const repoRoot = this.getRepoRoot();
     const agentPaths = [

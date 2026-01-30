@@ -16,7 +16,8 @@ import { timelineStore } from './timeline-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import type { ApprovalReply } from './approval-policy-store.js';
-import type { IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import { workflowsRunner } from './workflows-runner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -529,6 +530,17 @@ const notImplemented = <T>(feature: string): IpcResult<T> => ({
   },
 });
 
+const ipcError = <T>(code: IpcError['code'], message: string, details?: unknown): IpcResult<T> => ({
+  ok: false,
+  error: {
+    code,
+    message,
+    ...(details === undefined ? {} : { details }),
+  } as IpcError,
+});
+
+const ipcOk = <T>(data: T): IpcResult<T> => ({ ok: true, data });
+
 const DEFAULT_CONVERSATION_TITLE = 'New Conversation';
 
 const normalizeConversationTitle = (title: string): string => {
@@ -811,11 +823,19 @@ ipcMain.handle('tasks:getActiveRun', async () => {
 });
 
 ipcMain.handle('workflows:list', async () => {
-  return notImplemented<WorkflowDefinition[]>('workflows:list');
+  const result = await workflowsRunner.listDefinitions();
+  if (result.ok) {
+    return ipcOk<WorkflowDefinition[]>(result.data);
+  }
+  return ipcError<WorkflowDefinition[]>(result.code, result.message);
 });
 
-ipcMain.handle('workflows:run', async () => {
-  return notImplemented<WorkflowRun>('workflows:run');
+ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unknown) => {
+  const result = await workflowsRunner.run(workflowId, input);
+  if (result.ok) {
+    return ipcOk<WorkflowRun>(result.data);
+  }
+  return ipcError<WorkflowRun>(result.code, result.message, result.details);
 });
 
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {

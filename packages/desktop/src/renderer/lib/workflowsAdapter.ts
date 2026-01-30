@@ -1,39 +1,6 @@
-import type { IpcError, IpcResult, WorkflowDefinition } from '../types/electron';
+import type { IpcError, IpcResult, WorkflowDefinition, WorkflowRun } from '../types/electron';
 
-const mockWorkflows: WorkflowDefinition[] = [
-  {
-    id: 'daily-briefing',
-    title: 'Daily Briefing',
-    description: 'Summarize emails, calendar events, and top news each morning',
-  },
-  {
-    id: 'content-generator',
-    title: 'Content Generator',
-    description: 'Create blog posts, social media content, and marketing copy',
-  },
-  {
-    id: 'data-analyzer',
-    title: 'Data Analyzer',
-    description: 'Process spreadsheets, generate reports, and identify trends',
-  },
-  {
-    id: 'meeting-assistant',
-    title: 'Meeting Assistant',
-    description: 'Transcribe meetings, create action items, and send summaries',
-  },
-  {
-    id: 'research-helper',
-    title: 'Research Helper',
-    description: 'Gather information, summarize articles, and compile references',
-  },
-  {
-    id: 'email-composer',
-    title: 'Email Composer',
-    description: 'Draft professional emails, responses, and follow-ups',
-  },
-];
-
-function unavailable(message: string): IpcResult<WorkflowDefinition[]> {
+function unavailable<T>(message: string): IpcResult<T> {
   const error: IpcError = { code: 'UNAVAILABLE', message };
   return { ok: false, error };
 }
@@ -46,14 +13,22 @@ export const workflowsAdapter = {
     }
 
     try {
-      const result = await listFn();
-      if (!result.ok && result.error.code === 'NOT_IMPLEMENTED') {
-        return { ok: true, data: mockWorkflows };
-      }
-
-      return result;
+      return await listFn();
     } catch (err) {
       return unavailable(err instanceof Error ? err.message : 'Failed to load workflows.');
+    }
+  },
+
+  async run(workflowId: string, input?: unknown): Promise<IpcResult<WorkflowRun>> {
+    const runFn = window.flowstate?.workflows?.run;
+    if (!runFn) {
+      return unavailable('Workflows are not available in this build.');
+    }
+
+    try {
+      return await runFn(workflowId, input);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to run workflow.');
     }
   },
 };
