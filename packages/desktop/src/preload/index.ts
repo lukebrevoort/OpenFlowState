@@ -243,6 +243,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
   workflows: {
     list: () => ipcRenderer.invoke('workflows:list'),
     run: (workflowId: string, input?: unknown) => ipcRenderer.invoke('workflows:run', workflowId, input),
+    generateFromIntent: (intent: string) => ipcRenderer.invoke('workflows:generateFromIntent', intent),
   },
 
   integrations: {

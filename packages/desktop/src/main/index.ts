@@ -18,6 +18,7 @@ import { oauthServer } from './oauth-server.js';
 import type { ApprovalReply } from './approval-policy-store.js';
 import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { workflowsRunner } from './workflows-runner.js';
+import { workflowsGenerator } from './workflows-generator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -836,6 +837,14 @@ ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unkno
     return ipcOk<WorkflowRun>(result.data);
   }
   return ipcError<WorkflowRun>(result.code, result.message, result.details);
+});
+
+ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) => {
+  const result = await workflowsGenerator.generateFromIntent(intent);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message, result.details);
 });
 
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {

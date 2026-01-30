@@ -1,4 +1,4 @@
-import type { IpcError, IpcResult, WorkflowDefinition, WorkflowRun } from '../types/electron';
+import type { IpcError, IpcResult, WorkflowDefinition, WorkflowGenerationResult, WorkflowRun } from '../types/electron';
 
 function unavailable<T>(message: string): IpcResult<T> {
   const error: IpcError = { code: 'UNAVAILABLE', message };
@@ -29,6 +29,19 @@ export const workflowsAdapter = {
       return await runFn(workflowId, input);
     } catch (err) {
       return unavailable(err instanceof Error ? err.message : 'Failed to run workflow.');
+    }
+  },
+
+  async generateFromIntent(intent: string): Promise<IpcResult<WorkflowGenerationResult>> {
+    const genFn = window.flowstate?.workflows?.generateFromIntent;
+    if (!genFn) {
+      return unavailable('Workflow generation is not available in this build.');
+    }
+
+    try {
+      return await genFn(intent);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to generate workflow.');
     }
   },
 };

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
+import type { WorkflowDefinition, WorkflowGenerationResult, WorkflowRun } from '../types/electron';
 import { workflowsAdapter } from '../lib/workflowsAdapter';
 
 interface WorkflowsState {
@@ -8,9 +8,19 @@ interface WorkflowsState {
   error: string | null;
   lastRun: WorkflowRun | null;
   isRunning: boolean;
+  isGenerating: boolean;
+  generateError: string | null;
+  lastGenerated: WorkflowGenerationResult | null;
   reload: () => Promise<void>;
   run: (workflowId: string, input?: unknown) => Promise<WorkflowRun | null>;
+  generateFromIntent: (intent: string) => Promise<WorkflowGenerationResult | null>;
 }
+
+const upsertWorkflow = (current: WorkflowDefinition[], next: WorkflowDefinition): WorkflowDefinition[] => {
+  const merged = new Map(current.map((w) => [w.id, w]));
+  merged.set(next.id, next);
+  return Array.from(merged.values()).sort((a, b) => a.title.localeCompare(b.title));
+};
 
 export const useWorkflowsStore = create<WorkflowsState>((set) => ({
   workflows: [],
@@ -18,6 +28,9 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
   error: null,
   lastRun: null,
   isRunning: false,
+  isGenerating: false,
+  generateError: null,
+  lastGenerated: null,
   reload: async () => {
     set({ isLoading: true, error: null });
     const result = await workflowsAdapter.list();
@@ -36,6 +49,22 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
       return result.data;
     }
     set({ isRunning: false, error: result.error.message });
+    return null;
+  },
+
+  generateFromIntent: async (intent: string) => {
+    set({ isGenerating: true, generateError: null });
+    const result = await workflowsAdapter.generateFromIntent(intent);
+    if (result.ok) {
+      set((state) => ({
+        isGenerating: false,
+        lastGenerated: result.data,
+        workflows: upsertWorkflow(state.workflows, result.data.definition),
+      }));
+      return result.data;
+    }
+
+    set({ isGenerating: false, generateError: result.error.message });
     return null;
   },
 }));

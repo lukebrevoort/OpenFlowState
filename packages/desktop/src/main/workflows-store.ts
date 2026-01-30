@@ -14,6 +14,10 @@ class WorkflowsStore {
     this.definitions = new Map(definitions.map((d) => [d.id, d]));
   }
 
+  upsertDefinition(definition: WorkflowDefinition): void {
+    this.definitions.set(definition.id, definition);
+  }
+
   upsertTemplate(record: WorkflowTemplateRecord): void {
     this.templates.set(record.id, record);
   }

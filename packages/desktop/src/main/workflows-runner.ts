@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
 import { workflowsStore } from './workflows-store.js';
 
@@ -123,6 +124,7 @@ class WorkflowsRunner {
   async listDefinitions(): Promise<{ ok: true; data: WorkflowDefinition[] } | { ok: false; code: IpcErrorCode; message: string }>{
     const client = processManager.client;
     const directory = processManager.getProjectDirectory?.() ?? undefined;
+    const userDataDir = configStore.getDataDir();
 
     const fromSdk: WorkflowDefinition[] = [];
     if (client) {
@@ -151,8 +153,9 @@ class WorkflowsRunner {
     }
 
     const fromDisk = directory ? await this.loadWorkflowSkillsFromDir(directory) : [];
+    const fromUserData = userDataDir ? await this.loadWorkflowSkillsFromDir(userDataDir) : [];
     const merged = new Map<string, WorkflowDefinition>();
-    for (const def of [...fromSdk, ...fromDisk]) {
+    for (const def of [...fromSdk, ...fromDisk, ...fromUserData]) {
       merged.set(def.id, def);
     }
 

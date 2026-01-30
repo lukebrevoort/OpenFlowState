@@ -121,6 +121,11 @@ export interface WorkflowRun {
   error?: string;
 }
 
+export interface WorkflowGenerationResult {
+  definition: WorkflowDefinition;
+  skillMarkdown: string;
+}
+
 export type ChatSendResult = {
   success?: boolean;
   error?: string;
@@ -306,6 +311,7 @@ export interface FlowstateAPI {
   workflows: {
     list: () => Promise<IpcResult<WorkflowDefinition[]>>;
     run: (workflowId: string, input?: unknown) => Promise<IpcResult<WorkflowRun>>;
+    generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
   };
 
   integrations: {

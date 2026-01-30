@@ -74,10 +74,12 @@ function WorkflowCard({
   workflow,
   onTogglePin,
   onEdit,
+  onRun,
 }: {
   workflow: Workflow;
   onTogglePin: (id: string) => void;
   onEdit: (id: string) => void;
+  onRun: (id: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -111,7 +113,7 @@ function WorkflowCard({
 
       <div className="flex items-center gap-2">
         <button
-          onClick={() => console.log('Run workflow', workflow.id)}
+          onClick={() => onRun(workflow.id)}
           className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm flex items-center justify-center gap-2 shadow-sm"
         >
           <Play className="w-4 h-4" />
@@ -179,12 +181,17 @@ function WorkflowsMode() {
   const isLoading = useWorkflowsStore((state) => state.isLoading);
   const error = useWorkflowsStore((state) => state.error);
   const reload = useWorkflowsStore((state) => state.reload);
+  const runWorkflow = useWorkflowsStore((state) => state.run);
+  const isRunning = useWorkflowsStore((state) => state.isRunning);
+  const generateFromIntent = useWorkflowsStore((state) => state.generateFromIntent);
+  const isGenerating = useWorkflowsStore((state) => state.isGenerating);
+  const generateError = useWorkflowsStore((state) => state.generateError);
   const [pinnedOverrides, setPinnedOverrides] = useState<Record<string, boolean>>({});
 
   const [builderIntent, setBuilderIntent] = useState('');
   const [builderPreview, setBuilderPreview] = useState<string | null>(null);
   const [builderError, setBuilderError] = useState<string | null>(null);
-  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+  const [generatedDefinition, setGeneratedDefinition] = useState<WorkflowDefinition | null>(null);
   const builderIntentRef = useRef<HTMLTextAreaElement | null>(null);
 
   const keyHint = useMemo(() => {
@@ -208,59 +215,34 @@ function WorkflowsMode() {
     console.log('Editing workflow:', id);
   };
 
-  const buildPreviewStub = (intent: string) => {
-    const title = intent
-      .split(/\s+/)
-      .slice(0, 7)
-      .join(' ')
-      .replace(/[\r\n]+/g, ' ')
-      .trim();
-    const safeTitle = title.length > 0 ? title : 'Untitled workflow';
-    const normalizedIntent = intent.replace(/\s+/g, ' ').trim();
-    const escapedIntent = intent.replace(/"/g, '\\"');
-    const escapedCommandIntent = normalizedIntent.replace(/"/g, '\\"');
-
-    return [
-      '---',
-      'kind: workflow',
-      `title: "Draft: ${safeTitle}"`,
-      `intent: "${escapedIntent}"`,
-      '---',
-      '',
-      '# Generated command preview (stub)',
-      `opencode workflow run --from-intent "${escapedCommandIntent}"`,
-      '',
-      '# Proposed steps',
-      '- interpret: intent',
-      '- choose: tools',
-      '- execute: with approvals',
-    ].join('\n');
-  };
-
   const handleGeneratePreview = async () => {
     const trimmed = builderIntent.trim();
     if (!trimmed) {
       setBuilderError('Describe what you want to automate first.');
       setBuilderPreview(null);
+      setGeneratedDefinition(null);
       builderIntentRef.current?.focus();
       return;
     }
 
     setBuilderError(null);
-    setIsGeneratingPreview(true);
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    setBuilderPreview(buildPreviewStub(trimmed));
-    setIsGeneratingPreview(false);
+    const result = await generateFromIntent(trimmed);
+    if (!result) {
+      setBuilderPreview(null);
+      setGeneratedDefinition(null);
+      return;
+    }
+
+    setBuilderPreview(result.skillMarkdown);
+    setGeneratedDefinition(result.definition);
   };
 
   const handleRunPreview = () => {
-    if (!builderPreview) return;
-    try {
-      (window as any).flowstate?.opencode?.send?.(builderPreview);
-    } catch (err) {
-      console.log('Preview run (stub):', builderPreview, err);
-    }
+    if (!generatedDefinition) return;
+    runWorkflow(generatedDefinition.id);
   };
+
+  const activeBuilderError = builderError ?? generateError;
 
   const workflowCards = useMemo(
     () => workflows.map((workflow) => workflowToCardModel(workflow, pinnedOverrides)),
@@ -317,20 +299,20 @@ function WorkflowsMode() {
                   }}
                   placeholder="e.g. Every morning, summarize my calendar and inbox, then post highlights into Notion"
                   className="w-full min-h-[120px] resize-y rounded-xl bg-background/40 border border-border px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  aria-invalid={builderError ? 'true' : 'false'}
-                  aria-describedby={builderError ? 'workflow-builder-error' : 'workflow-builder-help'}
+                  aria-invalid={activeBuilderError ? 'true' : 'false'}
+                  aria-describedby={activeBuilderError ? 'workflow-builder-error' : 'workflow-builder-help'}
                 />
                 <p id="workflow-builder-help" className="mt-2 text-xs text-muted-foreground">
                   Tip: press {keyHint}+Enter to generate.
                 </p>
-                {builderError && (
+                {activeBuilderError && (
                   <div
                     id="workflow-builder-error"
                     role="alert"
                     className="mt-3 flex items-start gap-2 text-sm text-destructive"
                   >
                     <AlertCircle className="w-4 h-4 mt-0.5" />
-                    <span>{builderError}</span>
+                    <span>{activeBuilderError}</span>
                   </div>
                 )}
               </div>
@@ -339,16 +321,16 @@ function WorkflowsMode() {
                 <button
                   type="button"
                   onClick={handleGeneratePreview}
-                  disabled={isGeneratingPreview}
+                  disabled={isGenerating}
                   className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 disabled:opacity-60 disabled:cursor-not-allowed text-foreground transition-all duration-300 ease-in-out text-sm shadow-sm flex items-center gap-2"
                 >
-                  {isGeneratingPreview ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenLine className="w-4 h-4" />}
+                  {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenLine className="w-4 h-4" />}
                   Generate
                 </button>
                 <button
                   type="button"
                   onClick={handleRunPreview}
-                  disabled={!builderPreview}
+                  disabled={!generatedDefinition || isRunning}
                   className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-300 ease-in-out text-sm shadow-sm flex items-center gap-2"
                 >
                   <Play className="w-4 h-4" />
@@ -360,7 +342,9 @@ function WorkflowsMode() {
             <div className="rounded-xl border border-border bg-background/30 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <p className="text-sm text-foreground">Preview</p>
-                <p className="text-xs text-muted-foreground">Stubbed (NL -&gt; command ships next)</p>
+                <p className="text-xs text-muted-foreground">
+                  {generatedDefinition ? `Saved as ${generatedDefinition.id}` : 'Generated SKILL.md'}
+                </p>
               </div>
               <div className="p-4">
                 {builderPreview ? (
@@ -449,6 +433,7 @@ function WorkflowsMode() {
                   workflow={workflow}
                   onTogglePin={handleTogglePin}
                   onEdit={handleEdit}
+                  onRun={(id) => runWorkflow(id)}
                 />
               ))}
             </div>
@@ -465,6 +450,7 @@ function WorkflowsMode() {
                   workflow={workflow}
                   onTogglePin={handleTogglePin}
                   onEdit={handleEdit}
+                  onRun={(id) => runWorkflow(id)}
                 />
               ))}
             </div>
