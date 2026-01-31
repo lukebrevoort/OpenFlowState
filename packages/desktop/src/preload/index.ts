@@ -32,6 +32,11 @@ const flowstateAPI: FlowstateAPIDefinition = {
     getTheme: () => ipcRenderer.invoke('app:getTheme'),
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     openTerminal: (command: string) => ipcRenderer.invoke('app:openTerminal', command),
+    showSaveDialog: (options?: { title?: string; defaultPath?: string }) =>
+      ipcRenderer.invoke('app:showSaveDialog', options),
+    showOpenDialog: (options?: { title?: string }) =>
+      ipcRenderer.invoke('app:showOpenDialog', options),
+    ensureFile: (filePath: string) => ipcRenderer.invoke('app:ensureFile', filePath),
   },
 
   // Window controls (for custom title bar)
@@ -182,6 +187,15 @@ const flowstateAPI: FlowstateAPIDefinition = {
 
     // Get MCP server status
     status: () => ipcRenderer.invoke('mcp:status'),
+  },
+
+  canvas: {
+    browserLogin: (payload: {
+      canvasApiUrl: string;
+      storageStatePath: string;
+      confirmationFilePath?: string;
+      timeoutSeconds?: number;
+    }) => ipcRenderer.invoke('canvas:browserLogin', payload),
   },
 
   // ============================================================================

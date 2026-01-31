@@ -52,6 +52,18 @@ export interface UserPreferences {
   timezone: string;
   workingHours: WorkingHours;
   notifications: NotificationPreferences;
+
+  /**
+   * When true/false, overrides system prefers-reduced-motion.
+   * When undefined, the renderer should follow the system preference.
+   */
+  reduceMotion?: boolean;
+
+  /**
+   * Controls decorative background motion.
+   * When undefined, the renderer should default to 'animated'.
+   */
+  backgroundMotion?: 'animated' | 'static';
 }
 
 /**

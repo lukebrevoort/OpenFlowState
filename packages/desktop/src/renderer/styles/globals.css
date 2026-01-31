@@ -530,3 +530,56 @@ body,
     opacity: 0.7;
   }
 }
+
+/* ==========================================================
+   Motion + Blur Performance Modes
+   Controlled by App.tsx via root data attributes:
+   - data-fs-motion: 'full' | 'reduced'
+   - data-fs-bg: 'animated' | 'static'
+   - data-fs-blur: 'full' | 'reduced'
+   ========================================================== */
+
+html[data-fs-bg='static'] .ambient-gradient {
+  animation: none !important;
+}
+
+html[data-fs-motion='reduced'] .ambient-gradient,
+html[data-fs-motion='reduced'] .zen-drift,
+html[data-fs-motion='reduced'] .animate-float-slow,
+html[data-fs-motion='reduced'] .animate-float-medium,
+html[data-fs-motion='reduced'] .animate-sway-gentle,
+html[data-fs-motion='reduced'] .animate-pulse-gentle,
+html[data-fs-motion='reduced'] .pulse-ring,
+html[data-fs-motion='reduced'] .page-fade-up,
+html[data-fs-motion='reduced'] .animate-fade-in {
+  animation: none !important;
+}
+
+/* Blur reduction policy: disable backdrop-filter when costly */
+html[data-fs-blur='reduced'] .backdrop-blur,
+html[data-fs-blur='reduced'] .backdrop-blur-sm,
+html[data-fs-blur='reduced'] .backdrop-blur-md,
+html[data-fs-blur='reduced'] .backdrop-blur-lg,
+html[data-fs-blur='reduced'] .backdrop-blur-xl,
+html[data-fs-blur='reduced'] .backdrop-blur-2xl,
+html[data-fs-blur='reduced'] .backdrop-blur-3xl,
+html[data-fs-blur='reduced'] .fs-titlebar,
+html[data-fs-blur='reduced'] .fs-overlay,
+html[data-fs-blur='reduced'] .fs-modal-overlay {
+  backdrop-filter: none !important;
+}
+
+/* Compensate for reduced blur by making glass panels more opaque */
+html[data-fs-blur='reduced'] .fs-card {
+  background-color: color-mix(in srgb, var(--zen-cream) 92%, var(--background)) !important;
+}
+
+html[data-fs-blur='reduced'] .bg-card\/50,
+html[data-fs-blur='reduced'] .bg-card,
+html[data-fs-blur='reduced'] .bg-card\/70,
+html[data-fs-blur='reduced'] .bg-card\/80,
+html[data-fs-blur='reduced'] .bg-card\/85,
+html[data-fs-blur='reduced'] .bg-card\/90,
+html[data-fs-blur='reduced'] .bg-card\/95 {
+  background-color: rgba(255, 253, 250, 0.92) !important;
+}

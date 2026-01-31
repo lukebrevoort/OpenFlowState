@@ -444,12 +444,16 @@ async function canvasFetchRaw(
 // ============================================================================
 
 export async function browserLoginWithPlaywright(options?: {
+  canvasApiUrl?: string;
   storageStatePath?: string;
   loginUrl?: string;
   timeoutMs?: number;
   headless?: boolean;
+  confirmationFilePath?: string;
 }): Promise<{ storageStatePath: string; userId?: number; userName?: string }> {
-  const baseUrl = getCanvasBaseUrl();
+  const baseUrl = options?.canvasApiUrl
+    ? normalizeBaseUrl(options.canvasApiUrl)
+    : getCanvasBaseUrl();
   const storageStatePath =
     options?.storageStatePath ||
     process.env.CANVAS_STORAGE_STATE_PATH ||
@@ -470,6 +474,7 @@ export async function browserLoginWithPlaywright(options?: {
     (process.env.CANVAS_PLAYWRIGHT_HEADLESS || '').trim().toLowerCase() === 'true';
 
   const loginUrl = options?.loginUrl || process.env.CANVAS_LOGIN_URL || `${baseUrl}/login`;
+  const confirmationFilePath = options?.confirmationFilePath;
 
   const require = createRequire(import.meta.url);
   let chromium: any;
@@ -500,10 +505,33 @@ export async function browserLoginWithPlaywright(options?: {
       )}s...`
     );
 
+    if (confirmationFilePath) {
+      console.error(
+        `[mcp-canvas] Waiting for confirmation file: ${confirmationFilePath}`
+      );
+      const started = Date.now();
+      while (Date.now() - started < timeoutMs) {
+        try {
+          await fs.stat(confirmationFilePath);
+          break;
+        } catch {
+          // keep waiting
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (Date.now() - started >= timeoutMs) {
+        throw new Error(
+          `Timed out waiting for user confirmation file: ${confirmationFilePath}`
+        );
+      }
+    }
+
     const started = Date.now();
     let lastStatus: number | undefined;
+    const verificationTimeoutMs = 30000;
 
-    while (Date.now() - started < timeoutMs) {
+    while (Date.now() - started < verificationTimeoutMs) {
       try {
         const response = await context.request.get(`${baseUrl}/api/v1/users/self/profile`, {
           headers: { Accept: 'application/json' },
@@ -526,7 +554,7 @@ export async function browserLoginWithPlaywright(options?: {
     }
 
     throw new Error(
-      `Timed out waiting for Canvas login. Last status: ${lastStatus ?? 'unknown'}. ` +
+      `Timed out verifying Canvas login. Last status: ${lastStatus ?? 'unknown'}. ` +
         `Try again, or set CANVAS_LOGIN_URL if your school uses a custom login page.`
     );
   } finally {

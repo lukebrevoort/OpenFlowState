@@ -193,6 +193,9 @@ export interface FlowstateAPI {
     getTheme: () => Promise<'light' | 'dark'>;
     openExternal: (url: string) => Promise<void>;
     openTerminal: (command: string) => Promise<void>;
+    showSaveDialog: (options?: { title?: string; defaultPath?: string }) => Promise<string | null>;
+    showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
+    ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   };
 
   window: {
@@ -282,6 +285,15 @@ export interface FlowstateAPI {
     status: () => Promise<Record<string, McpServerStatus> | null>;
   };
 
+  canvas: {
+    browserLogin: (payload: {
+      canvasApiUrl: string;
+      storageStatePath: string;
+      confirmationFilePath?: string;
+      timeoutSeconds?: number;
+    }) => Promise<{ success: boolean; error?: string; storageStatePath?: string }>;
+  };
+
   // ============================================================================
   // Phase 3.5 - Typed feature surfaces (aliases over lower-level IPC)
   // ============================================================================
@@ -359,6 +371,18 @@ export interface FlowstateConfig {
       approvals: boolean;
       taskComplete: boolean;
     };
+
+    /**
+     * When true/false, overrides system prefers-reduced-motion.
+     * When undefined, the renderer should follow the system preference.
+     */
+    reduceMotion?: boolean;
+
+    /**
+     * Controls decorative background motion.
+     * When undefined, the renderer should default to 'animated'.
+     */
+    backgroundMotion?: 'animated' | 'static';
   };
   onboardingComplete?: boolean;
 }

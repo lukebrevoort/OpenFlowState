@@ -138,6 +138,13 @@ class ProcessManager {
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
 
+  // Batch timeline IPC events to reduce renderer churn during high-volume streams.
+  private timelineEventBuffer: unknown[] = [];
+  private timelineFlushTimer: NodeJS.Timeout | null = null;
+  private timelineFlushWebContents: Electron.WebContents | null = null;
+  private readonly timelineFlushIntervalMs = 75;
+  private readonly timelineFlushMaxBatchSize = 250;
+
   private readonly defaultAgent = 'flowstate-assistant';
 
   constructor() {
@@ -145,6 +152,50 @@ class ProcessManager {
     app.on('before-quit', async () => {
       await this.stop();
     });
+  }
+
+  private enqueueTimelineEvent(webContents: Electron.WebContents, event: unknown) {
+    if (!webContents || webContents.isDestroyed()) return;
+
+    this.timelineFlushWebContents = webContents;
+    this.timelineEventBuffer.push(event);
+
+    if (this.timelineEventBuffer.length >= this.timelineFlushMaxBatchSize) {
+      this.flushTimelineEvents();
+      return;
+    }
+
+    if (this.timelineFlushTimer) return;
+
+    this.timelineFlushTimer = setTimeout(() => {
+      this.flushTimelineEvents();
+    }, this.timelineFlushIntervalMs);
+  }
+
+  private flushTimelineEvents() {
+    if (this.timelineFlushTimer) {
+      clearTimeout(this.timelineFlushTimer);
+      this.timelineFlushTimer = null;
+    }
+
+    const webContents = this.timelineFlushWebContents;
+    if (!webContents || webContents.isDestroyed()) {
+      this.timelineEventBuffer = [];
+      this.timelineFlushWebContents = null;
+      return;
+    }
+
+    if (this.timelineEventBuffer.length === 0) return;
+
+    const events = this.timelineEventBuffer;
+    this.timelineEventBuffer = [];
+
+    if (events.length === 1) {
+      webContents.send('timeline:event', events[0]);
+      return;
+    }
+
+    webContents.send('timeline:event', { type: 'batch', events });
   }
 
   /**
@@ -456,8 +507,9 @@ class ProcessManager {
       this.isRunning = true;
       console.log(`OpenCode server started at ${this.instance.server.url}`);
 
-      // Create an initial session
-      await this.createSession('FlowState Chat');
+      // Don't eagerly create a session with a generic title.
+      // The first user interaction (or explicit "new conversation") will create the session,
+      // allowing OpenCode/agents to auto-title it based on the actual conversation.
 
       // Check MCP status after a short delay to let servers connect
       setTimeout(() => this.logMcpStatus(), 2000);
@@ -579,6 +631,9 @@ class ProcessManager {
       this.eventStreamAbortController = null;
     }
 
+    // Flush any remaining timeline events before shutdown.
+    this.flushTimelineEvents();
+
     try {
       this.instance.server.close();
       console.log('OpenCode server stopped');
@@ -600,11 +655,15 @@ class ProcessManager {
     }
 
     try {
-      const result = await this.instance.client.session.create({
-        body: {
-          title: title || 'FlowState Session',
-        },
-      });
+      const result = await this.instance.client.session.create(
+        title && title.trim().length
+          ? {
+              body: {
+                title: title.trim(),
+              },
+            }
+          : {}
+      );
 
       if (result.error) {
         throw new Error(`Failed to create session: ${JSON.stringify(result.error)}`);
@@ -898,7 +957,7 @@ class ProcessManager {
                   redacted: normalized.redacted,
                   payload: normalized.payload,
                 });
-                webContents.send('timeline:event', stored);
+                this.enqueueTimelineEvent(webContents, stored);
                 this.trackTaskPromotion(sessionId, normalized.event, webContents);
               } catch (error) {
                 console.warn('[ProcessManager] Failed to persist timeline event:', error);
@@ -908,10 +967,16 @@ class ProcessManager {
 
 
         }
+
+        // Flush any remaining events if the stream ends naturally.
+        this.flushTimelineEvents();
       } catch (error) {
         if (!this.eventStreamAbortController?.signal.aborted) {
           console.error('Event stream error:', error);
         }
+
+        // Attempt to flush anything queued before exiting.
+        this.flushTimelineEvents();
       }
     })();
   }
@@ -1019,7 +1084,7 @@ class ProcessManager {
           redacted: promotion.redacted,
           payload: promotion.payload,
         }).then((stored) => {
-          webContents.send('timeline:event', stored);
+          this.enqueueTimelineEvent(webContents, stored);
         }).catch((error) => {
           console.warn('[ProcessManager] Failed to persist promotion event:', error);
         });
@@ -1052,7 +1117,7 @@ class ProcessManager {
       };
 
       timelineStore.appendWithPayload(responseEvent).then((stored) => {
-        webContents.send('timeline:event', stored);
+        this.enqueueTimelineEvent(webContents, stored);
       }).catch((error) => {
         console.warn('[ProcessManager] Failed to persist response event:', error);
       });
@@ -1080,7 +1145,7 @@ class ProcessManager {
         redacted: completion.redacted,
         payload: completion.payload,
       }).then((stored) => {
-        webContents.send('timeline:event', stored);
+        this.enqueueTimelineEvent(webContents, stored);
       }).catch((error) => {
         console.warn('[ProcessManager] Failed to persist completion event:', error);
       });
@@ -1103,7 +1168,7 @@ class ProcessManager {
         redacted: summary.redacted,
         payload: summary.payload,
       }).then((stored) => {
-        webContents.send('timeline:event', stored);
+        this.enqueueTimelineEvent(webContents, stored);
       }).catch((error) => {
         console.warn('[ProcessManager] Failed to persist summary event:', error);
       });

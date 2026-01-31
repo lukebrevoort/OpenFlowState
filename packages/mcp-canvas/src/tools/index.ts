@@ -101,10 +101,19 @@ const CANVAS_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
+        canvasApiUrl: {
+          type: 'string',
+          description: 'Canvas instance URL (overrides CANVAS_API_URL for this login run)',
+        },
         storageStatePath: {
           type: 'string',
           description:
             'Where to save the Playwright storage state JSON (defaults to CANVAS_STORAGE_STATE_PATH)',
+        },
+        confirmationFilePath: {
+          type: 'string',
+          description:
+            'Optional file path to wait for before saving storage state (created when user confirms login)',
         },
         loginUrl: {
           type: 'string',
@@ -484,7 +493,9 @@ export function registerTools(server: Server): void {
       switch (name) {
         case 'canvas_auth_browser_login': {
           const result = await canvasApi.browserLoginWithPlaywright({
+            canvasApiUrl: args?.canvasApiUrl as string | undefined,
             storageStatePath: args?.storageStatePath as string | undefined,
+            confirmationFilePath: args?.confirmationFilePath as string | undefined,
             loginUrl: args?.loginUrl as string | undefined,
             timeoutMs:
               typeof args?.timeoutSeconds === 'number'

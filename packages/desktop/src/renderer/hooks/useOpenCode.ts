@@ -10,10 +10,17 @@
 
 import { useEffect, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore';
+import type { TaskRun } from '../stores/chatStore';
 import { useConfigStore } from '../stores/configStore';
 import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError, TimelineEvent } from '../types/electron';
 
 let listenersInitialized = false;
+
+const DEV = Boolean(
+  (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV ??
+    (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV ===
+      'development',
+);
 
 export function useOpenCode() {
   const {
@@ -86,18 +93,37 @@ export function useOpenCode() {
     if (listenersInitialized) return;
     listenersInitialized = true;
 
-    console.log('Setting up OpenCode event listeners');
+    if (DEV) console.log('Setting up OpenCode event listeners');
+
+    const unwrapBatch = <T,>(payload: unknown): T[] => {
+      if (!payload) return [];
+      if (typeof payload === 'object' && payload !== null) {
+        const maybe = payload as { events?: unknown };
+        if (Array.isArray(maybe.events)) {
+          return maybe.events as T[];
+        }
+      }
+      return [payload as T];
+    };
 
     // Handle incoming messages
     const removeMessageListener = window.flowstate.opencode.onMessage((message: OpenCodeMessage) => {
-      console.log('[Renderer] Received message:', message.id, 'role:', message.role, 'content length:', message.content?.length);
-      console.log('[Renderer] Message parts:', message.parts?.length);
+      if (DEV) {
+        console.log(
+          '[Renderer] Received message:',
+          message.id,
+          'role:',
+          message.role,
+          'content length:',
+          message.content?.length
+        );
+      }
       addAssistantMessage(message);
     });
 
     // Handle progress updates
     const removeProgressListener = window.flowstate.opencode.onProgress((progress: OpenCodeProgress) => {
-      console.log('Progress update:', progress);
+      if (DEV) console.log('Progress update:', progress);
       setStatus(progress.status);
       if (progress.sessionId) {
         setCurrentSessionId(progress.sessionId);
@@ -106,16 +132,19 @@ export function useOpenCode() {
 
     // Handle errors
     const removeErrorListener = window.flowstate.opencode.onError((err: OpenCodeError) => {
-      console.error('[Renderer] OpenCode error:', err);
+      if (DEV) console.error('[Renderer] OpenCode error:', err);
       setError(formatOpenCodeError(err));
     });
 
     // Handle general events
     const removeEventListener = window.flowstate.opencode.onEvent((event) => {
-      console.log('OpenCode event:', event);
+      if (!DEV) return;
+      for (const item of unwrapBatch(event)) {
+        console.log('OpenCode event:', item);
+      }
     });
 
-    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((event: TimelineEvent) => {
+    const applyTimelineEvent = (event: TimelineEvent) => {
       addTimelineEvent(event);
       if (event.kind === 'status' && event.title === 'Task promoted') {
         setHandoffTaskFromTimeline(event);
@@ -140,6 +169,46 @@ export function useOpenCode() {
       if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
         updateActiveTask({ summary: event.detail, summarySent: false });
       }
+    };
+
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload) => {
+      const events = unwrapBatch<TimelineEvent>(payload);
+      if (events.length === 0) return;
+
+      // Preserve existing behavior for single events.
+      if (events.length === 1) {
+        applyTimelineEvent(events[0]!);
+        return;
+      }
+
+      // Batch path: update timeline store once per flush.
+      const store = useChatStore.getState();
+      const mergedTimeline = [...store.timeline, ...events].slice(-200);
+      store.loadTimelineEvents(mergedTimeline);
+
+      let nextStatus: TaskRun['status'] | null = null;
+      let nextSummary: string | null = null;
+
+      // Compute final task state based on in-batch ordering.
+      for (const event of events) {
+        if (event.kind === 'approval_request') nextStatus = 'waiting_approval';
+        if (event.kind === 'approval_response') nextStatus = 'running';
+        if (event.kind === 'error') nextStatus = 'failed';
+
+        if (event.kind === 'status' && event.title === 'Task completed') nextStatus = 'completed';
+        if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
+          nextSummary = event.detail;
+        }
+      }
+
+      const updates: Partial<TaskRun> = {};
+      if (nextStatus) updates.status = nextStatus;
+      if (nextSummary) {
+        updates.summary = nextSummary;
+        updates.summarySent = false;
+      }
+
+      if (Object.keys(updates).length > 0) store.updateActiveTask(updates);
     });
 
     // Initial status check
@@ -147,7 +216,7 @@ export function useOpenCode() {
 
     // Cleanup on unmount
     return () => {
-      console.log('Cleaning up OpenCode event listeners');
+      if (DEV) console.log('Cleaning up OpenCode event listeners');
       removeMessageListener();
       removeProgressListener();
       removeErrorListener();
@@ -165,27 +234,27 @@ export function useOpenCode() {
    * Send a message to OpenCode
    */
   const sendMessage = useCallback(async (content: string) => {
-    console.log('[Renderer] sendMessage called with content length:', content.length);
+    if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
 
     if (activeTask && activeTask.status === 'running') {
-      console.log('[Renderer] Task already running, blocking message');
+      if (DEV) console.log('[Renderer] Task already running, blocking message');
       setError('Another task is already running for this conversation.');
       return { success: false, error: 'Task already running' };
     }
 
     // Add user message to store immediately
-    console.log('[Renderer] Adding user message to store');
+    if (DEV) console.log('[Renderer] Adding user message to store');
     addUserMessage(content);
 
     try {
       // Send to OpenCode (response comes via events)
-      console.log('[Renderer] Calling window.flowstate.opencode.send()...');
+      if (DEV) console.log('[Renderer] Calling window.flowstate.opencode.send()...');
       const result = await window.flowstate.opencode.send(content);
-      console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
+      if (DEV) console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
-        console.error('[Renderer] OpenCode returned error:', result.error);
+        if (DEV) console.error('[Renderer] OpenCode returned error:', result.error);
         const formattedError = formatOpenCodeError(result.errorDetails ?? result.error);
         setError(formattedError);
         // Add error message as assistant response
@@ -200,7 +269,7 @@ export function useOpenCode() {
 
       return { success: true };
     } catch (err) {
-      console.error('Failed to send message:', err);
+      if (DEV) console.error('Failed to send message:', err);
       const formattedError = formatOpenCodeError(
         err instanceof Error ? err.message : 'Failed to send message'
       );

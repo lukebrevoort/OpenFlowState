@@ -5,9 +5,11 @@
  * It manages the application lifecycle, creates windows, and handles IPC.
  */
 
-import { app, BrowserWindow, ipcMain, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeTheme, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
+import { runCanvasBrowserLogin } from './canvas-browser-login.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
@@ -168,6 +170,63 @@ ipcMain.handle('app:getTheme', () => {
  */
 ipcMain.handle('app:openExternal', async (_event, url: string) => {
   await shell.openExternal(url);
+});
+
+ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; defaultPath?: string }) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: options?.title ?? 'Choose a file location',
+    defaultPath: options?.defaultPath,
+    buttonLabel: 'Save',
+    showsTagField: false,
+  });
+
+  if (result.canceled) return null;
+  return result.filePath ?? null;
+});
+
+ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: options?.title ?? 'Choose a folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('app:ensureFile', async (_event, filePath: string) => {
+  try {
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, '', { flag: 'a' });
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to ensure file exists:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('canvas:browserLogin', async (_event, payload: {
+  canvasApiUrl: string;
+  storageStatePath: string;
+  confirmationFilePath?: string;
+  timeoutSeconds?: number;
+}) => {
+  try {
+    const result = await runCanvasBrowserLogin({
+      canvasApiUrl: payload.canvasApiUrl,
+      storageStatePath: payload.storageStatePath,
+      confirmationFilePath: payload.confirmationFilePath,
+      timeoutMs: payload.timeoutSeconds ? payload.timeoutSeconds * 1000 : undefined,
+    });
+
+    return { success: true, storageStatePath: result.storageStatePath };
+  } catch (error) {
+    console.error('Canvas browser login failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 ipcMain.handle('app:openTerminal', async (_event, command: string) => {
@@ -763,13 +822,18 @@ ipcMain.handle('chat:newConversation', async (_event, title?: string) => {
     throw new Error('OpenCode not running');
   }
 
-  const sessions = await processManager.listSessions();
-  const uniqueTitle = makeUniqueConversationTitle(title, sessions.map((s) => s.title));
+  const requestedTitle = (title ?? '').trim().replace(/\s+/g, ' ');
+  let uniqueTitle: string | undefined;
+  if (requestedTitle.length) {
+    const sessions = await processManager.listSessions();
+    uniqueTitle = makeUniqueConversationTitle(requestedTitle, sessions.map((s) => s.title));
+  }
+
   const sessionId = await processManager.createSession(uniqueTitle);
 
   configureTimelineStore();
   timelineStore.upsertSessionMeta(sessionId, {
-    title: uniqueTitle,
+    ...(uniqueTitle ? { title: uniqueTitle } : {}),
     createdAt: Date.now(),
     lastSeenAt: Date.now(),
   });
@@ -874,13 +938,18 @@ ipcMain.handle('opencode:newSession', async (_event, title?: string) => {
     throw new Error('OpenCode not running');
   }
 
-  const sessions = await processManager.listSessions();
-  const uniqueTitle = makeUniqueConversationTitle(title, sessions.map((s) => s.title));
+  const requestedTitle = (title ?? '').trim().replace(/\s+/g, ' ');
+  let uniqueTitle: string | undefined;
+  if (requestedTitle.length) {
+    const sessions = await processManager.listSessions();
+    uniqueTitle = makeUniqueConversationTitle(requestedTitle, sessions.map((s) => s.title));
+  }
+
   const sessionId = await processManager.createSession(uniqueTitle);
 
   configureTimelineStore();
   timelineStore.upsertSessionMeta(sessionId, {
-    title: uniqueTitle,
+    ...(uniqueTitle ? { title: uniqueTitle } : {}),
     createdAt: Date.now(),
     lastSeenAt: Date.now(),
   });

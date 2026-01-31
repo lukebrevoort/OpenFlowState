@@ -320,6 +320,31 @@ function CanvasConnectionForm({
   const [apiUrl, setApiUrl] = useState("");
   const [apiToken, setApiToken] = useState("");
   const [storageStatePath, setStorageStatePath] = useState("");
+  const [browserLoginRunning, setBrowserLoginRunning] = useState(false);
+  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
+  const [browserLoginConfirmPath, setBrowserLoginConfirmPath] = useState<string | null>(null);
+  const [browserLoginAwaitingConfirm, setBrowserLoginAwaitingConfirm] = useState(false);
+
+  const handlePickStoragePath = async () => {
+    const defaultPath = `canvas.json`;
+    const picked = await window.flowstate.app.showSaveDialog({
+      title: "Choose Canvas session file",
+      defaultPath,
+    });
+    if (picked) {
+      setStorageStatePath(picked);
+    }
+  };
+
+  const handlePickStorageFolder = async () => {
+    const picked = await window.flowstate.app.showOpenDialog({
+      title: "Choose folder for Canvas session file",
+    });
+    if (picked) {
+      const normalized = picked.replace(/\/+$/g, "");
+      setStorageStatePath(`${normalized}/canvas.json`);
+    }
+  };
 
   const canSubmit =
     apiUrl.trim().length > 0 &&
@@ -327,16 +352,49 @@ function CanvasConnectionForm({
       ? apiToken.trim().length > 0
       : storageStatePath.trim().length > 0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!canSubmit) return;
 
     if (authMode === "browser") {
+      setBrowserLoginRunning(true);
+      setBrowserLoginError(null);
+      const trimmedUrl = apiUrl.trim();
+      let trimmedPath = storageStatePath.trim();
+      if (trimmedPath && !trimmedPath.endsWith(".json")) {
+        trimmedPath = `${trimmedPath.replace(/\/+$/g, "")}/canvas.json`;
+      }
+
+      const ensureResult = await window.flowstate.app.ensureFile(trimmedPath);
+      if (!ensureResult.success) {
+        setBrowserLoginRunning(false);
+        setBrowserLoginError(ensureResult.error ?? "Failed to create storage file");
+        return;
+      }
+
+      const confirmPath = `${trimmedPath}.ready-${Date.now()}`;
+      setBrowserLoginConfirmPath(confirmPath);
+      setBrowserLoginAwaitingConfirm(true);
+
+      const result = await window.flowstate.canvas.browserLogin({
+        canvasApiUrl: trimmedUrl,
+        storageStatePath: trimmedPath,
+        confirmationFilePath: confirmPath,
+      });
+
+      setBrowserLoginRunning(false);
+      setBrowserLoginAwaitingConfirm(false);
+
+      if (!result.success) {
+        setBrowserLoginError(result.error ?? "Canvas login failed");
+        return;
+      }
+
       onSubmit("", {
-        canvasApiUrl: apiUrl.trim(),
+        canvasApiUrl: trimmedUrl,
         canvasAuthMode: "browser",
-        canvasStorageStatePath: storageStatePath.trim(),
+        canvasStorageStatePath: trimmedPath,
       });
       return;
     }
@@ -416,19 +474,10 @@ function CanvasConnectionForm({
             Browser Login Setup
           </h3>
           <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-            <li>
-              Run the Canvas MCP tool{' '}
-              <span className="font-mono">canvas_auth_browser_login</span>
-            </li>
-            <li>
-              Complete the login in the opened browser window (including MFA if
-              needed)
-            </li>
-            <li>
-              Save the generated storage state file somewhere on disk
-              (recommended: app config directory)
-            </li>
-            <li>Paste the absolute path to that file below</li>
+            <li>Enter your Canvas URL and choose a storage state path below</li>
+            <li>Click "Start Browser Login" to open a Canvas login window</li>
+            <li>Complete login (including MFA if needed)</li>
+            <li>FlowState will save the session to the storage state path</li>
           </ol>
           <p className="text-xs text-muted-foreground mt-2">
             This avoids storing a token and uses your browser session instead.
@@ -491,26 +540,65 @@ function CanvasConnectionForm({
             type="text"
             value={storageStatePath}
             onChange={(e) => setStorageStatePath(e.target.value)}
-            placeholder="/Users/you/.flowstate/canvas.storage.json"
+            placeholder="/Users/you/Library/Application Support/FlowState/canvas.json"
             className="fs-input font-mono text-sm"
             required
           />
+          <button
+            type="button"
+            onClick={handlePickStoragePath}
+            className="mt-2 fs-button-secondary text-xs"
+          >
+            Pick file location
+          </button>
+          <button
+            type="button"
+            onClick={handlePickStorageFolder}
+            className="mt-2 fs-button-secondary text-xs"
+          >
+            Pick folder
+          </button>
           <p className="text-xs text-muted-foreground mt-1">
-            Absolute path to the file created by{' '}
-            <span className="font-mono">canvas_auth_browser_login</span>
+            Absolute path where FlowState will save canvas.json
           </p>
+        </div>
+      )}
+
+      {authMode === "browser" && browserLoginAwaitingConfirm && browserLoginConfirmPath && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+          <p>
+            When you are fully logged in and on your Canvas dashboard, click the button below.
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              const result = await window.flowstate.app.ensureFile(browserLoginConfirmPath);
+              if (!result.success) {
+                setBrowserLoginError(result.error ?? "Failed to confirm login");
+              }
+            }}
+            className="fs-button-secondary text-xs"
+          >
+            I am on the dashboard
+          </button>
+        </div>
+      )}
+
+      {browserLoginError && (
+        <div className="text-xs text-destructive">
+          {browserLoginError}
         </div>
       )}
 
       <button
         type="submit"
         className="w-full fs-button-primary flex items-center justify-center gap-2"
-        disabled={isLoading || !canSubmit}
+        disabled={isLoading || browserLoginRunning || !canSubmit}
       >
-        {isLoading ? (
+        {isLoading || browserLoginRunning ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Connecting...
+            {authMode === "browser" ? "Opening browser..." : "Connecting..."}
           </>
         ) : (
           <>
@@ -519,7 +607,7 @@ function CanvasConnectionForm({
             ) : (
               <Shield className="w-4 h-4" />
             )}
-            Connect Canvas LMS
+            {authMode === "browser" ? "Start Browser Login" : "Connect Canvas LMS"}
           </>
         )}
       </button>

@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { CheckCircle2, Loader2, AlertTriangle, Wrench, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import type { TimelineEvent } from '../types/electron';
 import { ApprovalCard } from './ApprovalCard';
@@ -26,6 +27,22 @@ const colorByKind: Record<TimelineEvent['kind'], string> = {
   approval_response: 'text-[#4A7C59]',
   error: 'text-destructive',
   status: 'text-muted-foreground',
+};
+
+const dedupeKeyForEvent = (event: TimelineEvent) =>
+  `${event.kind}-${event.title}-${event.detail ?? ''}-${event.toolName ?? ''}`;
+
+const latestEventByTimestamp = (events: TimelineEvent[]) => {
+  // Keep behavior consistent with stable sort: for ties, prefer the first
+  // occurrence in the original array.
+  let latest = events[0];
+  for (let i = 1; i < events.length; i += 1) {
+    const candidate = events[i];
+    if (candidate.timestamp > latest.timestamp) {
+      latest = candidate;
+    }
+  }
+  return latest;
 };
 
 interface ActivityTimelineProps {
@@ -101,20 +118,36 @@ export function ActivityTimeline({
     );
   }
 
-  const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
-  const seenKeys = new Set<string>();
-  const deduped = sorted.filter((event) => {
-    const key = `${event.kind}-${event.title}-${event.detail ?? ''}-${event.toolName ?? ''}`;
-    if (seenKeys.has(key)) {
-      return false;
+  const isSingleItemCompact = variant === 'compact' && maxItems === 1;
+
+  const latestForCompact = useMemo(() => latestEventByTimestamp(events), [events]);
+
+  const deduped = useMemo(() => {
+    if (isSingleItemCompact) {
+      return null;
     }
-    seenKeys.add(key);
-    return true;
-  });
-  const visible = collapsed
-    ? deduped.slice(0, maxItems)
-    : deduped.slice(0, maxItemsExpanded);
-  const latest = visible[0];
+
+    const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
+    const seenKeys = new Set<string>();
+    return sorted.filter((event) => {
+      const key = dedupeKeyForEvent(event);
+      if (seenKeys.has(key)) {
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    });
+  }, [events, isSingleItemCompact]);
+
+  const visible = useMemo(() => {
+    if (!deduped) {
+      return null;
+    }
+    const limit = collapsed ? maxItems : maxItemsExpanded;
+    return deduped.slice(0, limit);
+  }, [deduped, collapsed, maxItems, maxItemsExpanded]);
+
+  const latest = isSingleItemCompact ? latestForCompact : visible?.[0];
 
   const logFallback = (action: string, event: TimelineEvent) => {
     // eslint-disable-next-line no-console
@@ -127,9 +160,10 @@ export function ActivityTimeline({
   const handleDeny = (event: TimelineEvent) => (onDeny ? onDeny(event) : logFallback('deny', event));
 
   if (variant === 'compact') {
-    const Icon = iconByKind[latest.kind] ?? Loader2;
-    const tone = colorByKind[latest.kind] ?? 'text-muted-foreground';
-    const shouldSpin = animateIcons && latest.kind === 'phase';
+    const event = latest ?? latestForCompact;
+    const Icon = iconByKind[event.kind] ?? Loader2;
+    const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
+    const shouldSpin = animateIcons && event.kind === 'phase';
 
     return (
       <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-2 py-1">
@@ -145,13 +179,13 @@ export function ActivityTimeline({
 
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-medium text-foreground truncate">
-            {latest.title}
+            {event.title}
           </p>
         </div>
 
         {showTimestamp && (
           <span className="text-[10px] text-muted-foreground tabular-nums">
-            {formatTime(latest.timestamp)}
+            {formatTime(event.timestamp)}
           </span>
         )}
       </div>
@@ -162,13 +196,13 @@ export function ActivityTimeline({
     <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <span className="text-xs text-muted-foreground">{deduped.length} steps</span>
+        <span className="text-xs text-muted-foreground">{(deduped ?? []).length} steps</span>
       </div>
       <div className="mt-4 space-y-3">
-        {visible.map((event, index) => {
+        {(visible ?? []).map((event, index) => {
           const Icon = iconByKind[event.kind] ?? Loader2;
           const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
-          const isLast = index === visible.length - 1;
+          const isLast = index === (visible ?? []).length - 1;
           const shouldSpin = animateIcons && event.kind === 'phase';
           const inline = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
           const isApprovalRequest = event.kind === 'approval_request';

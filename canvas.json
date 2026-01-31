@@ -1,0 +1,133 @@
+{
+  "cookies": [
+    {
+      "name": "DT",
+      "value": "DI1odQxZj0VTTWBTkY13EvP7w",
+      "domain": "login.stevens.edu",
+      "path": "/",
+      "expires": 1804371279.496186,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "ln",
+      "value": "lbrevoor",
+      "domain": "login.stevens.edu",
+      "path": "/",
+      "expires": 1801347297,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "JSESSIONID",
+      "value": "37F829463F6C0C426EC3CEAECEBEED12",
+      "domain": "login.stevens.edu",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "idx",
+      "value": "eyJ6aXAiOiJERUYiLCJ2ZXIiOiIxIiwiYWxpYXMiOiJlbmNyeXB0aW9ua2V5Iiwib2lkIjoiMDBvY2Q4ajFpZE9QNDlwYVE2OTUiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiZGlyIiwieHNpZCI6ImlkeGRZbUU3UnpXUWhlVEMwOW1oOXJJNkEifQ..fFrOxygyuYUc2jJV.FtUnYPaZq_ELlFKBZOONM9fmbc9nchxSnwR9fldbnOuruJbUR3EkDilBLhc50ZZDoU5mRfIv2oVHwrGenFDcikw6iwY9WdOzQ_N9-D2kBuR3Nw6CKrlNP0BWLVTCmle1u74l5SwEKJOvnRAZHESoHK5XKieeiAfMdryxbf5uvUPjx802AA73sr-18MLKbHW3Vp4yFgTBsKDFYr9Mpew2WSQQAoG6-nsYvZeeGHeoCefi7vNXYnR0ThN8XEOqCYj_h5mxacqH9b8d8_wN1vRT_2fOzb0DDQoClQski5c1IuS3P5gW3NvEnQ-NBIWHMlHrjOcfWfNjP7Cu2y1bNAwbdeTH5eZoy7FTPNCsolURnhqMBdnMEKQeV1wyVNbHJIpuGkr1GDuVgagqVbq5Xrzk8aILhY23xYZzRBWifRT60hsKquy6UDHuBe9HU4CAnJ8wkgkCRJocK_q3a7fdlC8BUmysTc52qtjHJH1I0LwH3RbhfguQ0d9CJSbT87t5hmaE_R-N4CZTxRo1vYvmLGjd-LnJQ4Ks8hQ_RpzzIFTK9LumvkYx7w6-QFthWUzLDIIpfMu7zNKAgoSv2JImJ-TudZqVFyNhC19eF19NSbsh5QHCtpRhPM2SfYTdW2j1AjjAhozg0DaV9msodxPKmG5S6wmNbdFgQ5FomuUp0mNcaLdS2mnyEaKXgS143hS2gP24jSVGBhBST2ylckvJ2S2Fc5_kzCyIn_ZPJ1ptBpF_89E3Nk5gsMQK2orwQVvKIsrE7g0xl3DVQShVHNTXKXbNIhcMo-HHNINQJJZ8k65ZJPYPv5PQdK1cKbWxuezo2cWiy89I4QlSOzE2GqSewkvI4eA2MLxA_mO0qDR7SSAHAD06WNCvAtDens5QpbSaTnEpzg5pwB7VXKDty1l577vVB46zxLRA05tXVVcrP445tXaelD5652VXYK3e34eUKfJXP9LZ6xVKgh2edPKcUSBFNE9-LNsXeQTaUwYPAgjlxD_JCXL6kTBwXxxM1Vi0KsI3-G_lRnDkFLRlILsE_LRp_futxeGvIHucjHJhoZ726OYL7QgoAAeFGkqghbh7D0hhCFFNNFcEUKF35luY-DFCRpLsrKcskYVNs6fVsguZTtOVjSVpKrDxDbEMpoTOtR5EQG5-c3u2f4vq8uiwIogepGKU.h-JRc8nw2DTnfxHtUk06Tg",
+      "domain": "login.stevens.edu",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "luf_-938837381",
+      "value": "eyJ6aXAiOiJERUYiLCJ2ZXIiOiIxIiwiYWxpYXMiOiJlbmNyeXB0aW9ua2V5Iiwib2lkIjoiMDBvY2Q4ajFpZE9QNDlwYVE2OTUiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiZGlyIiwidGltZXN0YW1wIjoxNzY5ODExMzA4NzE5fQ..nEek9DlNMbOlKrZP.Z5N4hGVZoEZkH4UbDpnDTlFdfxM0FgYFOiK63ekUZpowQTJpO-MEhpZlQcB1eSMs0qDCFD1Y8Q8B4xQISoL30uG6KFWDKYcoR2j2Mf99nT3jIg2j6HE7A3iKVjthnj6Z5kYZBj9NVMWaWcdksz3a-yXM5LHrd7gaxb8XRoDLPb59k4AIrWem9QC36EnJ6pPNJ4p2ztxoXewAQhQOkz40Jba3oO76Cu3gQNopG_yi12fgj4X96VnAmxZ7n-EvjSCDLiGg4Xr6i4V1ayExTbiZ9Cm_OlwKjhA0lkmMIl_NzK9zYg.Ndw7z3uKrf42v9uMPueFwg",
+      "domain": "login.stevens.edu",
+      "path": "/",
+      "expires": 1772403308.866276,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "last_known_canvas_host",
+      "value": "sit.instructure.com",
+      "domain": "sso.canvaslms.com",
+      "path": "/",
+      "expires": 1801347309.163697,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "log_session_id",
+      "value": "824cb92732d2578812c06a92226d3885",
+      "domain": "sit.instructure.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "canvas_session",
+      "value": "TiSVlokyxTkRRqRxRtkvTQ+GlbXDpplblIUyeZJge3qYXm6aZRZIsBSewUNq5IERcOPpAK-y8HrceBblgZEke5NCgpXboAUowhEPn8OP3w9tXJFz1jPTgReg3rjkdccYD-RZNuiItSowsf4lWbWbrnHa-C-yg-t8AfUqtUOLN5LUSkywlC8chOc6w01RowqggZaYROZV02Dg4AB5caQRq1mq6rCmbVRQnnzNL3ekInO5Ku4kmVRryVWzL4DrmLnOLRfWa24jDyhA23SjQ4GU-9mNyLzcDSpSRDJbe2vuTKgRhW5rwcP0ZAvT6rSDnTrWLgP0geVbHxaxcy2V1OL1mdJWTXjC975Wou-u_1mIQMyACbYono4vxD9MpZvujvYTyVeV0mRt4XPA9XneuyDOoL5YP7SCgem09MomLmfUh6n-POleOO-UDGqjMzRdCE9zSxD21xBRPoLXt2_2JEEv8gTErR1J6u6AoKl7lDoVCq4AYFQa2vCf2mogkB8sWFtfUgq9eN6a6HbJScAEZZKoHsi88Q-hwDGup2YeGGb9Zv8i_J8Nn8FFjFt0XgCC9DhSo-l4Ey91J7jpulfqYayuDuz.eXS-4dgKDYujt5KtSRKTAtpd6yk.aX0tbQ",
+      "domain": "sit.instructure.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "_csrf_token",
+      "value": "Bczfy2JaR5xUc8XluGM4nkwCy9SQWUTmoHoD2U2q4wgylOaRBAAr0j0YnIT%2BKGDwfzKIgPYcBrDNSmqOAoGiZA%3D%3D",
+      "domain": "sit.instructure.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://sit.instructure.com",
+      "localStorage": [
+        {
+          "name": "_pendo_sessionId.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1778451310281,\"value\":\"{\\\"sessionId\\\":\\\"DpAufSyOKlVRIMz3\\\",\\\"timestamp\\\":1769811310281}\"}"
+        },
+        {
+          "name": "_pendo_accountId.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1778451310279,\"value\":\"SSEvHjVDW26gUYIYujBBcyR0DHsDDlTHuz7pA8Ea\"}"
+        },
+        {
+          "name": "cacheBuster",
+          "value": "9d9a4d93-bb01-485e-9fb6-1e536ebffb5e"
+        },
+        {
+          "name": "eesysoft_walkthroughs_13267",
+          "value": "[]"
+        },
+        {
+          "name": "_pendo_meta.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1778451310281,\"value\":432393830}"
+        },
+        {
+          "name": "_pendo___sg__.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1778451310281,\"value\":\"{}\"}"
+        },
+        {
+          "name": "_pendo_visitorId.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1778451310279,\"value\":\"d776282704d69ca60c16fa6034f1ab54d1364cd19840382b9d46d59d775e77a5\"}"
+        },
+        {
+          "name": "_pendo_guides_blocked.1ca366f1-739e-4565-52d2-9e6f6a8d438f",
+          "value": "{\"ttl\":1769825710383,\"value\":\"0\"}"
+        }
+      ]
+    }
+  ]
+}

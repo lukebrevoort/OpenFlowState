@@ -30,6 +30,10 @@ function App() {
     if (typeof window === 'undefined') return true;
     return window.matchMedia('(min-width: 1024px)').matches;
   });
+  const [systemPrefersReducedMotion, setSystemPrefersReducedMotion] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  });
   const setCurrentSessionId = useChatStore((state) => state.setCurrentSessionId);
   const loadMessages = useChatStore((state) => state.loadMessages);
   const chatStatus = useChatStore((state) => state.status);
@@ -68,6 +72,14 @@ function App() {
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1024px)');
     const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setSystemPrefersReducedMotion(media.matches);
     update();
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
@@ -204,6 +216,23 @@ function App() {
 
   const showMainShell = !isOnboarding;
 
+  const userReduceMotion = config?.preferences?.reduceMotion;
+  const userBackgroundMotion = config?.preferences?.backgroundMotion;
+
+  const effectiveReduceMotion = userReduceMotion ?? systemPrefersReducedMotion;
+  const effectiveBackgroundMotion = effectiveReduceMotion
+    ? 'static'
+    : (userBackgroundMotion ?? 'animated');
+  const effectiveBlurMode =
+    effectiveReduceMotion || effectiveBackgroundMotion === 'animated' ? 'reduced' : 'full';
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.fsMotion = effectiveReduceMotion ? 'reduced' : 'full';
+    root.dataset.fsBg = effectiveBackgroundMotion;
+    root.dataset.fsBlur = effectiveBlurMode;
+  }, [effectiveBackgroundMotion, effectiveBlurMode, effectiveReduceMotion]);
+
   const zenStatus = useMemo<ZenStatus>(() => {
     if (chatStatus === 'error') return 'error';
     if (openCodeStatus && (!openCodeStatus.running || !openCodeStatus.healthy)) return 'error';
@@ -283,7 +312,7 @@ function App() {
       <div className="absolute inset-0 bg-background pointer-events-none" />
       <div className="absolute inset-0 ambient-gradient pointer-events-none" />
 
-      <ZenGarden />
+      {effectiveBackgroundMotion === 'animated' && !effectiveReduceMotion ? <ZenGarden /> : null}
 
       {showMainShell && (
         <>
