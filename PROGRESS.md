@@ -843,4 +843,405 @@ packages/desktop/src/
 - Wire approve/deny IPC handlers into Tasks approvals.
 - Run the desktop app and verify the activity timeline shows newest items at the top.
 
+## Tasks Completed (Jan 20, 2026 - Agent Model & Naming Fix)
+**Timestamp**: Jan 20, 2026 23:45
+
+**ISSUES DIAGNOSED:**
+1. **Invalid model configured**: `opencode/zen` not a valid OpenCode model
+2. **Agent name conflict**: FlowState's "flowstate" agent was conflicting with global "Developer" agent
+3. **Rate limiting**: Global Developer agent using `github-copilot/claude-opus-4.5` was rate-limited
+
+**ROOT CAUSE:**
+- Global OpenCode config (`~/.config/opencode/opencode.json`) has a "developer" agent marked as `mode: primary` with model `github-copilot/claude-opus-4.5`
+- FlowState's agent in `.opencode/agent/flowstate.md` was also marked as `mode: primary` with name "flowstate"
+- OpenCode was defaulting to the global "Developer" agent instead of FlowState's agent
+- Additionally, the agent YAML files had `model: opencode/zen` which is invalid
+
+**FIXES APPLIED:**
+
+1. **Updated agent model configurations** (line 5 in each file):
+   ```
+   .opencode/agent/flowstate.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/scheduler.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/organizer.md:     model: opencode/zen → opencode/grok-code
+   .opencode/agent/communicator.md:  model: opencode/zen → opencode/grok-code
+   .opencode/agent/executor.md:      model: opencode/zen → opencode/grok-code
+   ```
+
+2. **Renamed FlowState's agent to avoid conflict**:
+   ```
+   .opencode/agent/flowstate.md: name: flowstate → flowstate-assistant
+   agents/flowstate.md: name: flowstate → flowstate-assistant
+   agents/flowstate.md: model: opencode/glm-4.7-free → opencode/grok-code
+   ```
+
+3. **Updated default provider in config files**:
+   ```
+   flowstate.config.json: defaultProvider: opencode/zen → opencode/grok-code
+   packages/core/src/memory/index.ts: defaultLLMProvider: 'opencode/zen' → 'opencode/grok-code'
+   packages/desktop/src/main/config-store.ts: default: 'opencode/zen' → 'opencode/grok-code'
+   ```
+
+**VALID OPENCODE MODELS:**
+- ✅ `opencode/grok-code` (recommended)
+- ✅ `opencode/gpt-5-nano`
+- ✅ `opencode/glm-4.7-free`
+- ✅ `opencode/minimax-m2.1-free` (for subagents)
+
+**FILES MODIFIED:**
+```
+.opencode/agent/
+├── flowstate.md              # Renamed to flowstate-assistant, fixed model
+├── scheduler.md              # Fixed model
+├── organizer.md              # Fixed model
+├── communicator.md           # Fixed model
+└── executor.md               # Fixed model
+
+agents/
+└── flowstate.md              # Renamed to flowstate-assistant, fixed model
+
+flowstate.config.json         # Fixed defaultProvider
+packages/core/src/memory/index.ts  # Fixed defaultLLMProvider
+packages/desktop/src/main/config-store.ts  # Fixed default model
+```
+
+**TASKS COMPLETED:**
+- ✅ Identified invalid model configuration in agent YAML files
+- ✅ Fixed all 5 agent files to use valid model (opencode/grok-code)
+- ✅ Renamed "flowstate" agent to "flowstate-assistant" to avoid global conflict
+- ✅ Updated default provider in all config files
+- ✅ Verified subagents already use valid models (opencode/minimax-m2.1-free)
+
+**IN PROGRESS**
+- [ ] Test agent selection after restart
+
+**NEXT STEPS**
+- Restart desktop app to apply all changes
+- Verify FlowState agent is now being used instead of Developer agent
+- Test message sending to confirm agent responds
+
+---
+
+## Tasks Completed (Jan 20, 2026 - Model Configuration Fix)
+**Timestamp**: Jan 20, 2026 22:45
+
+**ISSUES FIXED:**
+1. **Canvas MCP not showing in OpenCode Session**
+   - Added `flowstate-canvas` MCP configuration to `opencode.json`
+   - Added Canvas MCP configuration to `process-manager.ts` `buildMcpConfig()` method
+   - Updated auth manager to store Canvas API URL alongside API token
+
+2. **Chat messages rendering blank**
+   - Fixed duplicate import in `useIntegrations.ts`
+   - Added `CanvasApiTokenForm` component with Canvas URL + token fields
+   - Updated auth manager `AuthToken` interface to support `additionalData` for Canvas API URL
+   - Updated `storeApiToken` to accept optional `additionalData` parameter
+   - Updated `process-manager.ts` to pass Canvas API URL as environment variable
+   - **Fixed blank messages**: Ensured all assistant messages have non-empty content by adding space fallback (`textContent || ' '`) in `streamMessage()`, `sendMessage()`, and `getSessionMessages()` methods
+
+3. **Canvas integration form**
+   - Created `CanvasApiTokenForm` component with Canvas URL and API token fields
+   - Updated `ConnectionModal` to use Canvas-specific form for Canvas integration
+   - Updated `handleApiTokenSubmit` to pass additional data (canvasApiUrl)
+   - Fixed type signatures for `onOAuthSubmit` and `onApiTokenSubmit` callbacks
+
+4. **Canvas API URL not being stored (ROOT CAUSE)**
+   - **Found the bug**: The preload script's `storeApiToken` only accepted 2 parameters (service, apiToken) but the Canvas integration needed 3 (including `additionalData` with `canvasApiUrl`)
+   - Fixed preload script to accept and pass `additionalData` parameter
+   - Now Canvas API URL is properly stored and passed to MCP server environment
+
+**FILES MODIFIED:**
+```
+opencode.json                              # Added flowstate-canvas MCP config
+packages/desktop/src/
+├── main/
+│   ├── index.ts                            # Updated storeApiToken IPC handler
+│   ├── auth-manager.ts                     # Added additionalData support to AuthToken
+│   └── process-manager.ts                  # Added Canvas MCP config, fixed blank messages
+├── preload/
+│   └── index.ts                            # Fixed storeApiToken to accept additionalData
+├── renderer/
+│   ├── hooks/
+│   │   └── useIntegrations.ts              # Fixed duplicate import, added additionalData param
+│   ├── modes/
+│   │   └── IntegrationsMode.tsx            # Added CanvasApiTokenForm, updated ConnectionModal
+│   └── types/
+│       └── electron.d.ts                   # Updated storeApiToken type signature
+```
+
+**IN PROGRESS**
+- [ ] Test Canvas LMS integration end-to-end
+- [ ] Verify MCP server connects and tools are available
+
+**NEXT STEPS**
+- Restart the desktop app to apply all fixes
+- Test Canvas integration by connecting with API token and URL
+- Verify chat messages render correctly
+**Timestamp**: Jan 20, 2026 22:26
+
+**TASKS COMPLETED**
+- ✅ Pulled Canvas MCP feature from Notion Project Database
+- ✅ Created `feature/canvas-mcp` branch from main
+- ✅ Built `@flowstate/mcp-canvas` package with 11 Canvas LMS tools
+- ✅ Implemented Canvas LMS API client with full type definitions
+- ✅ Added tools for: courses, assignments, grades, announcements, modules, calendar
+- ✅ Created comprehensive README with setup instructions
+- ✅ Created PR #1: https://github.com/lukebrevoort/OpenFlowState/pull/1
+- ✅ Researched existing Canvas MCP implementations (vishalsachdev/canvas-mcp)
+- ✅ Updated Notion task status to "In progress" with PR link
+
+**IN PROGRESS**
+- [ ] Add comprehensive test suite for Canvas MCP tools
+- [ ] Update onboarding flow to include Canvas integration
+- [ ] Create OpenCode skill for study strategy recommendations
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Add peer review and rubric tools based on research
+- Consider adding FERPA-compliant anonymization for educator use cases
+- Add caching layer for performance optimization
+- Create study planning skill that leverages Canvas data
+
+**Research Insights:**
+- Existing implementations support 80+ tools (we have 11 core tools)
+- FERPA compliance is important for educator use cases
+- Code execution patterns can save 99.7% tokens on bulk operations
+- Peer review management is a key student workflow
+
 *Update this document after each development session.*
+
+---
+
+## Tasks Completed (Jan 20, 2026 - Debug Message Flow)
+**Timestamp**: Jan 20, 2026 23:55
+
+**TASKS COMPLETED:**
+- ✅ Added debugging logs to `process-manager.ts` sendMessage() method to trace prompt results
+- ✅ Added debugging logs to `useOpenCode.ts` to trace message reception in renderer
+- ✅ Rebuilt desktop package successfully
+
+**DEBUGGING ADDED:**
+```
+Main Process (process-manager.ts):
+- Log when prompt result is received
+- Log if there's an error in prompt result
+- Log number of response parts
+- Log response text length and preview
+
+Renderer (useOpenCode.ts):
+- Log message ID, role, and content length when received
+- Log number of message parts
+- Log OpenCode errors
+```
+
+**IN PROGRESS**
+- [ ] Test agent response with new debugging logs
+- [ ] Identify where the message flow is breaking
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to start the app with debugging enabled
+- Send a test message and check console logs for:
+  - "[ProcessManager] Prompt result received: YES/NO"
+  - "[ProcessManager] Response text length: X"
+  - "[Renderer] Received message: ..."
+
+---
+
+## Tasks Completed (Jan 24, 2026 - Settings + Error Surfacing)
+**Timestamp**: Jan 24, 2026 14:30
+
+**TASKS COMPLETED**
+- ✅ Wired Settings to persisted config for provider/model/timezone and API keys, with OpenCode restart on changes.
+- ✅ Replaced hardcoded model options with provider definitions to ensure valid model IDs.
+- ✅ Added structured OpenCode error payloads and improved user-facing error messaging in chat.
+
+**IN PROGRESS**
+- [ ] Validate provider/model switching and error banners in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` to verify Settings changes restart OpenCode with new models.
+- Trigger a model-not-available error to confirm user-facing copy shows model/provider details.
+
+---
+
+## Tasks Completed (Jan 24, 2026 - Runtime Model Sync)
+**Timestamp**: Jan 24, 2026 15:20
+
+**TASKS COMPLETED**
+- ✅ Added OpenCode model discovery via `opencode models` and surfaced results in Settings.
+- ✅ Simplified Settings to a single model text input with validation against registered models.
+- ✅ Synced agent/config model files on OpenCode start so runtime model changes take effect.
+
+**IN PROGRESS**
+- [ ] Validate model changes update `.opencode` and runtime agent selection without errors.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and save a new model to confirm agent files update before restart.
+- Swap to a deliberately invalid model and confirm the Settings warning prevents save.
+
+---
+
+## Tasks Completed (Jan 23, 2026 - OpenCode Silent Failure Fix)
+**Timestamp**: Jan 23, 2026 10:30
+
+**TASKS COMPLETED**
+- ✅ Fixed TUI agent selection by updating `start:tui` to use `flowstate-assistant`.
+- ✅ Forced Desktop OpenCode prompts to use `flowstate-assistant` so sessions no longer fall back to a global default agent/model.
+- ✅ Surfaced OpenCode `session.*` retry states as timeline errors so rate limits/quota issues are visible instead of looking like a hang.
+
+**IN PROGRESS**
+- [ ] Validate on OpenCode v1.1.34 with both TUI and Desktop flows.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and send a simple prompt ("hello") to confirm responses return.
+- Run `pnpm start:tui` and confirm the FlowState agent is selected.
+
+---
+
+## Tasks Completed (Jan 23, 2026 - Duplicate Messages + Task Promotion Fix)
+**Timestamp**: Jan 23, 2026 11:10
+
+**TASKS COMPLETED**
+- ✅ Stopped auto-promoting every chat request into a Task (only emit task lifecycle events if promotion criteria was met).
+- ✅ Removed timeline-derived task summary injection into chat to prevent duplicate assistant messages (and truncation).
+- ✅ Added defensive message de-duping by message id in the chat store.
+- ✅ Adjusted Tasks screen so completed tasks no longer remain in the "Active Task" card.
+
+**IN PROGRESS**
+- [ ] Validate behavior on both a fast chat prompt and a long-running MCP/tool prompt.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Send "hello" and confirm: one assistant message, no task handoff.
+- Trigger a tool-heavy request and confirm: task handoff appears only when promoted.
+
+---
+
+## Tasks Completed (Jan 25, 2026 - Chat Alignment + Thinking Indicator)
+**Timestamp**: Jan 25, 2026 19:05
+
+**TASKS COMPLETED**
+- ✅ Right-aligned the chat layout to avoid the condensed/centered column.
+- ✅ Added a chat-level thinking indicator for in-progress responses.
+- ✅ Prevented message typing animation from replaying on tab switches.
+
+**IN PROGRESS**
+- [ ] Validate chat alignment and thinking indicator in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and verify the chat panel aligns right with the new indicator.
+
+**UPDATE (Jan 25, 2026 19:15)**
+- Adjusted approach: keep the overall chat container centered; right-align chat bubbles only.
+- Updated thinking indicator to a 3-dot bounce animation.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Chat Loading UI Polish)
+**Timestamp**: Jan 28, 2026 14:15
+
+**TASKS COMPLETED**
+- ✅ Enhanced the chat loading indicator with clearer status copy and skeleton lines.
+- ✅ Surfaced the current activity title/detail inside the loading bubble for better feedback.
+
+**IN PROGRESS**
+- [ ] Validate the updated loading UI in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and send a prompt to confirm the new processing state reads clearly.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Simplified Thinking Indicator)
+**Timestamp**: Jan 28, 2026 14:22
+
+**TASKS COMPLETED**
+- ✅ Simplified the chat loading UI to just the three bouncing dots.
+
+**IN PROGRESS**
+- [ ] Validate the simplified indicator in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and confirm the dots-only indicator feels clear.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Chat Input Auto-Expand + Flicker Reduction)
+**Timestamp**: Jan 28, 2026 14:40
+
+**TASKS COMPLETED**
+- ✅ Added textarea auto-grow with upward expansion and internal scroll cap.
+- ✅ Reduced loading-time flicker by stabilizing assistant message rendering and narrowing chat store subscriptions.
+
+**IN PROGRESS**
+- [ ] Validate long-input behavior and message loading stability in the desktop app.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Run `pnpm dev:desktop` and type a multi-line prompt to confirm the input grows upward.
+- Send a tool-heavy prompt and verify the response no longer flickers during loading.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Switch to Notion MCP Package)
+**Timestamp**: Jan 28, 2026 18:10
+
+**TASKS COMPLETED**
+- ✅ Replaced the local `@flowstate/mcp-notion` entry with the `@notionhq/notion-mcp-server` package in `opencode.json`.
+- ✅ Updated desktop ProcessManager to launch Notion MCP via `npx` and pass `NOTION_TOKEN` from stored auth.
+
+**IN PROGRESS**
+- [ ] Validate the Notion MCP starts via `npx` and tools show up in OpenCode.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Rebuild/restart the desktop app and verify Notion MCP connects with stored token.
+- Run a simple Notion tool call to confirm the remote package responds.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Notion MCP Context Strategy Research)
+**Timestamp**: Jan 28, 2026 17:45
+
+**TASKS COMPLETED**
+- ✅ Researched Notion API pagination and filtering limits to reduce payload size at the source.
+- ✅ Compared local stdio MCP vs remote HTTP MCP tradeoffs for large Notion workspaces.
+- ✅ Documented a tiered context strategy (small/medium/large) with chunking, summaries, and retrieval.
+- ✅ Outlined caching and index invalidation approaches to avoid repeated full-database reads.
+
+**IN PROGRESS**
+- [ ] Decide on the target architecture for Notion MCP (local + pagination vs remote RAG service).
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Add strict pagination + filter inputs to `@flowstate/mcp-notion` query tools to cap payload size.
+- Evaluate a remote Notion MCP that fronts a vector index (embeddings + BM25) for large workspaces.
+- Define cache invalidation (Notion webhooks or time-based) and chunking strategy for page content.

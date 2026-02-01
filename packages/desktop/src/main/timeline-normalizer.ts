@@ -49,7 +49,29 @@ const extractDetail = (data: OpenCodeEventPayload) => {
   return undefined;
 };
 
+const formatRetryDetail = (data: OpenCodeEventPayload) => {
+  const candidates = [data.message, data.error, data.reason, data.summary];
+  let message: string | undefined;
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      message = candidate.trim();
+      break;
+    }
+  }
+
+  const next = typeof data.next === 'number' ? data.next : undefined;
+  if (!message && !next) return undefined;
+
+  if (message && next) {
+    return clampDetail(`${message} (next retry at ${new Date(next).toISOString()})`);
+  }
+
+  if (message) return clampDetail(message);
+  return clampDetail(`Retry scheduled at ${new Date(next!).toISOString()}`);
+};
+
 const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: string) => {
+  const requestIdCandidates = [data.requestId, data.requestID, data.request_id, data.id];
   const titleCandidates = [data.title, data.action, data.intent, data.summary];
   const summaryCandidates = [data.summary, data.intent, data.action, fallbackDetail];
   const bodyCandidates = [data.body, data.preview, data.message];
@@ -67,7 +89,16 @@ const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: str
   const summary = pickText(summaryCandidates);
   const body = pickText(bodyCandidates);
 
+  let requestId: string | undefined;
+  for (const candidate of requestIdCandidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      requestId = candidate;
+      break;
+    }
+  }
+
   return {
+    requestId,
     title,
     summary,
     body,
@@ -164,6 +195,28 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
   }
 
   if (type.startsWith('session.')) {
+    const statusType =
+      typeof sanitizedPayload?.type === 'string'
+        ? sanitizedPayload.type
+        : typeof sanitizedPayload?.status === 'string'
+          ? sanitizedPayload.status
+          : typeof sanitizedPayload?.status === 'object' && sanitizedPayload.status
+            ? ((sanitizedPayload.status as { type?: unknown }).type as string | undefined)
+            : undefined;
+
+    if (statusType === 'retry') {
+      return {
+        event: buildBaseEvent({
+          sessionId,
+          kind: 'error',
+          title: 'Request delayed',
+          detail: formatRetryDetail(sanitizedPayload ?? {}) ?? detail ?? 'Request delayed due to provider retry',
+        }),
+        payload: sanitizedPayload ?? undefined,
+        redacted,
+      };
+    }
+
     return {
       event: buildBaseEvent({
         sessionId,
@@ -243,12 +296,18 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
 
   if (type.startsWith('permission.') || type.startsWith('approval.')) {
     const approvalPayload = extractApprovalPayload(sanitizedPayload ?? {}, detail);
+
+    const isRequest =
+      type.endsWith('.asked') ||
+      type.includes('asked') ||
+      type.includes('request');
+
     return {
       event: buildBaseEvent({
         sessionId,
-        kind: type.includes('approved') ? 'approval_response' : 'approval_request',
-        title: approvalPayload.title ?? (type.includes('approved') ? 'Approval granted' : 'Approval requested'),
-        detail: approvalPayload.summary ?? detail ?? 'User approval required',
+        kind: isRequest ? 'approval_request' : 'approval_response',
+        title: approvalPayload.title ?? (isRequest ? 'Approval requested' : 'Approval updated'),
+        detail: approvalPayload.summary ?? detail ?? (isRequest ? 'User approval required' : 'Approval response recorded'),
       }),
       payload: approvalPayload,
       redacted,

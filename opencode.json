@@ -2,9 +2,12 @@
   "$schema": "https://opencode.ai/config.json",
   "theme": "./themes/flowstate.json",
   "mcp": {
-    "flowstate-notion": {
+    "notion": {
       "type": "local",
-      "command": ["pnpm", "--filter", "@flowstate/mcp-notion", "start"],
+      "command": ["npx", "-y", "@notionhq/notion-mcp-server"],
+      "environment": {
+        "NOTION_TOKEN": ""
+      },
       "enabled": true
     },
     "flowstate-gmail": {
@@ -20,6 +23,11 @@
     "flowstate-system": {
       "type": "local",
       "command": ["pnpm", "--filter", "@flowstate/mcp-system", "start"],
+      "enabled": true
+    },
+    "flowstate-canvas": {
+      "type": "local",
+      "command": ["pnpm", "--filter", "@flowstate/mcp-canvas", "start"],
       "enabled": true
     }
   }

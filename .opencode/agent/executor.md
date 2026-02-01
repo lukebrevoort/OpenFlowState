@@ -2,7 +2,7 @@
 name: executor
 description: System automation specialist
 mode: subagent
-model: opencode/zen
+model: opencode/grok-code
 temperature: 0.1
 tools:
   system_*: true

@@ -5,16 +5,28 @@
  * It manages the application lifecycle, creates windows, and handles IPC.
  */
 
-import { app, BrowserWindow, ipcMain, shell, nativeTheme } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeTheme, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
+import { runCanvasBrowserLogin } from './canvas-browser-login.js';
+import { exec } from 'node:child_process';
+import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
+import { timelineStore } from './timeline-store.js';
+import { taskStore } from './task-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
+import type { ApprovalReply } from './approval-policy-store.js';
+import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import { workflowsRunner } from './workflows-runner.js';
+import { workflowsGenerator } from './workflows-generator.js';
+import { toRendererTaskRun } from './task-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const execAsync = promisify(exec);
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -160,6 +172,63 @@ ipcMain.handle('app:getTheme', () => {
  */
 ipcMain.handle('app:openExternal', async (_event, url: string) => {
   await shell.openExternal(url);
+});
+
+ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; defaultPath?: string }) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: options?.title ?? 'Choose a file location',
+    defaultPath: options?.defaultPath,
+    buttonLabel: 'Save',
+    showsTagField: false,
+  });
+
+  if (result.canceled) return null;
+  return result.filePath ?? null;
+});
+
+ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: options?.title ?? 'Choose a folder',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+
+  if (result.canceled) return null;
+  return result.filePaths[0] ?? null;
+});
+
+ipcMain.handle('app:ensureFile', async (_event, filePath: string) => {
+  try {
+    const dir = path.dirname(filePath);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(filePath, '', { flag: 'a' });
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to ensure file exists:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('canvas:browserLogin', async (_event, payload: {
+  canvasApiUrl: string;
+  storageStatePath: string;
+  confirmationFilePath?: string;
+  timeoutSeconds?: number;
+}) => {
+  try {
+    const result = await runCanvasBrowserLogin({
+      canvasApiUrl: payload.canvasApiUrl,
+      storageStatePath: payload.storageStatePath,
+      confirmationFilePath: payload.confirmationFilePath,
+      timeoutMs: payload.timeoutSeconds ? payload.timeoutSeconds * 1000 : undefined,
+    });
+
+    return { success: true, storageStatePath: result.storageStatePath };
+  } catch (error) {
+    console.error('Canvas browser login failed:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
 });
 
 ipcMain.handle('app:openTerminal', async (_event, command: string) => {
@@ -314,11 +383,11 @@ ipcMain.handle('auth:removeCredentials', async (_event, service: string) => {
 });
 
 /**
- * Store an API token directly (for Notion Internal Integration, etc.)
- */
-ipcMain.handle('auth:storeApiToken', async (_event, service: string, apiToken: string) => {
+  * Store an API token directly (for Notion Internal Integration, etc.)
+  */
+ ipcMain.handle('auth:storeApiToken', async (_event, service: string, apiToken: string, additionalData?: Record<string, string>) => {
   try {
-    await authManager.storeApiToken(service, apiToken);
+    await authManager.storeApiToken(service, apiToken, additionalData);
 
     // Reload MCP config to include the new service
     await processManager.reloadMcpConfig();
@@ -376,6 +445,25 @@ ipcMain.handle(
     }
   }
 );
+
+/**
+ * Re-authenticate a service using stored credentials
+ */
+ipcMain.handle('auth:reauthenticate', async (_event, service: string) => {
+  try {
+    const credentials = await authManager.getClientCredentials(service);
+    if (!credentials?.clientId || !credentials?.clientSecret) {
+      throw new Error(`Missing stored credentials for ${service}`);
+    }
+
+    const token = await oauthServer.startOAuth(service, credentials.clientId, credentials.clientSecret);
+    await processManager.reloadMcpConfig();
+    return token;
+  } catch (error) {
+    console.error(`[Auth] Error re-authenticating ${service}:`, error);
+    throw error;
+  }
+});
 
 /**
  * Refresh token for a service
@@ -442,7 +530,10 @@ ipcMain.handle('mcp:status', async () => {
  * Send a message to OpenCode and get a response
  */
 ipcMain.handle('opencode:send', async (event, message: string) => {
+  console.log('[IPC] opencode:send called with message length:', message.length);
+  
   if (!processManager.running) {
+    console.error('[IPC] OpenCode not running!');
     return {
       error: 'OpenCode not running',
       content: 'The AI assistant is not available. Please restart the application.',
@@ -452,16 +543,21 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
   try {
     // Get the webContents from the event
     const webContents = event.sender;
+    console.log('[IPC] Calling processManager.streamMessage()...');
 
     // Stream the message (sends events back via IPC)
     await processManager.streamMessage(message, webContents);
 
+    console.log('[IPC] streamMessage completed successfully');
     return { success: true };
   } catch (error) {
-    console.error('Error in opencode:send:', error);
+    console.error('[IPC] Error in opencode:send:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const message = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
     return {
-      error: error instanceof Error ? error.message : String(error),
-      content: 'An error occurred while processing your request.',
+      error: message,
+      content: message,
+      errorDetails: opencodeError,
     };
   }
 });
@@ -471,10 +567,24 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
  */
 ipcMain.handle('opencode:status', async () => {
   try {
-    return { success: true, status: processManager.running };
+    const health = await processManager.healthCheck();
+    return {
+      running: processManager.running,
+      // Back-compat for early renderer builds that expected `status`
+      status: processManager.running,
+      sessionId: processManager.sessionId,
+      healthy: health.healthy,
+      version: health.version,
+    };
   } catch (error) {
     console.error('Failed to get OpenCode status:', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      running: false,
+      status: false,
+      sessionId: null,
+      healthy: false,
+      version: undefined,
+    };
   }
 });
 
@@ -489,6 +599,368 @@ ipcMain.handle('opencode:restart', async () => {
   }
 });
 
+// ============================================================================
+// Phase 3.5 - Feature-level IPC surfaces (typed via renderer/types/electron.d.ts)
+// ============================================================================
+
+const ipcError = <T>(code: IpcError['code'], message: string, details?: unknown): IpcResult<T> => ({
+  ok: false,
+  error: {
+    code,
+    message,
+    ...(details === undefined ? {} : { details }),
+  } as IpcError,
+});
+
+const ipcOk = <T>(data: T): IpcResult<T> => ({ ok: true, data });
+
+const DEFAULT_CONVERSATION_TITLE = 'New Conversation';
+
+const normalizeConversationTitle = (title: string): string => {
+  return title.trim().replace(/\s+/g, ' ').toLowerCase();
+};
+
+const parseTitleSuffix = (title: string): { base: string; suffix: number | null } => {
+  const match = /^(.*?)(?:\s\((\d+)\))?$/.exec(title.trim());
+  if (!match) {
+    return { base: title.trim(), suffix: null };
+  }
+
+  const base = (match[1] ?? '').trim();
+  const suffix = match[2] ? Number(match[2]) : null;
+  return { base, suffix: Number.isFinite(suffix) ? suffix : null };
+};
+
+const makeUniqueConversationTitle = (requested: string | undefined, existingTitles: string[]): string => {
+  const initial = (requested ?? '').trim().replace(/\s+/g, ' ');
+  const desired = initial.length ? initial : DEFAULT_CONVERSATION_TITLE;
+
+  const existingNormalized = new Set(existingTitles.map(normalizeConversationTitle));
+  const desiredNorm = normalizeConversationTitle(desired);
+  if (!existingNormalized.has(desiredNorm)) {
+    return desired;
+  }
+
+  const parsed = parseTitleSuffix(desired);
+  const base = parsed.base.length ? parsed.base : DEFAULT_CONVERSATION_TITLE;
+  const baseNorm = normalizeConversationTitle(base);
+
+  const used = new Set<number>();
+  for (const t of existingTitles) {
+    const cleaned = t.trim().replace(/\s+/g, ' ');
+    const { base: b, suffix } = parseTitleSuffix(cleaned);
+    if (normalizeConversationTitle(b) !== baseNorm) {
+      continue;
+    }
+
+    if (suffix && suffix > 0) {
+      used.add(suffix);
+    } else {
+      used.add(1);
+    }
+  }
+
+  for (let n = 2; n < 10_000; n += 1) {
+    if (!used.has(n)) {
+      return `${base} (${n})`;
+    }
+  }
+
+  // Extremely unlikely fallback; keeps behavior deterministic.
+  return `${base} (${Date.now()})`;
+};
+
+const configureTimelineStore = (): void => {
+  // Avoid initializing with DEFAULT_DATA_DIR before ProcessManager has a chance
+  // to point the store at the app userData dir.
+  timelineStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureTaskStore = (): void => {
+  // Keep Tasks persisted alongside TimelineStore in the same memory.db.
+  taskStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+ipcMain.handle('settings:get', async () => {
+  try {
+    return configStore.get();
+  } catch {
+    return await configStore.load();
+  }
+});
+
+ipcMain.handle('settings:update', async (_event, config: Parameters<typeof configStore.update>[0]) => {
+  await configStore.update(config);
+  return configStore.get();
+});
+
+ipcMain.handle('settings:getTheme', () => {
+  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+});
+
+ipcMain.handle('settings:getAppInfo', () => {
+  return {
+    name: app.getName(),
+    version: app.getVersion(),
+    platform: process.platform,
+    isDev,
+  };
+});
+
+ipcMain.handle('integrations:listAuthStatuses', async () => {
+  try {
+    return await authManager.getAllStatuses();
+  } catch (error) {
+    console.error('[Integrations] Error getting all statuses:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('integrations:getMcpStatus', async () => {
+  try {
+    return await processManager.getMcpStatus();
+  } catch (error) {
+    console.error('[Integrations] Error getting MCP status:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('integrations:reloadMcp', async () => {
+  try {
+    await processManager.reloadMcpConfig();
+    return { success: true };
+  } catch (error) {
+    console.error('[Integrations] Error reloading MCP config:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle(
+  'integrations:oauthStart',
+  async (_event, service: string, clientId: string, clientSecret: string) => {
+    try {
+      await authManager.storeClientCredentials(service, {
+        clientId,
+        clientSecret,
+      });
+
+      const token = await oauthServer.startOAuth(service, clientId, clientSecret);
+      await processManager.reloadMcpConfig();
+      return token;
+    } catch (error) {
+      console.error(`[Integrations] Error starting OAuth for ${service}:`, error);
+      if (mainWindow?.webContents) {
+        mainWindow.webContents.send('oauth:error', {
+          service,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      throw error;
+    }
+  }
+);
+
+ipcMain.handle('integrations:oauthRefresh', async (_event, service: string) => {
+  try {
+    return await oauthServer.refreshToken(service);
+  } catch (error) {
+    console.error(`[Integrations] Error refreshing token for ${service}:`, error);
+    return null;
+  }
+});
+
+ipcMain.handle('integrations:oauthDisconnect', async (_event, service: string) => {
+  try {
+    await oauthServer.disconnect(service);
+    await processManager.reloadMcpConfig();
+    if (mainWindow?.webContents) {
+      mainWindow.webContents.send('oauth:disconnected', { service });
+    }
+  } catch (error) {
+    console.error(`[Integrations] Error disconnecting ${service}:`, error);
+    throw error;
+  }
+});
+
+ipcMain.handle(
+  'integrations:storeApiToken',
+  async (_event, service: string, apiToken: string, additionalData?: Record<string, string>) => {
+    try {
+      await authManager.storeApiToken(service, apiToken, additionalData);
+      await processManager.reloadMcpConfig();
+
+      if (mainWindow?.webContents) {
+        mainWindow.webContents.send('auth:apiTokenSuccess', { service });
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error(`[Integrations] Error storing API token for ${service}:`, error);
+      throw error;
+    }
+  }
+);
+
+ipcMain.handle('chat:sendMessage', async (event, message: string) => {
+  if (!processManager.running) {
+    return {
+      error: 'OpenCode not running',
+      content: 'The AI assistant is not available. Please restart the application.',
+    };
+  }
+
+  try {
+    await processManager.streamMessage(message, event.sender);
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error in chat:sendMessage:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const message = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
+    return {
+      error: message,
+      content: message,
+      errorDetails: opencodeError,
+    };
+  }
+});
+
+ipcMain.handle('chat:getStatus', async () => {
+  const health = await processManager.healthCheck();
+  return {
+    running: processManager.running,
+    status: processManager.running,
+    sessionId: processManager.sessionId,
+    healthy: health.healthy,
+    version: health.version,
+  };
+});
+
+ipcMain.handle('chat:newConversation', async (_event, title?: string) => {
+  if (!processManager.running) {
+    throw new Error('OpenCode not running');
+  }
+
+  const requestedTitle = (title ?? '').trim().replace(/\s+/g, ' ');
+  let uniqueTitle: string | undefined;
+  if (requestedTitle.length) {
+    const sessions = await processManager.listSessions();
+    uniqueTitle = makeUniqueConversationTitle(requestedTitle, sessions.map((s) => s.title));
+  }
+
+  const sessionId = await processManager.createSession(uniqueTitle);
+
+  configureTimelineStore();
+  timelineStore.upsertSessionMeta(sessionId, {
+    ...(uniqueTitle ? { title: uniqueTitle } : {}),
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+  });
+
+  return { sessionId };
+});
+
+ipcMain.handle('chat:listConversations', async () => {
+  const sessions = await processManager.listSessions();
+  if (!sessions.length) {
+    return sessions;
+  }
+
+  try {
+    configureTimelineStore();
+    const cutoff = timelineStore.getRetentionCutoffMs();
+    const [knownIds, activeIds] = await Promise.all([
+      timelineStore.listKnownSessionIds(),
+      timelineStore.listActiveSessionIdsSince(cutoff),
+    ]);
+
+    return sessions.filter((s) => !knownIds.has(s.id) || activeIds.has(s.id));
+  } catch (error) {
+    console.warn('[IPC] Failed to apply conversation retention filter:', error);
+    return sessions;
+  }
+});
+
+ipcMain.handle('chat:switchConversation', async (_event, sessionId: string) => {
+  await processManager.switchSession(sessionId);
+
+  try {
+    configureTimelineStore();
+    timelineStore.touchSession(sessionId);
+  } catch (error) {
+    console.warn('[IPC] Failed to update conversation last_seen:', error);
+  }
+
+  return { sessionId };
+});
+
+ipcMain.handle('chat:getMessages', async () => {
+  return await processManager.getSessionMessages();
+});
+
+ipcMain.handle('tasks:listRuns', async () => {
+  try {
+    configureTaskStore();
+    const runs = taskStore.listRuns({ limit: 100, offset: 0 });
+    return ipcOk<TaskRun[]>(runs.map(toRendererTaskRun));
+  } catch (error) {
+    console.warn('[IPC] Failed to list task runs:', error);
+    return ipcError<TaskRun[]>('UNKNOWN', 'Failed to list task runs.');
+  }
+});
+
+ipcMain.handle('tasks:getActiveRun', async () => {
+  try {
+    configureTaskStore();
+    const record = taskStore.getActiveRun({ sessionId: processManager.sessionId ?? undefined });
+    return ipcOk<TaskRun | null>(record ? toRendererTaskRun(record) : null);
+  } catch (error) {
+    console.warn('[IPC] Failed to get active task run:', error);
+    return ipcError<TaskRun | null>('UNKNOWN', 'Failed to get active task run.');
+  }
+});
+
+ipcMain.handle('workflows:list', async () => {
+  const result = await workflowsRunner.listDefinitions();
+  if (result.ok) {
+    return ipcOk<WorkflowDefinition[]>(result.data);
+  }
+  return ipcError<WorkflowDefinition[]>(result.code, result.message);
+});
+
+ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unknown) => {
+  const result = await workflowsRunner.run(workflowId, input);
+  if (result.ok) {
+    return ipcOk<WorkflowRun>(result.data);
+  }
+  return ipcError<WorkflowRun>(result.code, result.message, result.details);
+});
+
+ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) => {
+  const result = await workflowsGenerator.generateFromIntent(intent);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message, result.details);
+});
+
+ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
+  try {
+    const args = ['models'];
+    if (provider) {
+      args.push(provider);
+    }
+    const { stdout } = await execAsync(`opencode ${args.join(' ')}`);
+    const models = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && line.includes('/') && !line.includes(' '));
+    return Array.from(new Set(models));
+  } catch (error) {
+    console.error('Failed to list OpenCode models:', error);
+    return [];
+  }
+});
+
 
 /**
  * Create a new session
@@ -498,7 +970,22 @@ ipcMain.handle('opencode:newSession', async (_event, title?: string) => {
     throw new Error('OpenCode not running');
   }
 
-  const sessionId = await processManager.createSession(title);
+  const requestedTitle = (title ?? '').trim().replace(/\s+/g, ' ');
+  let uniqueTitle: string | undefined;
+  if (requestedTitle.length) {
+    const sessions = await processManager.listSessions();
+    uniqueTitle = makeUniqueConversationTitle(requestedTitle, sessions.map((s) => s.title));
+  }
+
+  const sessionId = await processManager.createSession(uniqueTitle);
+
+  configureTimelineStore();
+  timelineStore.upsertSessionMeta(sessionId, {
+    ...(uniqueTitle ? { title: uniqueTitle } : {}),
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+  });
+
   return { sessionId };
 });
 
@@ -506,7 +993,23 @@ ipcMain.handle('opencode:newSession', async (_event, title?: string) => {
  * List all sessions
  */
 ipcMain.handle('opencode:listSessions', async () => {
-  return await processManager.listSessions();
+  const sessions = await processManager.listSessions();
+  if (!sessions.length) {
+    return sessions;
+  }
+
+  try {
+    configureTimelineStore();
+    const cutoff = timelineStore.getRetentionCutoffMs();
+    const [knownIds, activeIds] = await Promise.all([
+      timelineStore.listKnownSessionIds(),
+      timelineStore.listActiveSessionIdsSince(cutoff),
+    ]);
+    return sessions.filter((s) => !knownIds.has(s.id) || activeIds.has(s.id));
+  } catch (error) {
+    console.warn('[IPC] Failed to apply session retention filter:', error);
+    return sessions;
+  }
 });
 
 /**
@@ -514,6 +1017,14 @@ ipcMain.handle('opencode:listSessions', async () => {
  */
 ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
   await processManager.switchSession(sessionId);
+
+  try {
+    configureTimelineStore();
+    timelineStore.touchSession(sessionId);
+  } catch (error) {
+    console.warn('[IPC] Failed to update session last_seen:', error);
+  }
+
   return { sessionId };
 });
 
@@ -534,9 +1045,26 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
  /**
   * Resolve a timeline payload from blob storage
   */
- ipcMain.handle('timeline:payload', async (_event, payloadRef: string) => {
-   return await processManager.getTimelinePayload(payloadRef);
- });
- 
- console.log('IPC handlers registered');
+  ipcMain.handle('timeline:payload', async (_event, payloadRef: string) => {
+    return await processManager.getTimelinePayload(payloadRef);
+  });
 
+  ipcMain.handle('approvals:reply', async (_event, requestId: string, reply: ApprovalReply) => {
+    if (!requestId || typeof requestId !== 'string') {
+      return { success: false, error: 'Invalid requestId' };
+    }
+
+    if (reply !== 'once' && reply !== 'always' && reply !== 'deny') {
+      return { success: false, error: 'Invalid reply' };
+    }
+
+    try {
+      await processManager.replyApproval(requestId, reply);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { success: false, error: message };
+    }
+  });
+  
+  console.log('IPC handlers registered');

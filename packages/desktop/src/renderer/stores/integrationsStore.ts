@@ -107,6 +107,21 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
       },
     ],
   },
+  {
+    id: 'canvas',
+    name: 'Canvas LMS',
+    description: 'Assignments, grades, and course materials (token or browser login)',
+    icon: '📚',
+    status: 'disconnected',
+    isOfficial: true,
+    authOptions: [
+      {
+        method: 'api_token',
+        label: 'Canvas Connection',
+        description: 'Connect with an API token or a browser session (no token) using a storage state file',
+      },
+    ],
+  },
 ];
 
 export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({

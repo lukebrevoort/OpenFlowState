@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useCallback, useEffect, useRef } from "react";
 import { useIntegrationsStore } from "../stores/integrationsStore";
 import type {
   OAuthSuccessEvent,
@@ -108,12 +107,17 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
   );
 
   const connectApiToken = useCallback(
-    async (service: string, apiToken: string) => {
+    async (service: string, apiToken: string, additionalData?: Record<string, string>) => {
       setConnecting(service);
       updateIntegration(service, { status: "connecting", error: undefined });
 
       try {
-        await window.flowstate.auth.storeApiToken(service, apiToken);
+        // For Canvas, pass additional data (like API URL)
+        if (service === 'canvas' && additionalData) {
+          await window.flowstate.auth.storeApiToken(service, apiToken, additionalData);
+        } else {
+          await window.flowstate.auth.storeApiToken(service, apiToken);
+        }
       } catch (error) {
         updateIntegration(service, {
           status: "error",

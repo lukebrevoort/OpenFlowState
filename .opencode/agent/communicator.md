@@ -2,7 +2,7 @@
 name: communicator
 description: Email and messaging specialist
 mode: subagent
-model: opencode/zen
+model: opencode/grok-code
 temperature: 0.4
 tools:
   gmail_*: true

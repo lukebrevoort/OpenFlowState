@@ -10,10 +10,17 @@
 
 import { useEffect, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore';
+import type { TaskRun } from '../stores/chatStore';
 import { useConfigStore } from '../stores/configStore';
 import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError, TimelineEvent } from '../types/electron';
 
 let listenersInitialized = false;
+
+const DEV = Boolean(
+  (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV ??
+    (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV ===
+      'development',
+);
 
 export function useOpenCode() {
   const {
@@ -32,11 +39,52 @@ export function useOpenCode() {
     error,
     currentSessionId,
     sessions,
-    timeline,
     activeTask,
   } = useChatStore();
 
   const { setOpenCodeStatus, refreshStatus } = useConfigStore();
+
+  const formatOpenCodeError = useCallback((err: OpenCodeError | string | null | undefined) => {
+    if (!err) return 'OpenCode request failed.';
+    if (typeof err === 'string') return err;
+
+    const baseMessage = err.message ?? err.error ?? 'OpenCode request failed.';
+    const normalizedMessage = baseMessage.toLowerCase();
+    const code = err.code?.toLowerCase();
+    const status = err.status;
+
+    const isRateLimit =
+      code === 'rate_limited' ||
+      status === 429 ||
+      normalizedMessage.includes('rate limit') ||
+      normalizedMessage.includes('too many requests');
+    const isModelUnavailable =
+      code === 'model_not_found' ||
+      code === 'model_unavailable' ||
+      normalizedMessage.includes('model not found') ||
+      normalizedMessage.includes('model unavailable') ||
+      normalizedMessage.includes('no longer available');
+    const isAuth =
+      status === 401 ||
+      normalizedMessage.includes('invalid api key') ||
+      normalizedMessage.includes('unauthorized') ||
+      normalizedMessage.includes('authentication');
+
+    let title = 'Request failed';
+    if (isModelUnavailable) title = 'Model unavailable';
+    if (isRateLimit) title = 'Rate limited';
+    if (isAuth) title = 'Authentication error';
+
+    const detailParts: string[] = [];
+    if (err.model) detailParts.push(`Model: ${err.model}`);
+    if (err.provider && (!err.model || !err.model.startsWith(err.provider))) {
+      detailParts.push(`Provider: ${err.provider}`);
+    }
+    if (err.retryAfter) detailParts.push(`Retry after ${err.retryAfter}s`);
+
+    const suffix = detailParts.length > 0 ? ` (${detailParts.join(', ')})` : '';
+    return `${title}: ${baseMessage}${suffix}`;
+  }, []);
 
   /**
    * Set up event listeners for OpenCode responses
@@ -45,17 +93,37 @@ export function useOpenCode() {
     if (listenersInitialized) return;
     listenersInitialized = true;
 
-    console.log('Setting up OpenCode event listeners');
+    if (DEV) console.log('Setting up OpenCode event listeners');
+
+    const unwrapBatch = <T,>(payload: unknown): T[] => {
+      if (!payload) return [];
+      if (typeof payload === 'object' && payload !== null) {
+        const maybe = payload as { events?: unknown };
+        if (Array.isArray(maybe.events)) {
+          return maybe.events as T[];
+        }
+      }
+      return [payload as T];
+    };
 
     // Handle incoming messages
     const removeMessageListener = window.flowstate.opencode.onMessage((message: OpenCodeMessage) => {
-      console.log('Received message:', message);
+      if (DEV) {
+        console.log(
+          '[Renderer] Received message:',
+          message.id,
+          'role:',
+          message.role,
+          'content length:',
+          message.content?.length
+        );
+      }
       addAssistantMessage(message);
     });
 
     // Handle progress updates
     const removeProgressListener = window.flowstate.opencode.onProgress((progress: OpenCodeProgress) => {
-      console.log('Progress update:', progress);
+      if (DEV) console.log('Progress update:', progress);
       setStatus(progress.status);
       if (progress.sessionId) {
         setCurrentSessionId(progress.sessionId);
@@ -64,16 +132,31 @@ export function useOpenCode() {
 
     // Handle errors
     const removeErrorListener = window.flowstate.opencode.onError((err: OpenCodeError) => {
-      console.error('OpenCode error:', err);
-      setError(err.error);
+      if (DEV) console.error('[Renderer] OpenCode error:', err);
+      setError(formatOpenCodeError(err));
     });
 
     // Handle general events
     const removeEventListener = window.flowstate.opencode.onEvent((event) => {
-      console.log('OpenCode event:', event);
+      if (!DEV) return;
+      for (const item of unwrapBatch(event)) {
+        console.log('OpenCode event:', item);
+      }
     });
 
-    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((event: TimelineEvent) => {
+    const refreshChatMessagesForSession = async (sessionId?: string) => {
+      if (!sessionId) return;
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+      try {
+        const messages = await window.flowstate.opencode.getMessages();
+        loadMessages(messages);
+      } catch (err) {
+        console.error('Failed to refresh chat messages after task completion:', err);
+      }
+    };
+
+    const applyTimelineEvent = (event: TimelineEvent) => {
       addTimelineEvent(event);
       if (event.kind === 'status' && event.title === 'Task promoted') {
         setHandoffTaskFromTimeline(event);
@@ -93,10 +176,58 @@ export function useOpenCode() {
 
       if (event.kind === 'status' && event.title === 'Task completed') {
         updateActiveTask({ status: 'completed' });
+        void refreshChatMessagesForSession(event.sessionId);
       }
 
       if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
         updateActiveTask({ summary: event.detail, summarySent: false });
+      }
+    };
+
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload) => {
+      const events = unwrapBatch<TimelineEvent>(payload);
+      if (events.length === 0) return;
+
+      // Preserve existing behavior for single events.
+      if (events.length === 1) {
+        applyTimelineEvent(events[0]!);
+        return;
+      }
+
+      // Batch path: update timeline store once per flush.
+      const store = useChatStore.getState();
+      const mergedTimeline = [...store.timeline, ...events].slice(-200);
+      store.loadTimelineEvents(mergedTimeline);
+
+      let nextStatus: TaskRun['status'] | null = null;
+      let nextSummary: string | null = null;
+
+      // Compute final task state based on in-batch ordering.
+      for (const event of events) {
+        if (event.kind === 'approval_request') nextStatus = 'waiting_approval';
+        if (event.kind === 'approval_response') nextStatus = 'running';
+        if (event.kind === 'error') nextStatus = 'failed';
+
+        if (event.kind === 'status' && event.title === 'Task completed') nextStatus = 'completed';
+        if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
+          nextSummary = event.detail;
+        }
+      }
+
+      const updates: Partial<TaskRun> = {};
+      if (nextStatus) updates.status = nextStatus;
+      if (nextSummary) {
+        updates.summary = nextSummary;
+        updates.summarySent = false;
+      }
+
+      if (Object.keys(updates).length > 0) store.updateActiveTask(updates);
+
+      if (events.some((event) => event.kind === 'status' && event.title === 'Task completed')) {
+        const completedSessionId = events.find(
+          (event) => event.kind === 'status' && event.title === 'Task completed'
+        )?.sessionId;
+        void refreshChatMessagesForSession(completedSessionId);
       }
     });
 
@@ -105,7 +236,7 @@ export function useOpenCode() {
 
     // Cleanup on unmount
     return () => {
-      console.log('Cleaning up OpenCode event listeners');
+      if (DEV) console.log('Cleaning up OpenCode event listeners');
       removeMessageListener();
       removeProgressListener();
       removeErrorListener();
@@ -113,45 +244,44 @@ export function useOpenCode() {
       removeTimelineListener();
       listenersInitialized = false;
     };
-  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus]);
+  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError, loadMessages]);
 
-  useEffect(() => {
-    if (activeTask?.status === 'completed' && activeTask.summary && !activeTask.summarySent) {
-      addAssistantMessage({
-        id: `summary-${Date.now()}`,
-        role: 'assistant',
-        content: activeTask.summary,
-        timestamp: new Date().toISOString(),
-      });
-      updateActiveTask({ summarySent: true });
-    }
-  }, [activeTask, addAssistantMessage, updateActiveTask]);
+  // Note: We intentionally do not auto-inject task summaries into chat.
+  // The chat response already arrives via `opencode:message`, and injecting the
+  // timeline-derived summary creates duplicate assistant messages.
 
   /**
    * Send a message to OpenCode
    */
   const sendMessage = useCallback(async (content: string) => {
+    if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
 
     if (activeTask && activeTask.status === 'running') {
+      if (DEV) console.log('[Renderer] Task already running, blocking message');
       setError('Another task is already running for this conversation.');
       return { success: false, error: 'Task already running' };
     }
 
     // Add user message to store immediately
+    if (DEV) console.log('[Renderer] Adding user message to store');
     addUserMessage(content);
 
     try {
       // Send to OpenCode (response comes via events)
+      if (DEV) console.log('[Renderer] Calling window.flowstate.opencode.send()...');
       const result = await window.flowstate.opencode.send(content);
+      if (DEV) console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
-        setError(result.error);
+        if (DEV) console.error('[Renderer] OpenCode returned error:', result.error);
+        const formattedError = formatOpenCodeError(result.errorDetails ?? result.error);
+        setError(formattedError);
         // Add error message as assistant response
         addAssistantMessage({
           id: `error-${Date.now()}`,
           role: 'assistant',
-          content: result.content || `Error: ${result.error}`,
+          content: result.content || formattedError,
           timestamp: new Date().toISOString(),
         });
         return { success: false, error: result.error };
@@ -159,11 +289,14 @@ export function useOpenCode() {
 
       return { success: true };
     } catch (err) {
-      console.error('Failed to send message:', err);
-      setError(err instanceof Error ? err.message : 'Failed to send message');
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to send message' };
+      if (DEV) console.error('Failed to send message:', err);
+      const formattedError = formatOpenCodeError(
+        err instanceof Error ? err.message : 'Failed to send message'
+      );
+      setError(formattedError);
+      return { success: false, error: formattedError };
     }
-  }, [activeTask, addUserMessage, setError, addAssistantMessage]);
+  }, [activeTask, addUserMessage, setError, addAssistantMessage, formatOpenCodeError]);
 
   /**
    * Create a new session

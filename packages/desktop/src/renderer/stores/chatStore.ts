@@ -130,11 +130,21 @@ export const useChatStore = create<ChatState>((set) => ({
       timestamp: new Date(openCodeMessage.timestamp),
       parts: openCodeMessage.parts,
     };
-    set((state) => ({
-      messages: [...state.messages, message],
-      isLoading: false,
-      status: 'idle',
-    }));
+
+    set((state) => {
+      if (state.messages.some((existing) => existing.id === message.id)) {
+        return {
+          isLoading: false,
+          status: 'idle',
+        };
+      }
+
+      return {
+        messages: [...state.messages, message],
+        isLoading: false,
+        status: 'idle',
+      };
+    });
   },
 
   addTimelineEvent: (event) => {

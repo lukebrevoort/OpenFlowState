@@ -18,7 +18,6 @@ import {
   AuthMethod,
   AuthOption,
 } from "../stores/integrationsStore";
-import type { AuthStatus } from "../types/electron";
 
 /**
  * Auth Method Selector - Choose between OAuth and API Token
@@ -304,6 +303,319 @@ function ApiTokenForm({
 }
 
 /**
+ * Canvas Connection Form
+ *
+ * Supports:
+ * - API Token auth
+ * - Browser Login auth (no token) via Playwright storage state
+ */
+function CanvasConnectionForm({
+  onSubmit,
+  isLoading,
+}: {
+  onSubmit: (apiToken: string, additionalData: Record<string, string>) => void;
+  isLoading: boolean;
+}) {
+  const [authMode, setAuthMode] = useState<"token" | "browser">("token");
+  const [apiUrl, setApiUrl] = useState("");
+  const [apiToken, setApiToken] = useState("");
+  const [storageStatePath, setStorageStatePath] = useState("");
+  const [browserLoginRunning, setBrowserLoginRunning] = useState(false);
+  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
+  const [browserLoginConfirmPath, setBrowserLoginConfirmPath] = useState<string | null>(null);
+  const [browserLoginAwaitingConfirm, setBrowserLoginAwaitingConfirm] = useState(false);
+
+  const handlePickStoragePath = async () => {
+    const defaultPath = `canvas.json`;
+    const picked = await window.flowstate.app.showSaveDialog({
+      title: "Choose Canvas session file",
+      defaultPath,
+    });
+    if (picked) {
+      setStorageStatePath(picked);
+    }
+  };
+
+  const handlePickStorageFolder = async () => {
+    const picked = await window.flowstate.app.showOpenDialog({
+      title: "Choose folder for Canvas session file",
+    });
+    if (picked) {
+      const normalized = picked.replace(/\/+$/g, "");
+      setStorageStatePath(`${normalized}/canvas.json`);
+    }
+  };
+
+  const canSubmit =
+    apiUrl.trim().length > 0 &&
+    (authMode === "token"
+      ? apiToken.trim().length > 0
+      : storageStatePath.trim().length > 0);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!canSubmit) return;
+
+    if (authMode === "browser") {
+      setBrowserLoginRunning(true);
+      setBrowserLoginError(null);
+      const trimmedUrl = apiUrl.trim();
+      let trimmedPath = storageStatePath.trim();
+      if (trimmedPath && !trimmedPath.endsWith(".json")) {
+        trimmedPath = `${trimmedPath.replace(/\/+$/g, "")}/canvas.json`;
+      }
+
+      const ensureResult = await window.flowstate.app.ensureFile(trimmedPath);
+      if (!ensureResult.success) {
+        setBrowserLoginRunning(false);
+        setBrowserLoginError(ensureResult.error ?? "Failed to create storage file");
+        return;
+      }
+
+      const confirmPath = `${trimmedPath}.ready-${Date.now()}`;
+      setBrowserLoginConfirmPath(confirmPath);
+      setBrowserLoginAwaitingConfirm(true);
+
+      const result = await window.flowstate.canvas.browserLogin({
+        canvasApiUrl: trimmedUrl,
+        storageStatePath: trimmedPath,
+        confirmationFilePath: confirmPath,
+      });
+
+      setBrowserLoginRunning(false);
+      setBrowserLoginAwaitingConfirm(false);
+
+      if (!result.success) {
+        setBrowserLoginError(result.error ?? "Canvas login failed");
+        return;
+      }
+
+      onSubmit("", {
+        canvasApiUrl: trimmedUrl,
+        canvasAuthMode: "browser",
+        canvasStorageStatePath: trimmedPath,
+      });
+      return;
+    }
+
+    onSubmit(apiToken.trim(), {
+      canvasApiUrl: apiUrl.trim(),
+      canvasAuthMode: "token",
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Inline auth mode selector */}
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-foreground">
+          Canvas authentication
+        </label>
+        <div className="grid grid-cols-1 gap-2">
+          <button
+            type="button"
+            onClick={() => setAuthMode("token")}
+            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
+              authMode === "token"
+                ? "border-primary bg-primary/10"
+                : "border-border hover:border-primary/50"
+            }`}
+          >
+            <Key className="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">API Token</p>
+              <p className="text-xs text-muted-foreground">
+                Paste a Canvas access token from Account Settings.
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAuthMode("browser")}
+            className={`flex items-start gap-3 p-3 rounded-lg border text-left transition-all ${
+              authMode === "browser"
+                ? "border-primary bg-primary/10"
+                : "border-border hover:border-primary/50"
+            }`}
+          >
+            <Shield className="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <p className="font-medium text-foreground">
+                Browser Login (No token)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Use a Playwright storage state file created by the Canvas MCP tool
+                <span className="font-mono"> canvas_auth_browser_login</span>.
+              </p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Instructions */}
+      {authMode === "token" ? (
+        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+          <h3 className="text-sm font-medium text-foreground mb-2">
+            Canvas API Token Setup
+          </h3>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Log in to your Canvas LMS instance</li>
+            <li>Go to Account → Settings</li>
+            <li>Scroll to "Approved Integrations"</li>
+            <li>Click "New Access Token"</li>
+            <li>Copy the generated token</li>
+          </ol>
+        </div>
+      ) : (
+        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+          <h3 className="text-sm font-medium text-foreground mb-2">
+            Browser Login Setup
+          </h3>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Enter your Canvas URL and choose a storage state path below</li>
+            <li>Click "Start Browser Login" to open a Canvas login window</li>
+            <li>Complete login (including MFA if needed)</li>
+            <li>FlowState will save the session to the storage state path</li>
+          </ol>
+          <p className="text-xs text-muted-foreground mt-2">
+            This avoids storing a token and uses your browser session instead.
+          </p>
+        </div>
+      )}
+
+      <div>
+        <label
+          htmlFor="canvasApiUrl"
+          className="block text-sm font-medium text-foreground mb-1"
+        >
+          Canvas Instance URL
+        </label>
+        <input
+          id="canvasApiUrl"
+          type="url"
+          value={apiUrl}
+          onChange={(e) => setApiUrl(e.target.value)}
+          placeholder="https://your-school.instructure.com"
+          className="fs-input"
+          required
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          The URL of your Canvas LMS instance
+        </p>
+      </div>
+
+      {authMode === "token" ? (
+        <div>
+          <label
+            htmlFor="canvasApiToken"
+            className="block text-sm font-medium text-foreground mb-1"
+          >
+            Canvas API Token
+          </label>
+          <input
+            id="canvasApiToken"
+            type="password"
+            value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+            placeholder="Enter your Canvas API token"
+            className="fs-input font-mono text-sm"
+            required
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Generated from Canvas Settings → Approved Integrations
+          </p>
+        </div>
+      ) : (
+        <div>
+          <label
+            htmlFor="canvasStorageStatePath"
+            className="block text-sm font-medium text-foreground mb-1"
+          >
+            Storage State Path
+          </label>
+          <input
+            id="canvasStorageStatePath"
+            type="text"
+            value={storageStatePath}
+            onChange={(e) => setStorageStatePath(e.target.value)}
+            placeholder="/Users/you/Library/Application Support/FlowState/canvas.json"
+            className="fs-input font-mono text-sm"
+            required
+          />
+          <button
+            type="button"
+            onClick={handlePickStoragePath}
+            className="mt-2 fs-button-secondary text-xs"
+          >
+            Pick file location
+          </button>
+          <button
+            type="button"
+            onClick={handlePickStorageFolder}
+            className="mt-2 fs-button-secondary text-xs"
+          >
+            Pick folder
+          </button>
+          <p className="text-xs text-muted-foreground mt-1">
+            Absolute path where FlowState will save canvas.json
+          </p>
+        </div>
+      )}
+
+      {authMode === "browser" && browserLoginAwaitingConfirm && browserLoginConfirmPath && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+          <p>
+            When you are fully logged in and on your Canvas dashboard, click the button below.
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              const result = await window.flowstate.app.ensureFile(browserLoginConfirmPath);
+              if (!result.success) {
+                setBrowserLoginError(result.error ?? "Failed to confirm login");
+              }
+            }}
+            className="fs-button-secondary text-xs"
+          >
+            I am on the dashboard
+          </button>
+        </div>
+      )}
+
+      {browserLoginError && (
+        <div className="text-xs text-destructive">
+          {browserLoginError}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="w-full fs-button-primary flex items-center justify-center gap-2"
+        disabled={isLoading || browserLoginRunning || !canSubmit}
+      >
+        {isLoading || browserLoginRunning ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            {authMode === "browser" ? "Opening browser..." : "Connecting..."}
+          </>
+        ) : (
+          <>
+            {authMode === "token" ? (
+              <Key className="w-4 h-4" />
+            ) : (
+              <Shield className="w-4 h-4" />
+            )}
+            {authMode === "browser" ? "Start Browser Login" : "Connect Canvas LMS"}
+          </>
+        )}
+      </button>
+    </form>
+  );
+}
+
+/**
  * Connection Modal - Handles both OAuth and API Token flows
  */
 function ConnectionModal({
@@ -315,8 +627,8 @@ function ConnectionModal({
 }: {
   integration: Integration;
   onClose: () => void;
-  onOAuthSubmit: (clientId: string, clientSecret: string) => void;
-  onApiTokenSubmit: (apiToken: string) => void;
+  onOAuthSubmit: (service: string, clientId: string, clientSecret: string) => void;
+  onApiTokenSubmit: (service: string, apiToken: string, additionalData?: Record<string, string>) => void;
   isLoading: boolean;
 }) {
   const [selectedMethod, setSelectedMethod] = useState<AuthMethod | null>(
@@ -367,7 +679,17 @@ function ConnectionModal({
             />
           )}
 
-          {selectedMethod === "api_token" && (
+          {selectedMethod === "api_token" && integration.id === "canvas" && (
+            <CanvasConnectionForm
+              onSubmit={(apiToken, additionalData) => {
+                onApiTokenSubmit(integration.id, apiToken, additionalData);
+                onClose();
+              }}
+              isLoading={isLoading}
+            />
+          )}
+
+          {selectedMethod === "api_token" && integration.id !== "canvas" && (
             <ApiTokenForm
               onSubmit={(apiToken) => {
                 onApiTokenSubmit(integration.id, apiToken);
@@ -418,9 +740,6 @@ function IntegrationsMode() {
   const [showModal, setShowModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] =
     useState<Integration | null>(null);
-  const [authStatuses, setAuthStatuses] = useState<
-    Record<string, AuthStatus>
-  >({});
 
   useEffect(() => {
     if (!showModal) {
@@ -453,8 +772,8 @@ function IntegrationsMode() {
     await connectOAuth(service, clientId, clientSecret);
   };
 
-  const handleApiTokenSubmit = async (service: string, apiToken: string) => {
-    await connectApiToken(service, apiToken);
+  const handleApiTokenSubmit = async (service: string, apiToken: string, additionalData?: Record<string, string>) => {
+    await connectApiToken(service, apiToken, additionalData);
   };
 
   const handleDisconnect = async (service: string) => {
@@ -464,23 +783,6 @@ function IntegrationsMode() {
   const handleRefresh = () => {
     refresh();
   };
-
-  useEffect(() => {
-    const fetchStatuses = async () => {
-      try {
-        const statuses = await window.flowstate.auth.getAllStatuses();
-        const map: Record<string, AuthStatus> = {};
-        statuses.forEach((status) => {
-          map[status.service] = status;
-        });
-        setAuthStatuses(map);
-      } catch (error) {
-        console.error("Failed to fetch auth statuses:", error);
-      }
-    };
-
-    fetchStatuses();
-  }, [integrations, isLoading, connectingService]);
 
   // Separate integrations
   const officialIntegrations = integrations.filter((i) => i.isOfficial);

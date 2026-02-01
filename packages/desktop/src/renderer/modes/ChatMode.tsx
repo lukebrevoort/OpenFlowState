@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
+import { Send, Sparkles, AlertCircle, RefreshCw, Plus } from "lucide-react";
 import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
@@ -33,36 +34,216 @@ const getTypingStepSize = (contentLength: number) => {
   if (contentLength < 700) return 10;
   return 14;
 };
+
+const MAX_INPUT_HEIGHT = 128;
+
+const renderMessageParts = (parts?: Message["parts"]) => {
+  if (!parts || parts.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {parts.map((part, index) => (
+        <span
+          key={`${part.type}-${index}`}
+          className="flex items-center gap-1 rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
+        >
+          <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
+            {part.type.replace(/_/g, " ")}
+          </span>
+          {part.text && (
+            <span className="text-[11px] opacity-80">
+              {part.text.length > 40 ? `${part.text.slice(0, 40)}…` : part.text}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+};
+
+const formatContent = (content: string) => {
+  const parts = content.split(/(```[\s\S]*?```)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("```")) {
+      const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
+      return (
+        <pre
+          key={index}
+          className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
+        >
+          <code>{code}</code>
+        </pre>
+      );
+    }
+
+    const lines = part.split("\n");
+
+    return (
+      <span key={index}>
+        {lines.map((line, lineIndex) => {
+          if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
+            return (
+              <div key={lineIndex} className="flex gap-2 my-1">
+                <span className="text-primary">•</span>
+                <span
+                  className="text-foreground"
+                  dangerouslySetInnerHTML={{
+                    __html: line
+                      .replace(/^[•-]\s*/, "")
+                      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
+                  }}
+                />
+              </div>
+            );
+          }
+
+          return (
+            <span key={lineIndex}>
+              <span
+                className="text-foreground"
+                dangerouslySetInnerHTML={{
+                  __html: line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
+                }}
+              />
+              {lineIndex < lines.length - 1 && <br />}
+            </span>
+          );
+        })}
+      </span>
+    );
+  });
+};
+
+const AssistantMessageContent = ({
+  message,
+  animatedMessagesRef,
+}: {
+  message: Message;
+  animatedMessagesRef: MutableRefObject<Set<string>>;
+}) => {
+  const shouldAnimate = !animatedMessagesRef.current.has(message.id);
+  const [visibleText, setVisibleText] = useState(
+    shouldAnimate ? "" : message.content,
+  );
+  const [isComplete, setIsComplete] = useState(!shouldAnimate);
+
+  useEffect(() => {
+    if (!shouldAnimate) {
+      setVisibleText(message.content);
+      setIsComplete(true);
+      return;
+    }
+
+    let currentIndex = 0;
+    const step = getTypingStepSize(message.content.length);
+    let timeoutId: number | null = null;
+
+    const tick = () => {
+      currentIndex = Math.min(message.content.length, currentIndex + step);
+      setVisibleText(message.content.slice(0, currentIndex));
+
+      if (currentIndex < message.content.length) {
+        timeoutId = window.setTimeout(tick, 22);
+      } else {
+        setIsComplete(true);
+        animatedMessagesRef.current.add(message.id);
+      }
+    };
+
+    tick();
+
+    return () => {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [message.content, message.id, shouldAnimate, animatedMessagesRef]);
+
+  if (!isComplete) {
+    return (
+      <span className="whitespace-pre-wrap">
+        {visibleText}
+        <span className="inline-block w-2 animate-pulse text-primary">▍</span>
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {formatContent(message.content)}
+      {renderMessageParts(message.parts)}
+    </>
+  );
+};
 /**
  * ChatMode - Primary chat interface for natural language interaction with OpenCode
  */
 function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const [mcpStatus, setMcpStatus] = useState<Record<
     string,
     McpServerStatus
   > | null>(null);
-  const [activitySteps, setActivitySteps] = useState<ReturnType<typeof initialActivitySteps>>([]);
+  const [activitySteps, setActivitySteps] = useState<
+    ReturnType<typeof initialActivitySteps>
+  >([]);
   const [activityIndex, setActivityIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
   const animatedMessagesRef = useRef(new Set<string>());
+  const initialMessagesRef = useRef(false);
 
-  const {
-    messages,
-    isLoading,
-    status,
-    error,
-    currentSessionId,
-    handoffTask,
-    timeline,
-  } = useChatStore();
-  const { sendMessage, checkStatus, refreshTimeline } = useOpenCode();
+  const messages = useChatStore((state) => state.messages);
+  const isLoading = useChatStore((state) => state.isLoading);
+  const status = useChatStore((state) => state.status);
+  const error = useChatStore((state) => state.error);
+  const currentSessionId = useChatStore((state) => state.currentSessionId);
+  const handoffTask = useChatStore((state) => state.handoffTask);
+  const timeline = useChatStore((state) => state.timeline);
+  const { sendMessage, checkStatus, refreshTimeline, createSession } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
+  const scrollToBottom = (behavior: ScrollBehavior) => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  };
+
+  const updateStickToBottom = () => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 64;
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Avoid `scrollIntoView` which can scroll the window/body when content grows.
+    // Only auto-scroll when the user is already near the bottom.
+    if (!shouldStickToBottomRef.current) return;
+    scrollToBottom(status === "thinking" || isLoading ? "auto" : "smooth");
+  }, [messages, status, isLoading]);
+
+  useEffect(() => {
+    if (initialMessagesRef.current) return;
+    messages.forEach((message) => animatedMessagesRef.current.add(message.id));
+    initialMessagesRef.current = true;
   }, [messages]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    const nextHeight = Math.min(textarea.scrollHeight, MAX_INPUT_HEIGHT);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY =
+      textarea.scrollHeight > MAX_INPUT_HEIGHT ? "auto" : "hidden";
+  }, [input]);
 
   useEffect(() => {
     checkStatus();
@@ -101,7 +282,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     if (!window.flowstate?.opencode?.onEvent) return undefined;
 
     const removeEvent = window.flowstate.opencode.onEvent((event) => {
-      if (status !== 'thinking') return;
+      if (status !== "thinking") return;
       const step = stepFromOpenCodeEvent(event);
       if (!step) return;
       setActivitySteps((prev) => mergeActivityStep(prev, step));
@@ -147,6 +328,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     const message = input.trim();
     setInput("");
 
+    // User intent: keep the latest messages in view after sending.
+    shouldStickToBottomRef.current = true;
+    scrollToBottom("auto");
+
     const result = await sendMessage(message);
     if (result?.success) {
       refreshTimeline();
@@ -164,17 +349,19 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     checkStatus();
   };
 
-  const statusLabel = statusLabels[status] ?? statusLabels.idle;
-  const statusDotClass =
-    status === "error"
-      ? "bg-destructive"
-      : status === "thinking"
-        ? "bg-[#C87137]"
-        : "bg-[#A5B574]";
+  const handleNewChat = async () => {
+    try {
+      await createSession();
+      setInput("");
+      shouldStickToBottomRef.current = true;
+      scrollToBottom("auto");
+      textareaRef.current?.focus();
+    } catch (err) {
+      console.error("Failed to create new chat session", err);
+    }
+  };
 
-  const openCodeLabel = openCodeStatus?.running
-    ? "OpenCode running"
-    : "OpenCode offline";
+  const statusLabel = statusLabels[status] ?? statusLabels.idle;
   const sessionLabel = currentSessionId
     ? `Session ${currentSessionId}`
     : "Session pending";
@@ -206,149 +393,37 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     0,
   );
 
-  const renderMessageParts = (parts?: Message["parts"]) => {
-    if (!parts || parts.length === 0) return null;
+  const showThinking = status === "thinking" || isLoading;
 
-    return (
-      <div className="mt-3 flex flex-wrap gap-2">
-        {parts.map((part, index) => (
-          <span
-            key={`${part.type}-${index}`}
-            className="flex items-center gap-1 rounded-full border border-border bg-muted/60 px-3 py-1 text-[11px] font-medium text-secondary-foreground"
-          >
-            <span className="uppercase tracking-wide text-[10px] text-muted-foreground">
-              {part.type.replace(/_/g, " ")}
+  const ThinkingIndicator = () => (
+    <div className="w-full flex justify-start">
+      <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-card border border-border text-foreground backdrop-blur-xl shadow-sm">
+        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-border">
+          <Sparkles className="w-4 h-4 text-primary" />
+          <span className="text-sm font-medium text-primary">FlowState</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="sr-only">Thinking</span>
+
+          <div className="flex justify-center items-center h-4 w-4">
+            <span
+              className="flex items-center justify-center  gap-1"
+              aria-hidden="true"
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.2s]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.1s]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
             </span>
-            {part.text && (
-              <span className="text-[11px] opacity-80">
-                {part.text.length > 40
-                  ? `${part.text.slice(0, 40)}…`
-                  : part.text}
-              </span>
-            )}
-          </span>
-        ))}
+          </div>
+        </div>
       </div>
-    );
-  };
-
-  const AssistantMessageContent = ({ message }: { message: Message }) => {
-    const shouldAnimate = !animatedMessagesRef.current.has(message.id);
-    const [visibleText, setVisibleText] = useState(
-      shouldAnimate ? "" : message.content,
-    );
-    const [isComplete, setIsComplete] = useState(!shouldAnimate);
-
-    useEffect(() => {
-      if (!shouldAnimate) {
-        setVisibleText(message.content);
-        setIsComplete(true);
-        return;
-      }
-
-      let currentIndex = 0;
-      const step = getTypingStepSize(message.content.length);
-      let timeoutId: number | null = null;
-
-      const tick = () => {
-        currentIndex = Math.min(message.content.length, currentIndex + step);
-        setVisibleText(message.content.slice(0, currentIndex));
-
-        if (currentIndex < message.content.length) {
-          timeoutId = window.setTimeout(tick, 22);
-        } else {
-          setIsComplete(true);
-          animatedMessagesRef.current.add(message.id);
-        }
-      };
-
-      tick();
-
-      return () => {
-        if (timeoutId) {
-          window.clearTimeout(timeoutId);
-        }
-      };
-    }, [message.content, message.id, shouldAnimate]);
-
-    if (!isComplete) {
-      return (
-        <span className="whitespace-pre-wrap">
-          {visibleText}
-          <span className="inline-block w-2 animate-pulse text-primary">▍</span>
-        </span>
-      );
-    }
-
-    return (
-      <>
-        {formatContent(message.content)}
-        {renderMessageParts(message.parts)}
-      </>
-    );
-  };
-
-  const formatContent = (content: string) => {
-    const parts = content.split(/(```[\s\S]*?```)/g);
-
-    return parts.map((part, index) => {
-      if (part.startsWith("```")) {
-        const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
-        return (
-          <pre
-            key={index}
-            className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
-          >
-            <code>{code}</code>
-          </pre>
-        );
-      }
-
-      const lines = part.split("\n");
-
-      return (
-        <span key={index}>
-          {lines.map((line, lineIndex) => {
-            if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
-              return (
-                <div key={lineIndex} className="flex gap-2 my-1">
-                  <span className="text-primary">•</span>
-                  <span
-                    className="text-foreground"
-                    dangerouslySetInnerHTML={{
-                      __html: line
-                        .replace(/^[•-]\s*/, "")
-                        .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-                    }}
-                  />
-                </div>
-              );
-            }
-
-            return (
-              <span key={lineIndex}>
-                <span
-                  className="text-foreground"
-                  dangerouslySetInnerHTML={{
-                    __html: line.replace(
-                      /\*\*(.*?)\*\*/g,
-                      "<strong>$1</strong>",
-                    ),
-                  }}
-                />
-                {lineIndex < lines.length - 1 && <br />}
-              </span>
-            );
-          })}
-        </span>
-      );
-    });
-  };
+    </div>
+  );
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-shrink-0 px-6 pt-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-4">
@@ -370,8 +445,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                   </p>
                 </div>
               </div>
-              <div className="text-xs text-muted-foreground text-right">
+              <div className="flex flex-col items-end gap-2 text-xs text-muted-foreground text-right">
                 <p>{providerLabel}</p>
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New chat
+                </button>
               </div>
             </div>
             {activityDetail && (
@@ -431,7 +514,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
           <div className="flex-1">
             <p className="text-sm text-destructive font-medium">
-              Connection Error
+              Assistant Error
             </p>
             <p className="text-xs text-muted-foreground">{error}</p>
           </div>
@@ -445,16 +528,20 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
-        <div className="max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
+        <div
+          ref={messagesScrollRef}
+          onScroll={updateStickToBottom}
+          className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-4 pb-24 scroll-pb-24 scrollbar-hide"
+        >
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`w-full flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
                 className={`max-w-[70%] rounded-2xl px-4 py-3 ${
                   message.role === "user"
-                    ? "bg-card border border-border text-primary-foreground shadow-sm"
+                    ? "bg-card border border-border text-foreground shadow-sm"
                     : "bg-card border border-border text-foreground backdrop-blur-xl"
                 }`}
               >
@@ -468,17 +555,20 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 )}
                 <div className="text-sm leading-relaxed">
                   {message.role === "user" ? (
-                    <span className="whitespace-pre-wrap">
+                    <span className="whitespace-pre-wrap break-words text-foreground">
                       {message.content}
                     </span>
                   ) : (
-                    <AssistantMessageContent message={message} />
+                    <AssistantMessageContent
+                      message={message}
+                      animatedMessagesRef={animatedMessagesRef}
+                    />
                   )}
                 </div>
                 <div
                   className={`text-xs mt-2 ${
                     message.role === "user"
-                      ? "text-primary-foreground/70"
+                      ? "text-foreground/70"
                       : "text-muted-foreground"
                   }`}
                 >
@@ -491,13 +581,15 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
             </div>
           ))}
 
+          {showThinking && <ThinkingIndicator />}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {handoffTask && (
         <div className="px-6 pb-4">
-          <div className="max-w-4xl mx-auto">
+          <div className="w-full max-w-4xl mx-auto">
             <TaskHandoffCard
               title={handoffTask.title}
               description={handoffTask.description}
@@ -508,17 +600,18 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-shrink-0 px-6 pb-6">
-        <div className="max-w-4xl mx-auto">
+        <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-end gap-3">
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Type your message..."
                 rows={1}
                 disabled={isLoading}
-                className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 disabled:opacity-50"
+                className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 overflow-y-auto disabled:opacity-50"
                 style={{ minHeight: "24px" }}
               />
               <button
