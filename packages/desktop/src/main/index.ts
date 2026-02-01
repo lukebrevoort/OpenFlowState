@@ -15,12 +15,14 @@ import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
 import { timelineStore } from './timeline-store.js';
+import { taskStore } from './task-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import type { ApprovalReply } from './approval-policy-store.js';
 import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { workflowsRunner } from './workflows-runner.js';
 import { workflowsGenerator } from './workflows-generator.js';
+import { toRendererTaskRun } from './task-types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -445,6 +447,25 @@ ipcMain.handle(
 );
 
 /**
+ * Re-authenticate a service using stored credentials
+ */
+ipcMain.handle('auth:reauthenticate', async (_event, service: string) => {
+  try {
+    const credentials = await authManager.getClientCredentials(service);
+    if (!credentials?.clientId || !credentials?.clientSecret) {
+      throw new Error(`Missing stored credentials for ${service}`);
+    }
+
+    const token = await oauthServer.startOAuth(service, credentials.clientId, credentials.clientSecret);
+    await processManager.reloadMcpConfig();
+    return token;
+  } catch (error) {
+    console.error(`[Auth] Error re-authenticating ${service}:`, error);
+    throw error;
+  }
+});
+
+/**
  * Refresh token for a service
  */
 ipcMain.handle('oauth:refresh', async (_event, service: string) => {
@@ -582,14 +603,6 @@ ipcMain.handle('opencode:restart', async () => {
 // Phase 3.5 - Feature-level IPC surfaces (typed via renderer/types/electron.d.ts)
 // ============================================================================
 
-const notImplemented = <T>(feature: string): IpcResult<T> => ({
-  ok: false,
-  error: {
-    code: 'NOT_IMPLEMENTED',
-    message: `${feature} is not available yet.`,
-  },
-});
-
 const ipcError = <T>(code: IpcError['code'], message: string, details?: unknown): IpcResult<T> => ({
   ok: false,
   error: {
@@ -661,6 +674,11 @@ const configureTimelineStore = (): void => {
   // Avoid initializing with DEFAULT_DATA_DIR before ProcessManager has a chance
   // to point the store at the app userData dir.
   timelineStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureTaskStore = (): void => {
+  // Keep Tasks persisted alongside TimelineStore in the same memory.db.
+  taskStore.configure({ dataDir: configStore.getDataDir() });
 };
 
 ipcMain.handle('settings:get', async () => {
@@ -880,11 +898,25 @@ ipcMain.handle('chat:getMessages', async () => {
 });
 
 ipcMain.handle('tasks:listRuns', async () => {
-  return notImplemented<TaskRun[]>('tasks:listRuns');
+  try {
+    configureTaskStore();
+    const runs = taskStore.listRuns({ limit: 100, offset: 0 });
+    return ipcOk<TaskRun[]>(runs.map(toRendererTaskRun));
+  } catch (error) {
+    console.warn('[IPC] Failed to list task runs:', error);
+    return ipcError<TaskRun[]>('UNKNOWN', 'Failed to list task runs.');
+  }
 });
 
 ipcMain.handle('tasks:getActiveRun', async () => {
-  return notImplemented<TaskRun | null>('tasks:getActiveRun');
+  try {
+    configureTaskStore();
+    const record = taskStore.getActiveRun({ sessionId: processManager.sessionId ?? undefined });
+    return ipcOk<TaskRun | null>(record ? toRendererTaskRun(record) : null);
+  } catch (error) {
+    console.warn('[IPC] Failed to get active task run:', error);
+    return ipcError<TaskRun | null>('UNKNOWN', 'Failed to get active task run.');
+  }
 });
 
 ipcMain.handle('workflows:list', async () => {

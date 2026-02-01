@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { Send, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
+import { Send, Sparkles, AlertCircle, RefreshCw, Plus } from "lucide-react";
 import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
@@ -204,7 +204,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
-  const { sendMessage, checkStatus, refreshTimeline } = useOpenCode();
+  const { sendMessage, checkStatus, refreshTimeline, createSession } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
   const scrollToBottom = (behavior: ScrollBehavior) => {
@@ -349,6 +349,18 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     checkStatus();
   };
 
+  const handleNewChat = async () => {
+    try {
+      await createSession();
+      setInput("");
+      shouldStickToBottomRef.current = true;
+      scrollToBottom("auto");
+      textareaRef.current?.focus();
+    } catch (err) {
+      console.error("Failed to create new chat session", err);
+    }
+  };
+
   const statusLabel = statusLabels[status] ?? statusLabels.idle;
   const sessionLabel = currentSessionId
     ? `Session ${currentSessionId}`
@@ -433,8 +445,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                   </p>
                 </div>
               </div>
-              <div className="text-xs text-muted-foreground text-right">
+              <div className="flex flex-col items-end gap-2 text-xs text-muted-foreground text-right">
                 <p>{providerLabel}</p>
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New chat
+                </button>
               </div>
             </div>
             {activityDetail && (

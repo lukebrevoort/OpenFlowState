@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import { approvalPolicyStore } from './approval-policy-store.js';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
 import { workflowsStore } from './workflows-store.js';
@@ -186,6 +187,17 @@ class WorkflowsRunner {
 
     const directory = processManager.getProjectDirectory?.() ?? undefined;
     const sessionId = processManager.sessionId ?? (await processManager.createSession('FlowState Workflows'));
+
+    try {
+      const optedIn = await approvalPolicyStore.getWorkflowOptIn(id);
+      if (optedIn) {
+        approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+      }
+    } catch (error) {
+      // Never block a workflow run on policy state.
+      console.warn('[WorkflowsRunner] Failed to apply per-workflow Always Approve:', error);
+    }
+
     const runId = randomUUID();
     const startedAt = Date.now();
 

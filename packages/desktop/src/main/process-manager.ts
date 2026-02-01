@@ -16,9 +16,13 @@ import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
+import { authManager } from './auth-manager.js';
+import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { taskStore } from './task-store.js';
+import type { TaskRunRecord } from './task-types.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -133,6 +137,8 @@ class ProcessManager {
   private eventStreamAbortController: AbortController | null = null;
   private flowstatePrompt: string | null = null;
   private timelineInitialized = false;
+  private reauthCooldown = new Map<string, number>();
+  private readonly reauthCooldownMs = 5 * 60 * 1000;
   private taskPromotionState = new Map<
     string,
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
@@ -146,6 +152,239 @@ class ProcessManager {
   private readonly timelineFlushMaxBatchSize = 250;
 
   private readonly defaultAgent = 'flowstate-assistant';
+
+  private extractToolService(payload: unknown): string | null {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const candidates = [record?.service, record?.tool, record?.toolName, record?.name, record?.provider];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const normalized = candidate.toLowerCase().trim();
+      if (!normalized) continue;
+      const prefix = normalized.split(/[._\s-]/)[0];
+      if (prefix && ['gmail', 'gcal', 'notion', 'canvas'].includes(prefix)) {
+        return prefix;
+      }
+    }
+    return null;
+  }
+
+  private extractErrorMessage(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const record = payload as Record<string, unknown>;
+    const candidates = [
+      record.error,
+      record.message,
+      record.reason,
+      record.summary,
+      record.detail,
+      (record.error && typeof record.error === 'object') ? (record.error as { message?: unknown }).message : undefined,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+    return null;
+  }
+
+  private isAuthErrorMessage(message: string | null): boolean {
+    if (!message) return false;
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('unauthorized') ||
+      normalized.includes('permission denied') ||
+      normalized.includes('authentication') ||
+      normalized.includes('invalid_grant') ||
+      normalized.includes('token expired')
+    );
+  }
+
+  private shouldAttemptReauth(service: string): boolean {
+    const lastAttempt = this.reauthCooldown.get(service) ?? 0;
+    return Date.now() - lastAttempt > this.reauthCooldownMs;
+  }
+
+  private async attemptReauth(service: string, webContents: Electron.WebContents, reason?: string) {
+    if (!this.shouldAttemptReauth(service)) return;
+    this.reauthCooldown.set(service, Date.now());
+
+    try {
+      const credentials = await authManager.getClientCredentials(service);
+      if (!credentials?.clientId || !credentials?.clientSecret) {
+        console.warn(`[Reauth] Missing stored credentials for ${service}`);
+        webContents.send('auth:reauthRequired', {
+          service,
+          reason: reason ?? 'Authentication expired',
+          missingCredentials: true,
+        });
+        return;
+      }
+
+      webContents.send('auth:reauthStarted', { service });
+      await oauthServer.startOAuth(service, credentials.clientId, credentials.clientSecret);
+      await this.reloadMcpConfig();
+      webContents.send('auth:reauthSuccess', { service });
+    } catch (error) {
+      console.error(`[Reauth] Failed to re-authenticate ${service}:`, error);
+      webContents.send('auth:reauthFailed', {
+        service,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private inferTaskRunId(sessionId: string, payload: unknown, fallbackTaskId?: string): string {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const taskIdFromPayload = record && typeof record.taskId === 'string' && record.taskId.trim().length > 0 ? record.taskId : undefined;
+    const candidate = taskIdFromPayload ?? fallbackTaskId;
+    return candidate && candidate.trim().length > 0 ? candidate : sessionId;
+  }
+
+  private inferTaskRunKind(payload: unknown): TaskRunRecord['kind'] {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const workflowId = record
+      ? (typeof record.workflowId === 'string' ? record.workflowId : typeof record.workflow_id === 'string' ? record.workflow_id : undefined)
+      : undefined;
+    return workflowId ? 'workflow' : 'chat';
+  }
+
+  private pickTaskText(
+    payload: unknown,
+    normalizedTitle: string,
+    normalizedDetail?: string
+  ): { title: string; description: string; summary?: string } {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const fromPayloadTitle = record && typeof record.title === 'string' ? record.title : undefined;
+    const fromPayloadDescription = record && typeof record.description === 'string' ? record.description : undefined;
+    const fromPayloadSummary = record && typeof record.summary === 'string' ? record.summary : undefined;
+    const fromPayloadMessage = record && typeof record.message === 'string' ? record.message : undefined;
+    const bestSummary = fromPayloadSummary ?? fromPayloadMessage;
+
+    // Prefer user intent text over lifecycle labels like "Task promoted".
+    const titleCandidate = fromPayloadTitle ?? (bestSummary ? clampMessage(bestSummary, 72) : undefined);
+    const title = titleCandidate && titleCandidate.trim().length > 0 ? titleCandidate.trim() : normalizedTitle;
+
+    const descriptionCandidate = fromPayloadDescription ?? bestSummary ?? normalizedDetail;
+    const description =
+      descriptionCandidate && descriptionCandidate.trim().length > 0
+        ? clampMessage(descriptionCandidate.trim(), 240)
+        : 'Working...';
+
+    return {
+      title,
+      description,
+      ...(bestSummary ? { summary: clampMessage(bestSummary, 600) } : {}),
+    };
+  }
+
+  private handleTaskStoreFromNormalizedEvent(
+    rawType: string,
+    normalized: {
+      event: { sessionId: string; taskId?: string; title: string; detail?: string; timestamp: number };
+      payload?: unknown;
+    },
+    sessionId: string
+  ): void {
+    try {
+      if (rawType === 'task.promoted') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const text = this.pickTaskText(normalized.payload, normalized.event.title, normalized.event.detail);
+
+        const run: TaskRunRecord = {
+          id,
+          sessionId,
+          kind: this.inferTaskRunKind(normalized.payload),
+          title: text.title,
+          description: text.description,
+          status: 'running',
+          startedAt: normalized.event.timestamp,
+          updatedAt: normalized.event.timestamp,
+          progress: 0,
+        };
+        taskStore.upsertRun(run);
+        return;
+      }
+
+      if (rawType === 'task.completed') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
+        if (!updated) {
+          const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
+          taskStore.upsertRun({
+            id,
+            sessionId,
+            kind: this.inferTaskRunKind(normalized.payload),
+            title: text.title,
+            description: text.description,
+            status: 'completed',
+            startedAt: normalized.event.timestamp,
+            updatedAt: normalized.event.timestamp,
+            progress: 100,
+          });
+        }
+        return;
+      }
+
+      if (rawType === 'task.summary') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const summary = (() => {
+          const record =
+            normalized.payload && typeof normalized.payload === 'object'
+              ? (normalized.payload as Record<string, unknown>)
+              : null;
+          const value = record && typeof record.summary === 'string' ? record.summary : undefined;
+          return value ?? normalized.event.detail;
+        })();
+
+        if (summary && summary.trim().length > 0) {
+          const updated = taskStore.updateRun(id, {
+            summary: clampMessage(summary.trim(), 1200),
+            updatedAt: normalized.event.timestamp,
+          });
+
+          if (!updated) {
+            const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
+            taskStore.upsertRun({
+              id,
+              sessionId,
+              kind: this.inferTaskRunKind(normalized.payload),
+              title: text.title,
+              description: text.description,
+              status: 'running',
+              startedAt: normalized.event.timestamp,
+              updatedAt: normalized.event.timestamp,
+              progress: 0,
+              summary: clampMessage(summary.trim(), 1200),
+            });
+          }
+        }
+        return;
+      }
+
+      if (rawType === 'permission.asked' || rawType.startsWith('approval.') || rawType.startsWith('permission.')) {
+        // Best-effort: if an approval request arrives while a task is active, surface it.
+        const record =
+          normalized.payload && typeof normalized.payload === 'object'
+            ? (normalized.payload as Record<string, unknown>)
+            : null;
+        const explicitTaskId = record && typeof record.taskId === 'string' ? record.taskId : undefined;
+        const candidateId = explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
+        if (!candidateId) return;
+
+        const existing = taskStore.getRun(candidateId);
+        if (!existing) return;
+        if (existing.status !== 'running' && existing.status !== 'starting') return;
+
+        // Only treat explicit "asked"/"request" events as blocking.
+        const isRequest = rawType.endsWith('.asked') || rawType.includes('asked') || rawType.includes('request');
+        if (!isRequest) return;
+
+        taskStore.updateRun(candidateId, { status: 'waiting_approval', updatedAt: normalized.event.timestamp });
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to update TaskStore:', error);
+    }
+  }
 
   constructor() {
     // Handle app shutdown
@@ -938,11 +1177,21 @@ class ProcessManager {
               }
             }
 
+            const errorMessage = this.extractErrorMessage(typedEvent.properties);
+            const toolService = this.extractToolService(typedEvent.properties);
+            const isToolResultEvent =
+              typedEvent.type.includes('tool') &&
+              (typedEvent.type.includes('result') || typedEvent.type.includes('error') || typedEvent.type.includes('failed'));
+            if (isToolResultEvent && toolService && this.isAuthErrorMessage(errorMessage)) {
+              void this.attemptReauth(toolService, webContents, errorMessage ?? undefined);
+            }
+
             const normalized = normalizeOpenCodeEvent(
               { type: typedEvent.type, properties: typedEvent.properties },
               sessionId
             );
             if (normalized) {
+              this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId);
               const isApprovalEvent =
                 normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
               const shouldStore =
@@ -1079,6 +1328,7 @@ class ProcessManager {
         sessionId
       );
       if (promotion) {
+        this.handleTaskStoreFromNormalizedEvent('task.promoted', promotion, sessionId);
         timelineStore.appendWithPayload({
           ...promotion.event,
           redacted: promotion.redacted,
@@ -1140,6 +1390,7 @@ class ProcessManager {
       sessionId
     );
     if (completion) {
+      this.handleTaskStoreFromNormalizedEvent('task.completed', completion, sessionId);
       timelineStore.appendWithPayload({
         ...completion.event,
         redacted: completion.redacted,
@@ -1163,6 +1414,7 @@ class ProcessManager {
       sessionId
     );
     if (summary) {
+      this.handleTaskStoreFromNormalizedEvent('task.summary', summary, sessionId);
       timelineStore.appendWithPayload({
         ...summary.event,
         redacted: summary.redacted,
