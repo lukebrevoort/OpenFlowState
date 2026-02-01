@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { Send, Sparkles, AlertCircle, RefreshCw } from "lucide-react";
+import { Send, Sparkles, AlertCircle, RefreshCw, Plus } from "lucide-react";
 import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
@@ -52,9 +52,7 @@ const renderMessageParts = (parts?: Message["parts"]) => {
           </span>
           {part.text && (
             <span className="text-[11px] opacity-80">
-              {part.text.length > 40
-                ? `${part.text.slice(0, 40)}…`
-                : part.text}
+              {part.text.length > 40 ? `${part.text.slice(0, 40)}…` : part.text}
             </span>
           )}
         </span>
@@ -105,10 +103,7 @@ const formatContent = (content: string) => {
               <span
                 className="text-foreground"
                 dangerouslySetInnerHTML={{
-                  __html: line.replace(
-                    /\*\*(.*?)\*\*/g,
-                    "<strong>$1</strong>",
-                  ),
+                  __html: line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
                 }}
               />
               {lineIndex < lines.length - 1 && <br />}
@@ -187,6 +182,8 @@ const AssistantMessageContent = ({
 function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const [mcpStatus, setMcpStatus] = useState<Record<
     string,
     McpServerStatus
@@ -207,12 +204,29 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
-  const { sendMessage, checkStatus, refreshTimeline } = useOpenCode();
+  const { sendMessage, checkStatus, refreshTimeline, createSession } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
 
+  const scrollToBottom = (behavior: ScrollBehavior) => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  };
+
+  const updateStickToBottom = () => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 64;
+  };
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // Avoid `scrollIntoView` which can scroll the window/body when content grows.
+    // Only auto-scroll when the user is already near the bottom.
+    if (!shouldStickToBottomRef.current) return;
+    scrollToBottom(status === "thinking" || isLoading ? "auto" : "smooth");
+  }, [messages, status, isLoading]);
 
   useEffect(() => {
     if (initialMessagesRef.current) return;
@@ -314,6 +328,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     const message = input.trim();
     setInput("");
 
+    // User intent: keep the latest messages in view after sending.
+    shouldStickToBottomRef.current = true;
+    scrollToBottom("auto");
+
     const result = await sendMessage(message);
     if (result?.success) {
       refreshTimeline();
@@ -331,17 +349,19 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     checkStatus();
   };
 
-  const statusLabel = statusLabels[status] ?? statusLabels.idle;
-  const statusDotClass =
-    status === "error"
-      ? "bg-destructive"
-      : status === "thinking"
-        ? "bg-[#C87137]"
-        : "bg-[#A5B574]";
+  const handleNewChat = async () => {
+    try {
+      await createSession();
+      setInput("");
+      shouldStickToBottomRef.current = true;
+      scrollToBottom("auto");
+      textareaRef.current?.focus();
+    } catch (err) {
+      console.error("Failed to create new chat session", err);
+    }
+  };
 
-  const openCodeLabel = openCodeStatus?.running
-    ? "OpenCode running"
-    : "OpenCode offline";
+  const statusLabel = statusLabels[status] ?? statusLabels.idle;
   const sessionLabel = currentSessionId
     ? `Session ${currentSessionId}`
     : "Session pending";
@@ -384,16 +404,21 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="sr-only">Thinking</span>
-          <span className="flex items-center gap-1" aria-hidden="true">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce [animation-delay:-0.2s]" />
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce [animation-delay:-0.1s]" />
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/80 animate-bounce" />
-          </span>
+
+          <div className="flex justify-center items-center h-4 w-4">
+            <span
+              className="flex items-center justify-center  gap-1"
+              aria-hidden="true"
+            >
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.2s]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.1s]" />
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
+            </span>
+          </div>
         </div>
       </div>
     </div>
   );
-
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -420,8 +445,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                   </p>
                 </div>
               </div>
-              <div className="text-xs text-muted-foreground text-right">
+              <div className="flex flex-col items-end gap-2 text-xs text-muted-foreground text-right">
                 <p>{providerLabel}</p>
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  New chat
+                </button>
               </div>
             </div>
             {activityDetail && (
@@ -479,10 +512,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       {error && (
         <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mx-6 mt-4 flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" />
-            <div className="flex-1">
-              <p className="text-sm text-destructive font-medium">
-                Assistant Error
-              </p>
+          <div className="flex-1">
+            <p className="text-sm text-destructive font-medium">
+              Assistant Error
+            </p>
             <p className="text-xs text-muted-foreground">{error}</p>
           </div>
           <button
@@ -495,7 +528,11 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       )}
 
       <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
-        <div className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto space-y-4 pb-24 scroll-pb-24 scrollbar-hide">
+        <div
+          ref={messagesScrollRef}
+          onScroll={updateStickToBottom}
+          className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-4 pb-24 scroll-pb-24 scrollbar-hide"
+        >
           {messages.map((message) => (
             <div
               key={message.id}
@@ -504,7 +541,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
               <div
                 className={`max-w-[70%] rounded-2xl px-4 py-3 ${
                   message.role === "user"
-                    ? "bg-card border border-border text-primary-foreground shadow-sm"
+                    ? "bg-card border border-border text-foreground shadow-sm"
                     : "bg-card border border-border text-foreground backdrop-blur-xl"
                 }`}
               >
@@ -518,7 +555,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 )}
                 <div className="text-sm leading-relaxed">
                   {message.role === "user" ? (
-                    <span className="whitespace-pre-wrap break-words text-secondary">
+                    <span className="whitespace-pre-wrap break-words text-foreground">
                       {message.content}
                     </span>
                   ) : (
@@ -531,7 +568,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 <div
                   className={`text-xs mt-2 ${
                     message.role === "user"
-                      ? "text-secondary-foreground"
+                      ? "text-foreground/70"
                       : "text-muted-foreground"
                   }`}
                 >

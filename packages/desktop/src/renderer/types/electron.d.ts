@@ -46,6 +46,16 @@ export interface OpenCodeEvent {
   data: unknown;
 }
 
+export interface IpcError {
+  code: 'NOT_IMPLEMENTED' | 'INVALID_REQUEST' | 'UNAVAILABLE' | 'UNKNOWN';
+  message: string;
+  details?: unknown;
+}
+
+export type IpcResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: IpcError };
+
 export type TimelineEventKind =
   | 'phase'
   | 'tool_call'
@@ -65,6 +75,7 @@ export interface TimelineEvent {
   detail?: string;
   toolName?: string;
   payloadInline?: {
+    requestId?: string;
     title?: string;
     summary?: string;
     body?: string;
@@ -93,6 +104,34 @@ export interface Session {
   id: string;
   title: string;
 }
+
+export interface WorkflowDefinition {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  startedAt: number;
+  finishedAt?: number;
+  output?: unknown;
+  error?: string;
+}
+
+export interface WorkflowGenerationResult {
+  definition: WorkflowDefinition;
+  skillMarkdown: string;
+}
+
+export type ChatSendResult = {
+  success?: boolean;
+  error?: string;
+  content?: string;
+  errorDetails?: OpenCodeError;
+};
 
 // ============================================================================
 // Auth Types
@@ -154,6 +193,9 @@ export interface FlowstateAPI {
     getTheme: () => Promise<'light' | 'dark'>;
     openExternal: (url: string) => Promise<void>;
     openTerminal: (command: string) => Promise<void>;
+    showSaveDialog: (options?: { title?: string; defaultPath?: string }) => Promise<string | null>;
+    showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
+    ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   };
 
   window: {
@@ -173,6 +215,7 @@ export interface FlowstateAPI {
     getStatus: (service: string) => Promise<AuthStatus>;
     getAllStatuses: () => Promise<AuthStatus[]>;
     removeToken: (service: string) => Promise<void>;
+    reauthenticate: (service: string) => Promise<AuthToken>;
 
     // Client credentials management
     setCredentials: (service: string, credentials: ClientCredentials) => Promise<void>;
@@ -206,7 +249,7 @@ export interface FlowstateAPI {
 
     // Get status
     status: () => Promise<OpenCodeStatus>;
-    restart: () => Promise<void>;
+    restart: () => Promise<{ success: boolean; error?: string }>;
     listModels: (provider?: string) => Promise<string[]>;
 
     // Session management
@@ -231,12 +274,84 @@ export interface FlowstateAPI {
     resolvePayload: (payloadRef: string) => Promise<unknown | null>;
   };
 
+  approvals: {
+    reply: (requestId: string, reply: 'once' | 'always' | 'deny') => Promise<{ success: boolean; error?: string }>;
+  };
+
   mcp: {
     // Reload MCP configuration (after connecting new integrations)
-    reload: () => Promise<{ success: boolean }>;
+    reload: () => Promise<{ success: boolean; error?: string }>;
 
     // Get MCP server status
     status: () => Promise<Record<string, McpServerStatus> | null>;
+  };
+
+  canvas: {
+    browserLogin: (payload: {
+      canvasApiUrl: string;
+      storageStatePath: string;
+      confirmationFilePath?: string;
+      timeoutSeconds?: number;
+    }) => Promise<{ success: boolean; error?: string; storageStatePath?: string }>;
+  };
+
+  // ============================================================================
+  // Phase 3.5 - Typed feature surfaces (aliases over lower-level IPC)
+  // ============================================================================
+
+  chat: {
+    sendMessage: (message: string) => Promise<ChatSendResult>;
+    getStatus: () => Promise<OpenCodeStatus>;
+
+    newConversation: (title?: string) => Promise<{ sessionId: string }>;
+    listConversations: () => Promise<Session[]>;
+    switchConversation: (sessionId: string) => Promise<{ sessionId: string }>;
+    getMessages: () => Promise<OpenCodeMessage[]>;
+
+    onMessage: (callback: (message: OpenCodeMessage) => void) => () => void;
+    onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
+    onError: (callback: (error: OpenCodeError) => void) => () => void;
+    onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
+    removeAllListeners: () => void;
+  };
+
+  tasks: {
+    listRuns: () => Promise<IpcResult<TaskRun[]>>;
+    getActiveRun: () => Promise<IpcResult<TaskRun | null>>;
+  };
+
+  workflows: {
+    list: () => Promise<IpcResult<WorkflowDefinition[]>>;
+    run: (workflowId: string, input?: unknown) => Promise<IpcResult<WorkflowRun>>;
+    generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
+  };
+
+  integrations: {
+    listAuthStatuses: () => Promise<AuthStatus[]>;
+    getMcpStatus: () => Promise<Record<string, McpServerStatus> | null>;
+    reloadMcp: () => Promise<{ success: boolean; error?: string }>;
+
+    oauthStart: (service: string, clientId: string, clientSecret: string) => Promise<AuthToken>;
+    oauthRefresh: (service: string) => Promise<AuthToken | null>;
+    oauthDisconnect: (service: string) => Promise<void>;
+
+    storeApiToken: (
+      service: string,
+      apiToken: string,
+      additionalData?: Record<string, string>
+    ) => Promise<{ success: boolean }>;
+
+    onOAuthSuccess: (callback: (event: OAuthSuccessEvent) => void) => () => void;
+    onOAuthError: (callback: (event: OAuthErrorEvent) => void) => () => void;
+    onApiTokenSuccess: (callback: (event: ApiTokenSuccessEvent) => void) => () => void;
+  };
+
+  settings: {
+    get: () => Promise<FlowstateConfig>;
+    update: (config: Partial<FlowstateConfig>) => Promise<FlowstateConfig>;
+    getTheme: () => Promise<'light' | 'dark'>;
+    getAppInfo: () => Promise<AppInfo>;
   };
 }
 
@@ -257,6 +372,18 @@ export interface FlowstateConfig {
       approvals: boolean;
       taskComplete: boolean;
     };
+
+    /**
+     * When true/false, overrides system prefers-reduced-motion.
+     * When undefined, the renderer should follow the system preference.
+     */
+    reduceMotion?: boolean;
+
+    /**
+     * Controls decorative background motion.
+     * When undefined, the renderer should default to 'animated'.
+     */
+    backgroundMotion?: 'animated' | 'static';
   };
   onboardingComplete?: boolean;
 }

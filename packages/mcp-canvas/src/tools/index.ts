@@ -18,11 +18,41 @@ import {
 } from '../utils/constants.js';
 import { extractDocumentText } from '../utils/documentParsers.js';
 
+const redactSecretsFromString = (input: string): string => {
+  return input
+    .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(canvas_session|_csrf_token|csrf_token|session)=[^;\s]+/gi, '$1=[REDACTED]');
+};
+
+const redactSecretsDeep = (value: unknown): unknown => {
+  if (typeof value === 'string') return redactSecretsFromString(value);
+  if (Array.isArray(value)) return value.map(redactSecretsDeep);
+  if (!value || typeof value !== 'object') return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (/token|authorization|cookie|password|secret|key/i.test(k)) {
+      out[k] = '[REDACTED]';
+    } else {
+      out[k] = redactSecretsDeep(v);
+    }
+  }
+  return out;
+};
+
+const safeJson = (value: unknown): string => {
+  try {
+    return JSON.stringify(redactSecretsDeep(value));
+  } catch {
+    return '[Unserializable]';
+  }
+};
+
 const formatToolError = (error: unknown): string => {
   if (error instanceof Error) {
-    return error.message;
+    return redactSecretsFromString(error.message);
   }
-  return String(error);
+  return redactSecretsFromString(String(error));
 };
 
 const formatBytes = (bytes: number) => {
@@ -58,6 +88,49 @@ const formatDate = (dateStr: string | null): string => {
 
 // Tool definitions with annotations for better LLM understanding
 const CANVAS_TOOLS = [
+  {
+    name: 'canvas_auth_browser_login',
+    description:
+      'Open a browser to log into Canvas and save a Playwright storage state file (for schools that disallow API tokens)',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        canvasApiUrl: {
+          type: 'string',
+          description: 'Canvas instance URL (overrides CANVAS_API_URL for this login run)',
+        },
+        storageStatePath: {
+          type: 'string',
+          description:
+            'Where to save the Playwright storage state JSON (defaults to CANVAS_STORAGE_STATE_PATH)',
+        },
+        confirmationFilePath: {
+          type: 'string',
+          description:
+            'Optional file path to wait for before saving storage state (created when user confirms login)',
+        },
+        loginUrl: {
+          type: 'string',
+          description:
+            'Optional override for the login URL (defaults to CANVAS_LOGIN_URL or {CANVAS_API_URL}/login)',
+        },
+        timeoutSeconds: {
+          type: 'number',
+          description: 'Max time to wait for login before failing (default: 300 seconds)',
+        },
+        headless: {
+          type: 'boolean',
+          description: 'Run the browser headless (default: false)',
+        },
+      },
+    },
+  },
   // ========== READ OPERATIONS (All read-only, safe to auto-execute) ==========
   {
     name: 'canvas_list_courses',
@@ -414,10 +487,40 @@ export function registerTools(server: Server): void {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
-    console.error('[mcp-canvas] Tool call:', name, JSON.stringify(args));
+    console.error('[mcp-canvas] Tool call:', name, safeJson(args));
 
     try {
       switch (name) {
+        case 'canvas_auth_browser_login': {
+          const result = await canvasApi.browserLoginWithPlaywright({
+            canvasApiUrl: args?.canvasApiUrl as string | undefined,
+            storageStatePath: args?.storageStatePath as string | undefined,
+            confirmationFilePath: args?.confirmationFilePath as string | undefined,
+            loginUrl: args?.loginUrl as string | undefined,
+            timeoutMs:
+              typeof args?.timeoutSeconds === 'number'
+                ? Math.max(1, Math.floor(args.timeoutSeconds)) * 1000
+                : undefined,
+            headless: args?.headless as boolean | undefined,
+          });
+
+          const userPart =
+            result.userName || result.userId
+              ? `Logged in as ${result.userName ?? `user ${result.userId}`}. `
+              : '';
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `${userPart}Saved Canvas session to: ${result.storageStatePath}\n` +
+                  `Next: set CANVAS_AUTH_MODE=browser and CANVAS_STORAGE_STATE_PATH to this file.`,
+              },
+            ],
+          };
+        }
+
         case 'canvas_list_courses': {
           const courses = await canvasApi.getCourses({
             enrollmentState: args?.enrollmentState as 'active' | 'completed' | 'all' | undefined,

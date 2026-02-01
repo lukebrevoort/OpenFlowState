@@ -16,8 +16,12 @@ import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
+import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
+import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { taskStore } from './task-store.js';
+import type { TaskRunRecord } from './task-types.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -120,6 +124,11 @@ const buildOpenCodeError = (
   };
 };
 
+const clampMessage = (value: string, maxLength: number): string => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}…`;
+};
+
 class ProcessManager {
   private instance: OpenCodeInstance | null = null;
   private isRunning: boolean = false;
@@ -127,18 +136,304 @@ class ProcessManager {
   private eventStreamAbortController: AbortController | null = null;
   private flowstatePrompt: string | null = null;
   private timelineInitialized = false;
+  private reauthCooldown = new Map<string, number>();
+  private readonly reauthCooldownMs = 5 * 60 * 1000;
   private taskPromotionState = new Map<
     string,
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
 
+  // Batch timeline IPC events to reduce renderer churn during high-volume streams.
+  private timelineEventBuffer: unknown[] = [];
+  private timelineFlushTimer: NodeJS.Timeout | null = null;
+  private timelineFlushWebContents: Electron.WebContents | null = null;
+  private readonly timelineFlushIntervalMs = 75;
+  private readonly timelineFlushMaxBatchSize = 250;
+
   private readonly defaultAgent = 'flowstate-assistant';
+
+  private extractToolService(payload: unknown): string | null {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const candidates = [record?.service, record?.tool, record?.toolName, record?.name, record?.provider];
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue;
+      const normalized = candidate.toLowerCase().trim();
+      if (!normalized) continue;
+      const prefix = normalized.split(/[._\s-]/)[0];
+      if (prefix && ['gmail', 'gcal', 'notion', 'canvas'].includes(prefix)) {
+        return prefix;
+      }
+    }
+    return null;
+  }
+
+  private extractErrorMessage(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') return null;
+    const record = payload as Record<string, unknown>;
+    const candidates = [
+      record.error,
+      record.message,
+      record.reason,
+      record.summary,
+      record.detail,
+      (record.error && typeof record.error === 'object') ? (record.error as { message?: unknown }).message : undefined,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+    return null;
+  }
+
+  private isAuthErrorMessage(message: string | null): boolean {
+    if (!message) return false;
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('unauthorized') ||
+      normalized.includes('permission denied') ||
+      normalized.includes('authentication') ||
+      normalized.includes('invalid_grant') ||
+      normalized.includes('token expired')
+    );
+  }
+
+  private shouldAttemptReauth(service: string): boolean {
+    const lastAttempt = this.reauthCooldown.get(service) ?? 0;
+    return Date.now() - lastAttempt > this.reauthCooldownMs;
+  }
+
+  private async attemptReauth(service: string, webContents: Electron.WebContents, reason?: string) {
+    if (!this.shouldAttemptReauth(service)) return;
+    this.reauthCooldown.set(service, Date.now());
+
+    try {
+      const credentials = await authManager.getClientCredentials(service);
+      if (!credentials?.clientId || !credentials?.clientSecret) {
+        console.warn(`[Reauth] Missing stored credentials for ${service}`);
+        webContents.send('auth:reauthRequired', {
+          service,
+          reason: reason ?? 'Authentication expired',
+          missingCredentials: true,
+        });
+        return;
+      }
+
+      webContents.send('auth:reauthStarted', { service });
+      await oauthServer.startOAuth(service, credentials.clientId, credentials.clientSecret);
+      await this.reloadMcpConfig();
+      webContents.send('auth:reauthSuccess', { service });
+    } catch (error) {
+      console.error(`[Reauth] Failed to re-authenticate ${service}:`, error);
+      webContents.send('auth:reauthFailed', {
+        service,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private inferTaskRunId(sessionId: string, payload: unknown, fallbackTaskId?: string): string {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const taskIdFromPayload = record && typeof record.taskId === 'string' && record.taskId.trim().length > 0 ? record.taskId : undefined;
+    const candidate = taskIdFromPayload ?? fallbackTaskId;
+    return candidate && candidate.trim().length > 0 ? candidate : sessionId;
+  }
+
+  private inferTaskRunKind(payload: unknown): TaskRunRecord['kind'] {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const workflowId = record
+      ? (typeof record.workflowId === 'string' ? record.workflowId : typeof record.workflow_id === 'string' ? record.workflow_id : undefined)
+      : undefined;
+    return workflowId ? 'workflow' : 'chat';
+  }
+
+  private pickTaskText(
+    payload: unknown,
+    normalizedTitle: string,
+    normalizedDetail?: string
+  ): { title: string; description: string; summary?: string } {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+    const fromPayloadTitle = record && typeof record.title === 'string' ? record.title : undefined;
+    const fromPayloadDescription = record && typeof record.description === 'string' ? record.description : undefined;
+    const fromPayloadSummary = record && typeof record.summary === 'string' ? record.summary : undefined;
+    const fromPayloadMessage = record && typeof record.message === 'string' ? record.message : undefined;
+    const bestSummary = fromPayloadSummary ?? fromPayloadMessage;
+
+    // Prefer user intent text over lifecycle labels like "Task promoted".
+    const titleCandidate = fromPayloadTitle ?? (bestSummary ? clampMessage(bestSummary, 72) : undefined);
+    const title = titleCandidate && titleCandidate.trim().length > 0 ? titleCandidate.trim() : normalizedTitle;
+
+    const descriptionCandidate = fromPayloadDescription ?? bestSummary ?? normalizedDetail;
+    const description =
+      descriptionCandidate && descriptionCandidate.trim().length > 0
+        ? clampMessage(descriptionCandidate.trim(), 240)
+        : 'Working...';
+
+    return {
+      title,
+      description,
+      ...(bestSummary ? { summary: clampMessage(bestSummary, 600) } : {}),
+    };
+  }
+
+  private handleTaskStoreFromNormalizedEvent(
+    rawType: string,
+    normalized: {
+      event: { sessionId: string; taskId?: string; title: string; detail?: string; timestamp: number };
+      payload?: unknown;
+    },
+    sessionId: string
+  ): void {
+    try {
+      if (rawType === 'task.promoted') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const text = this.pickTaskText(normalized.payload, normalized.event.title, normalized.event.detail);
+
+        const run: TaskRunRecord = {
+          id,
+          sessionId,
+          kind: this.inferTaskRunKind(normalized.payload),
+          title: text.title,
+          description: text.description,
+          status: 'running',
+          startedAt: normalized.event.timestamp,
+          updatedAt: normalized.event.timestamp,
+          progress: 0,
+        };
+        taskStore.upsertRun(run);
+        return;
+      }
+
+      if (rawType === 'task.completed') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
+        if (!updated) {
+          const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
+          taskStore.upsertRun({
+            id,
+            sessionId,
+            kind: this.inferTaskRunKind(normalized.payload),
+            title: text.title,
+            description: text.description,
+            status: 'completed',
+            startedAt: normalized.event.timestamp,
+            updatedAt: normalized.event.timestamp,
+            progress: 100,
+          });
+        }
+        return;
+      }
+
+      if (rawType === 'task.summary') {
+        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const summary = (() => {
+          const record =
+            normalized.payload && typeof normalized.payload === 'object'
+              ? (normalized.payload as Record<string, unknown>)
+              : null;
+          const value = record && typeof record.summary === 'string' ? record.summary : undefined;
+          return value ?? normalized.event.detail;
+        })();
+
+        if (summary && summary.trim().length > 0) {
+          const updated = taskStore.updateRun(id, {
+            summary: clampMessage(summary.trim(), 1200),
+            updatedAt: normalized.event.timestamp,
+          });
+
+          if (!updated) {
+            const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
+            taskStore.upsertRun({
+              id,
+              sessionId,
+              kind: this.inferTaskRunKind(normalized.payload),
+              title: text.title,
+              description: text.description,
+              status: 'running',
+              startedAt: normalized.event.timestamp,
+              updatedAt: normalized.event.timestamp,
+              progress: 0,
+              summary: clampMessage(summary.trim(), 1200),
+            });
+          }
+        }
+        return;
+      }
+
+      if (rawType === 'permission.asked' || rawType.startsWith('approval.') || rawType.startsWith('permission.')) {
+        // Best-effort: if an approval request arrives while a task is active, surface it.
+        const record =
+          normalized.payload && typeof normalized.payload === 'object'
+            ? (normalized.payload as Record<string, unknown>)
+            : null;
+        const explicitTaskId = record && typeof record.taskId === 'string' ? record.taskId : undefined;
+        const candidateId = explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
+        if (!candidateId) return;
+
+        const existing = taskStore.getRun(candidateId);
+        if (!existing) return;
+        if (existing.status !== 'running' && existing.status !== 'starting') return;
+
+        // Only treat explicit "asked"/"request" events as blocking.
+        const isRequest = rawType.endsWith('.asked') || rawType.includes('asked') || rawType.includes('request');
+        if (!isRequest) return;
+
+        taskStore.updateRun(candidateId, { status: 'waiting_approval', updatedAt: normalized.event.timestamp });
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to update TaskStore:', error);
+    }
+  }
 
   constructor() {
     // Handle app shutdown
     app.on('before-quit', async () => {
       await this.stop();
     });
+  }
+
+  private enqueueTimelineEvent(webContents: Electron.WebContents, event: unknown) {
+    if (!webContents || webContents.isDestroyed()) return;
+
+    this.timelineFlushWebContents = webContents;
+    this.timelineEventBuffer.push(event);
+
+    if (this.timelineEventBuffer.length >= this.timelineFlushMaxBatchSize) {
+      this.flushTimelineEvents();
+      return;
+    }
+
+    if (this.timelineFlushTimer) return;
+
+    this.timelineFlushTimer = setTimeout(() => {
+      this.flushTimelineEvents();
+    }, this.timelineFlushIntervalMs);
+  }
+
+  private flushTimelineEvents() {
+    if (this.timelineFlushTimer) {
+      clearTimeout(this.timelineFlushTimer);
+      this.timelineFlushTimer = null;
+    }
+
+    const webContents = this.timelineFlushWebContents;
+    if (!webContents || webContents.isDestroyed()) {
+      this.timelineEventBuffer = [];
+      this.timelineFlushWebContents = null;
+      return;
+    }
+
+    if (this.timelineEventBuffer.length === 0) return;
+
+    const events = this.timelineEventBuffer;
+    this.timelineEventBuffer = [];
+
+    if (events.length === 1) {
+      webContents.send('timeline:event', events[0]);
+      return;
+    }
+
+    webContents.send('timeline:event', { type: 'batch', events });
   }
 
   /**
@@ -201,6 +496,13 @@ class ProcessManager {
       ? path.resolve(appPath, '../../..')
       : path.resolve(appPath, '..');
     return path.resolve(packagesDir, '..');
+  }
+
+  /**
+   * Directory used for workspace-scoped OpenCode operations (find, command list, etc.)
+   */
+  getProjectDirectory(): string {
+    return this.getRepoRoot();
   }
 
   private async updateAgentModelFiles(model: string): Promise<void> {
@@ -343,22 +645,19 @@ class ProcessManager {
       console.error('[ProcessManager] GCal token found but MCP server not built!');
     }
 
-    // Notion MCP
+    // Notion MCP (remote package via npx)
     const notionToken = await authManager.getToken('notion');
-    const notionPath = this.verifyMcpServer(packagesDir, 'mcp-notion');
-    if (notionToken && notionPath) {
-      mcpConfig['flowstate-notion'] = {
+    if (notionToken) {
+      mcpConfig['notion'] = {
         type: 'local',
-        command: ['node', notionPath],
+        command: ['npx', '-y', '@notionhq/notion-mcp-server'],
         environment: {
-          NOTION_ACCESS_TOKEN: notionToken.accessToken,
+          NOTION_TOKEN: notionToken.accessToken,
         },
         enabled: true,
         timeout: 10000,
       };
       console.log('[ProcessManager] Notion MCP configured with token');
-    } else if (notionToken && !notionPath) {
-      console.error('[ProcessManager] Notion token found but MCP server not built!');
     }
 
     // System MCP (no auth needed)
@@ -373,21 +672,34 @@ class ProcessManager {
       console.log('[ProcessManager] System MCP configured');
     }
 
-    // Canvas LMS MCP (API token auth)
+    // Canvas LMS MCP (token or browser session auth)
     const canvasToken = await authManager.getToken('canvas');
     const canvasPath = this.verifyMcpServer(packagesDir, 'mcp-canvas');
     if (canvasToken && canvasPath) {
+      const canvasAuthMode = canvasToken.additionalData?.canvasAuthMode;
+      const useBrowserAuth = canvasAuthMode === 'browser';
+
       mcpConfig['flowstate-canvas'] = {
         type: 'local',
         command: ['node', canvasPath],
         environment: {
-          CANVAS_API_TOKEN: canvasToken.accessToken,
           CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
+          CANVAS_AUTH_MODE: useBrowserAuth ? 'browser' : 'token',
+          ...(useBrowserAuth
+            ? {
+                CANVAS_STORAGE_STATE_PATH:
+                  canvasToken.additionalData?.canvasStorageStatePath || '',
+              }
+            : {
+                CANVAS_API_TOKEN: canvasToken.accessToken,
+              }),
         },
         enabled: true,
         timeout: 10000,
       };
-      console.log('[ProcessManager] Canvas LMS MCP configured with token');
+      console.log(
+        `[ProcessManager] Canvas LMS MCP configured (${useBrowserAuth ? 'browser' : 'token'} auth)`
+      );
     } else if (canvasToken && !canvasPath) {
       console.error('[ProcessManager] Canvas token found but MCP server not built!');
     }
@@ -433,8 +745,9 @@ class ProcessManager {
       this.isRunning = true;
       console.log(`OpenCode server started at ${this.instance.server.url}`);
 
-      // Create an initial session
-      await this.createSession('FlowState Chat');
+      // Don't eagerly create a session with a generic title.
+      // The first user interaction (or explicit "new conversation") will create the session,
+      // allowing OpenCode/agents to auto-title it based on the actual conversation.
 
       // Check MCP status after a short delay to let servers connect
       setTimeout(() => this.logMcpStatus(), 2000);
@@ -556,6 +869,9 @@ class ProcessManager {
       this.eventStreamAbortController = null;
     }
 
+    // Flush any remaining timeline events before shutdown.
+    this.flushTimelineEvents();
+
     try {
       this.instance.server.close();
       console.log('OpenCode server stopped');
@@ -577,11 +893,15 @@ class ProcessManager {
     }
 
     try {
-      const result = await this.instance.client.session.create({
-        body: {
-          title: title || 'FlowState Session',
-        },
-      });
+      const result = await this.instance.client.session.create(
+        title && title.trim().length
+          ? {
+              body: {
+                title: title.trim(),
+              },
+            }
+          : {}
+      );
 
       if (result.error) {
         throw new Error(`Failed to create session: ${JSON.stringify(result.error)}`);
@@ -803,6 +1123,18 @@ class ProcessManager {
 
     console.log('Starting OpenCode event stream...');
 
+    const extractRequestId = (properties: unknown): string | undefined => {
+      if (!properties || typeof properties !== 'object') return undefined;
+      const record = properties as Record<string, unknown>;
+      const candidates = [record.requestID, record.requestId, record.request_id, record.id];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return candidate;
+        }
+      }
+      return undefined;
+    };
+
     // Run event stream in background
     (async () => {
       try {
@@ -816,50 +1148,83 @@ class ProcessManager {
             break;
           }
 
-            // Type the event
-            const typedEvent = event as { type?: string; properties?: unknown };
+          // Type the event
+          const typedEvent = event as { type?: string; properties?: unknown };
 
-            // Forward relevant events to renderer
-            if (typedEvent.type) {
-              webContents.send('opencode:event', {
-                type: typedEvent.type,
-                data: typedEvent.properties,
-              });
+          // Forward relevant events to renderer
+          if (typedEvent.type) {
+            webContents.send('opencode:event', {
+              type: typedEvent.type,
+              data: typedEvent.properties,
+            });
 
-              const payloadSessionId =
-                typeof typedEvent.properties === 'object' && typedEvent.properties
-                  ? (typedEvent.properties as { sessionId?: string }).sessionId
-                  : undefined;
-              const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
-              const normalized = normalizeOpenCodeEvent(
-                { type: typedEvent.type, properties: typedEvent.properties },
-                sessionId
-              );
-              if (normalized) {
-                const shouldStore = this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId);
-                if (!shouldStore) {
-                  continue;
-                }
-                try {
-                  const stored = await timelineStore.appendWithPayload({
-                    ...normalized.event,
-                    redacted: normalized.redacted,
-                    payload: normalized.payload,
-                  });
-                  webContents.send('timeline:event', stored);
-                  this.trackTaskPromotion(sessionId, normalized.event, webContents);
-                } catch (error) {
-                  console.warn('[ProcessManager] Failed to persist timeline event:', error);
-                }
+            const payloadSessionId =
+              typeof typedEvent.properties === 'object' && typedEvent.properties
+                ? ((typedEvent.properties as { sessionID?: string; sessionId?: string }).sessionID ??
+                    (typedEvent.properties as { sessionID?: string; sessionId?: string }).sessionId)
+                : undefined;
+            const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
+
+            const requestId = extractRequestId(typedEvent.properties);
+            if (requestId && sessionId !== 'unknown-session') {
+              approvalPolicyStore.trackRequest(requestId, sessionId);
+
+              if (typedEvent.type === 'permission.asked' && approvalPolicyStore.isSessionAlwaysApprove(sessionId)) {
+                this.replyApproval(requestId, 'always').catch((error) => {
+                  console.warn('[ProcessManager] Failed to auto-approve permission request:', error);
+                });
               }
             }
 
+            const errorMessage = this.extractErrorMessage(typedEvent.properties);
+            const toolService = this.extractToolService(typedEvent.properties);
+            const isToolResultEvent =
+              typedEvent.type.includes('tool') &&
+              (typedEvent.type.includes('result') || typedEvent.type.includes('error') || typedEvent.type.includes('failed'));
+            if (isToolResultEvent && toolService && this.isAuthErrorMessage(errorMessage)) {
+              void this.attemptReauth(toolService, webContents, errorMessage ?? undefined);
+            }
+
+            const normalized = normalizeOpenCodeEvent(
+              { type: typedEvent.type, properties: typedEvent.properties },
+              sessionId
+            );
+            if (normalized) {
+              this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId);
+              const isApprovalEvent =
+                normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
+              const shouldStore =
+                isApprovalEvent ||
+                (this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
+              if (!shouldStore) {
+                continue;
+              }
+              try {
+                const stored = await timelineStore.appendWithPayload({
+                  ...normalized.event,
+                  redacted: normalized.redacted,
+                  payload: normalized.payload,
+                });
+                this.enqueueTimelineEvent(webContents, stored);
+                this.trackTaskPromotion(sessionId, normalized.event, webContents);
+              } catch (error) {
+                console.warn('[ProcessManager] Failed to persist timeline event:', error);
+              }
+            }
+          }
+
 
         }
+
+        // Flush any remaining events if the stream ends naturally.
+        this.flushTimelineEvents();
       } catch (error) {
         if (!this.eventStreamAbortController?.signal.aborted) {
           console.error('Event stream error:', error);
         }
+
+        // Attempt to flush anything queued before exiting.
+        this.flushTimelineEvents();
       }
     })();
   }
@@ -962,12 +1327,13 @@ class ProcessManager {
         sessionId
       );
       if (promotion) {
+        this.handleTaskStoreFromNormalizedEvent('task.promoted', promotion, sessionId);
         timelineStore.appendWithPayload({
           ...promotion.event,
           redacted: promotion.redacted,
           payload: promotion.payload,
         }).then((stored) => {
-          webContents.send('timeline:event', stored);
+          this.enqueueTimelineEvent(webContents, stored);
         }).catch((error) => {
           console.warn('[ProcessManager] Failed to persist promotion event:', error);
         });
@@ -990,6 +1356,21 @@ class ProcessManager {
     // If the request never met promotion criteria, do not create Task lifecycle events.
     // This keeps fast chat responses ("hello") from showing up as stuck tasks.
     if (!state.promoted) {
+      const responseEvent = {
+        id: `status-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        sessionId,
+        timestamp: Date.now(),
+        kind: 'status' as const,
+        title: 'Response sent',
+        detail: detail ? clampMessage(detail, 120) : 'Ready for the next request',
+      };
+
+      timelineStore.appendWithPayload(responseEvent).then((stored) => {
+        this.enqueueTimelineEvent(webContents, stored);
+      }).catch((error) => {
+        console.warn('[ProcessManager] Failed to persist response event:', error);
+      });
+
       this.clearTaskTracking(sessionId);
       return;
     }
@@ -1008,12 +1389,13 @@ class ProcessManager {
       sessionId
     );
     if (completion) {
+      this.handleTaskStoreFromNormalizedEvent('task.completed', completion, sessionId);
       timelineStore.appendWithPayload({
         ...completion.event,
         redacted: completion.redacted,
         payload: completion.payload,
       }).then((stored) => {
-        webContents.send('timeline:event', stored);
+        this.enqueueTimelineEvent(webContents, stored);
       }).catch((error) => {
         console.warn('[ProcessManager] Failed to persist completion event:', error);
       });
@@ -1031,12 +1413,13 @@ class ProcessManager {
       sessionId
     );
     if (summary) {
+      this.handleTaskStoreFromNormalizedEvent('task.summary', summary, sessionId);
       timelineStore.appendWithPayload({
         ...summary.event,
         redacted: summary.redacted,
         payload: summary.payload,
       }).then((stored) => {
-        webContents.send('timeline:event', stored);
+        this.enqueueTimelineEvent(webContents, stored);
       }).catch((error) => {
         console.warn('[ProcessManager] Failed to persist summary event:', error);
       });
@@ -1129,6 +1512,37 @@ class ProcessManager {
       };
     } catch {
       return { healthy: false };
+    }
+  }
+
+  async replyApproval(requestId: string, reply: ApprovalReply): Promise<void> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    if (!requestId || typeof requestId !== 'string') {
+      throw new Error('Invalid approval request id');
+    }
+
+    const mappedReply: 'once' | 'always' | 'reject' = reply === 'deny' ? 'reject' : reply;
+
+    const sessionId = approvalPolicyStore.getSessionIdForRequest(requestId) ?? this.activeSessionId ?? undefined;
+    if (reply === 'always' && sessionId) {
+      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+    }
+
+    const permissionClient = (this.instance.client as unknown as { permission?: { reply: (input: { requestID: string; reply: 'once' | 'always' | 'reject' }) => Promise<{ error?: unknown }> } }).permission;
+    if (!permissionClient) {
+      throw new Error('OpenCode permission API unavailable');
+    }
+
+    const result = await permissionClient.reply({
+      requestID: requestId,
+      reply: mappedReply,
+    });
+
+    if (result.error) {
+      throw new Error(`Failed to reply to approval request: ${JSON.stringify(result.error)}`);
     }
   }
 }

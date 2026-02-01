@@ -1,5 +1,7 @@
+import { useMemo } from 'react';
 import { CheckCircle2, Loader2, AlertTriangle, Wrench, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import type { TimelineEvent } from '../types/electron';
+import { ApprovalCard } from './ApprovalCard';
 
 const formatTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], {
@@ -27,6 +29,22 @@ const colorByKind: Record<TimelineEvent['kind'], string> = {
   status: 'text-muted-foreground',
 };
 
+const dedupeKeyForEvent = (event: TimelineEvent) =>
+  `${event.kind}-${event.title}-${event.detail ?? ''}-${event.toolName ?? ''}`;
+
+const latestEventByTimestamp = (events: TimelineEvent[]) => {
+  // Keep behavior consistent with stable sort: for ties, prefer the first
+  // occurrence in the original array.
+  let latest = events[0];
+  for (let i = 1; i < events.length; i += 1) {
+    const candidate = events[i];
+    if (candidate.timestamp > latest.timestamp) {
+      latest = candidate;
+    }
+  }
+  return latest;
+};
+
 interface ActivityTimelineProps {
   events: TimelineEvent[];
   title?: string;
@@ -35,7 +53,37 @@ interface ActivityTimelineProps {
   maxItemsExpanded?: number;
   emptyMessage?: string;
   variant?: 'default' | 'compact';
+  showTimestamp?: boolean;
+  animateIcons?: boolean;
+  onApprove?: (event: TimelineEvent) => void;
+  onAlwaysApprove?: (event: TimelineEvent) => void;
+  onDeny?: (event: TimelineEvent) => void;
 }
+
+type ApprovalInlinePayload = {
+  title?: string;
+  summary?: string;
+  body?: string;
+  approveLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
+};
+
+const isApprovalInlinePayload = (value: unknown): value is ApprovalInlinePayload => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const maybe = value as Record<string, unknown>;
+  return (
+    'title' in maybe ||
+    'summary' in maybe ||
+    'body' in maybe ||
+    'approveLabel' in maybe ||
+    'alwaysApproveLabel' in maybe ||
+    'denyLabel' in maybe
+  );
+};
 
 export function ActivityTimeline({
   events,
@@ -45,10 +93,22 @@ export function ActivityTimeline({
   maxItemsExpanded = 20,
   emptyMessage = 'No activity yet',
   variant = 'default',
+  showTimestamp = true,
+  animateIcons = true,
+  onApprove,
+  onAlwaysApprove,
+  onDeny,
 }: ActivityTimelineProps) {
   if (!events || events.length === 0) {
     if (variant === 'compact') {
-      return <div className="text-xs text-muted-foreground">{emptyMessage}</div>;
+      return (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-1.5">
+          <div className="w-5 h-5 rounded-full bg-muted/50 border border-border flex items-center justify-center">
+            <span className="h-2 w-2 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+          </div>
+          <p className="text-[11px] text-muted-foreground truncate">{emptyMessage}</p>
+        </div>
+      );
     }
 
     return (
@@ -58,48 +118,76 @@ export function ActivityTimeline({
     );
   }
 
-  const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
-  const seenKeys = new Set<string>();
-  const deduped = sorted.filter((event) => {
-    const key = `${event.kind}-${event.title}-${event.detail ?? ''}-${event.toolName ?? ''}`;
-    if (seenKeys.has(key)) {
-      return false;
+  const isSingleItemCompact = variant === 'compact' && maxItems === 1;
+
+  const latestForCompact = useMemo(() => latestEventByTimestamp(events), [events]);
+
+  const deduped = useMemo(() => {
+    if (isSingleItemCompact) {
+      return null;
     }
-    seenKeys.add(key);
-    return true;
-  });
-  const visible = collapsed
-    ? deduped.slice(0, maxItems)
-    : deduped.slice(0, maxItemsExpanded);
-  const latest = visible[0];
+
+    const sorted = [...events].sort((a, b) => b.timestamp - a.timestamp);
+    const seenKeys = new Set<string>();
+    return sorted.filter((event) => {
+      const key = dedupeKeyForEvent(event);
+      if (seenKeys.has(key)) {
+        return false;
+      }
+      seenKeys.add(key);
+      return true;
+    });
+  }, [events, isSingleItemCompact]);
+
+  const visible = useMemo(() => {
+    if (!deduped) {
+      return null;
+    }
+    const limit = collapsed ? maxItems : maxItemsExpanded;
+    return deduped.slice(0, limit);
+  }, [deduped, collapsed, maxItems, maxItemsExpanded]);
+
+  const latest = isSingleItemCompact ? latestForCompact : visible?.[0];
+
+  const logFallback = (action: string, event: TimelineEvent) => {
+    // eslint-disable-next-line no-console
+    console.log(`[timeline] ${action}`, event);
+  };
+
+  const handleApprove = (event: TimelineEvent) => (onApprove ? onApprove(event) : logFallback('approve', event));
+  const handleAlwaysApprove = (event: TimelineEvent) =>
+    onAlwaysApprove ? onAlwaysApprove(event) : logFallback('always_approve', event);
+  const handleDeny = (event: TimelineEvent) => (onDeny ? onDeny(event) : logFallback('deny', event));
 
   if (variant === 'compact') {
-    const Icon = iconByKind[latest.kind] ?? Loader2;
-    const tone = colorByKind[latest.kind] ?? 'text-muted-foreground';
+    const event = latest ?? latestForCompact;
+    const Icon = iconByKind[event.kind] ?? Loader2;
+    const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
+    const shouldSpin = animateIcons && event.kind === 'phase';
 
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/20 px-2.5 py-1.5">
+      <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-2 py-1">
         <div
-          className={`w-5 h-5 rounded-full bg-muted/50 border border-border flex items-center justify-center ${tone}`}
+          className={`w-4 h-4 rounded-full bg-muted/50 border border-border flex items-center justify-center ${tone}`}
         >
           <Icon
             className={
-              latest.kind === 'phase' || latest.kind === 'status'
-                ? 'w-3 h-3 animate-spin'
-                : 'w-3 h-3'
+              shouldSpin ? 'w-3 h-3 animate-spin' : 'w-3 h-3'
             }
           />
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium text-foreground truncate">
-            {latest.detail ? `${latest.title} — ${latest.detail}` : latest.title}
+          <p className="text-[10px] font-medium text-foreground truncate">
+            {event.title}
           </p>
         </div>
 
-        <span className="text-[10px] text-muted-foreground tabular-nums">
-          {formatTime(latest.timestamp)}
-        </span>
+        {showTimestamp && (
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {formatTime(event.timestamp)}
+          </span>
+        )}
       </div>
     );
   }
@@ -108,13 +196,16 @@ export function ActivityTimeline({
     <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        <span className="text-xs text-muted-foreground">{deduped.length} steps</span>
+        <span className="text-xs text-muted-foreground">{(deduped ?? []).length} steps</span>
       </div>
       <div className="mt-4 space-y-3">
-        {visible.map((event, index) => {
+        {(visible ?? []).map((event, index) => {
           const Icon = iconByKind[event.kind] ?? Loader2;
           const tone = colorByKind[event.kind] ?? 'text-muted-foreground';
-          const isLast = index === visible.length - 1;
+          const isLast = index === (visible ?? []).length - 1;
+          const shouldSpin = animateIcons && event.kind === 'phase';
+          const inline = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
+          const isApprovalRequest = event.kind === 'approval_request';
 
           return (
             <div key={event.id} className="flex items-start gap-3">
@@ -124,9 +215,7 @@ export function ActivityTimeline({
                 >
                   <Icon
                     className={
-                      event.kind === 'phase' || event.kind === 'status'
-                        ? 'w-4 h-4 animate-spin'
-                        : 'w-4 h-4'
+                      shouldSpin ? 'w-4 h-4 animate-spin' : 'w-4 h-4'
                     }
                   />
                 </div>
@@ -142,12 +231,30 @@ export function ActivityTimeline({
                       <p className="text-xs text-muted-foreground mt-1">{event.detail}</p>
                     )}
                   </div>
-                  <span className="text-xs text-muted-foreground">{formatTime(event.timestamp)}</span>
+                  {showTimestamp && (
+                    <span className="text-xs text-muted-foreground">{formatTime(event.timestamp)}</span>
+                  )}
                 </div>
                 {event.toolName && (
                   <span className="mt-2 inline-flex items-center rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground">
                     {event.toolName}
                   </span>
+                )}
+
+                {isApprovalRequest && (
+                  <div className="mt-3">
+                    <ApprovalCard
+                      title={inline?.title ?? event.title}
+                      summary={inline?.summary ?? event.detail ?? 'This action requires your approval.'}
+                      body={inline?.body ?? ''}
+                      primaryActionLabel={inline?.approveLabel}
+                      alwaysApproveLabel={inline?.alwaysApproveLabel}
+                      denyLabel={inline?.denyLabel}
+                      onApprove={() => handleApprove(event)}
+                      onAlwaysApprove={() => handleAlwaysApprove(event)}
+                      onDeny={() => handleDeny(event)}
+                    />
+                  </div>
                 )}
               </div>
             </div>

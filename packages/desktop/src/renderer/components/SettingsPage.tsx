@@ -11,6 +11,7 @@ export function SettingsPage() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [language, setLanguage] = useState("en");
+  const [systemPrefersReducedMotion, setSystemPrefersReducedMotion] = useState(false);
   const [resetStatus, setResetStatus] = useState<"idle" | "done">("idle");
   const resetLabel = resetStatus === "done" ? "Reset" : "Reset now";
 
@@ -28,6 +29,14 @@ export function SettingsPage() {
     setTimezone(config.preferences.timezone ?? "America/New_York");
     setModelInput(config.provider.default ?? "");
   }, [config]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setSystemPrefersReducedMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const handleResetOnboarding = async () => {
     try {
@@ -67,6 +76,103 @@ export function SettingsPage() {
     } catch (error) {
       console.error("Failed to update timezone", error);
     }
+  };
+
+  const reduceMotionPreference = config?.preferences.reduceMotion;
+  const effectiveReduceMotion = reduceMotionPreference ?? systemPrefersReducedMotion;
+  const backgroundMotionPreference = config?.preferences.backgroundMotion ?? "animated";
+
+  const handleToggleReducedMotion = async () => {
+    if (!config) return;
+
+    const current = reduceMotionPreference ?? systemPrefersReducedMotion;
+    const next = !current;
+
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          reduceMotion: next,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update reduced motion", error);
+    }
+  };
+
+  const handleUseSystemReducedMotion = async () => {
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          reduceMotion: undefined,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to reset reduced motion preference", error);
+    }
+  };
+
+  const handleToggleBackgroundMotion = async () => {
+    if (!config) return;
+    const next = backgroundMotionPreference === "animated" ? "static" : "animated";
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          backgroundMotion: next,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update background motion", error);
+    }
+  };
+
+  const handleResetBackgroundMotion = async () => {
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          backgroundMotion: undefined,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to reset background motion preference", error);
+    }
+  };
+
+  const ToggleSwitch = ({
+    checked,
+    onToggle,
+    disabled,
+    label,
+  }: {
+    checked: boolean;
+    onToggle: () => void;
+    disabled?: boolean;
+    label: string;
+  }) => {
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={onToggle}
+        disabled={disabled}
+        className={`relative w-12 h-6 border border-border rounded-full transition-colors ${
+          checked ? "bg-primary" : "bg-switch-background"
+        } ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      >
+        <span
+          className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${
+            checked ? "translate-x-6" : "translate-x-0"
+          }`}
+        />
+      </button>
+    );
   };
   const loadModelOptions = async () => {
     if (!window.flowstate?.opencode?.listModels) return;
@@ -224,6 +330,72 @@ export function SettingsPage() {
                     </span>
                   </div>
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6">
+              <Cpu className="w-5 h-5 text-primary" />
+              <h3 className="text-xl text-foreground">Motion & Performance</h3>
+            </div>
+
+            <div className="space-y-5">
+              <div className="flex items-start justify-between gap-6">
+                <div>
+                  <p className="text-sm text-foreground">Reduced motion / Low power</p>
+                  <p className="text-xs text-muted-foreground">
+                    Disables decorative animations and reduces blur effects.
+                    {reduceMotionPreference === undefined
+                      ? ` Following system (${systemPrefersReducedMotion ? "On" : "Off"}).`
+                      : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ToggleSwitch
+                    checked={effectiveReduceMotion}
+                    onToggle={handleToggleReducedMotion}
+                    disabled={!config}
+                    label="Reduced motion / Low power"
+                  />
+                  {reduceMotionPreference !== undefined && (
+                    <button
+                      type="button"
+                      onClick={handleUseSystemReducedMotion}
+                      className="fs-button-secondary text-xs px-3 py-1.5"
+                    >
+                      Use system
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-start justify-between gap-6">
+                <div>
+                  <p className="text-sm text-foreground">Background motion</p>
+                  <p className="text-xs text-muted-foreground">
+                    Animate the ambient background. Turn off for a static background.
+                    {effectiveReduceMotion ? " Disabled while Reduced motion is on." : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ToggleSwitch
+                    checked={!effectiveReduceMotion && backgroundMotionPreference === "animated"}
+                    onToggle={handleToggleBackgroundMotion}
+                    disabled={!config || effectiveReduceMotion}
+                    label="Background motion"
+                  />
+                  {config?.preferences.backgroundMotion !== undefined && (
+                    <button
+                      type="button"
+                      onClick={handleResetBackgroundMotion}
+                      className="fs-button-secondary text-xs px-3 py-1.5"
+                      disabled={!config}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -1204,3 +1204,44 @@ Renderer (useOpenCode.ts):
 **NEXT STEPS**
 - Run `pnpm dev:desktop` and type a multi-line prompt to confirm the input grows upward.
 - Send a tool-heavy prompt and verify the response no longer flickers during loading.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Switch to Notion MCP Package)
+**Timestamp**: Jan 28, 2026 18:10
+
+**TASKS COMPLETED**
+- ✅ Replaced the local `@flowstate/mcp-notion` entry with the `@notionhq/notion-mcp-server` package in `opencode.json`.
+- ✅ Updated desktop ProcessManager to launch Notion MCP via `npx` and pass `NOTION_TOKEN` from stored auth.
+
+**IN PROGRESS**
+- [ ] Validate the Notion MCP starts via `npx` and tools show up in OpenCode.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Rebuild/restart the desktop app and verify Notion MCP connects with stored token.
+- Run a simple Notion tool call to confirm the remote package responds.
+
+---
+
+## Tasks Completed (Jan 28, 2026 - Notion MCP Context Strategy Research)
+**Timestamp**: Jan 28, 2026 17:45
+
+**TASKS COMPLETED**
+- ✅ Researched Notion API pagination and filtering limits to reduce payload size at the source.
+- ✅ Compared local stdio MCP vs remote HTTP MCP tradeoffs for large Notion workspaces.
+- ✅ Documented a tiered context strategy (small/medium/large) with chunking, summaries, and retrieval.
+- ✅ Outlined caching and index invalidation approaches to avoid repeated full-database reads.
+
+**IN PROGRESS**
+- [ ] Decide on the target architecture for Notion MCP (local + pagination vs remote RAG service).
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Add strict pagination + filter inputs to `@flowstate/mcp-notion` query tools to cap payload size.
+- Evaluate a remote Notion MCP that fronts a vector index (embeddings + BM25) for large workspaces.
+- Define cache invalidation (Notion webhooks or time-based) and chunking strategy for page content.

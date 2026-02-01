@@ -1,25 +1,23 @@
-import { CheckCircle2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { ApprovalCard } from '../components/ApprovalCard';
-import { useMemo, useState } from 'react';
+import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
 import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
-import { useChatStore } from '../stores/chatStore';
+import { useTasksStore } from '../stores/tasksStore';
+import { useOpenCode } from '../hooks/useOpenCode';
 
-interface RunningTask {
-  id: string;
-  title: string;
-  description: string;
-  progress: number;
-  status: 'analyzing' | 'processing' | 'finalizing';
-  timeline: TimelineEvent[];
-}
+type ApprovalPayloadInline = {
+  requestId?: string;
+  title?: string;
+  summary?: string;
+  body?: string;
+  approveLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
+};
 
-interface CompletedTask {
-  id: number;
-  title: string;
-  description: string;
-  completedAt: Date;
-}
+const isApprovalPayloadInline = (payload: unknown): payload is ApprovalPayloadInline => {
+  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload);
+};
 
 const deriveProgress = (events: TimelineEvent[]) => {
   if (!events || events.length === 0) return 0;
@@ -28,241 +26,300 @@ const deriveProgress = (events: TimelineEvent[]) => {
   return Math.min(100, Math.round((completed / total) * 100));
 };
 
-function RunningTaskCard({ task }: { task: RunningTask }) {
-  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
-  const statusText = {
-    analyzing: 'Analyzing...',
-    processing: 'Processing...',
-    finalizing: 'Finalizing...',
-  };
-  const isComplete = task.progress >= 100 || task.status === 'finalizing';
+function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
+  const runs = useTasksStore((state) => state.runs);
+  const selectedRunId = useTasksStore((state) => state.selectedRunId);
+  const selectedTimeline = useTasksStore((state) => state.selectedTimeline);
+  const isLoadingRuns = useTasksStore((state) => state.isLoadingRuns);
+  const isLoadingTimeline = useTasksStore((state) => state.isLoadingTimeline);
+  const error = useTasksStore((state) => state.error);
+  const reloadRuns = useTasksStore((state) => state.reloadRuns);
+  const loadActiveRun = useTasksStore((state) => state.loadActiveRun);
+  const selectRun = useTasksStore((state) => state.selectRun);
+  const reloadSelectedTimeline = useTasksStore((state) => state.reloadSelectedTimeline);
+  const { switchSession } = useOpenCode();
 
-  return (
-    <div className="bg-card/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-sm transition-all duration-300 ease-in-out">
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <h3 className="text-base text-foreground mb-1">{task.title}</h3>
-          <p className="text-sm text-muted-foreground">{task.description}</p>
-        </div>
-        {isComplete ? (
-          <CheckCircle2 className="w-5 h-5 text-[#4A7C59] flex-shrink-0 ml-3" />
-        ) : (
-          <Loader2 className="w-5 h-5 text-[#A5B574] animate-spin flex-shrink-0 ml-3" />
-        )}
-      </div>
+  useEffect(() => {
+    void loadActiveRun();
+    void reloadRuns();
+  }, [loadActiveRun, reloadRuns]);
 
-      <div className="mb-2">
-        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-[#A5B574] to-[#C87137] rounded-full transition-all duration-300 ease-in-out"
-            style={{ width: `${task.progress}%` }}
-          />
-        </div>
-      </div>
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadActiveRun({ silent: true });
+      void reloadRuns({ silent: true });
+      void reloadSelectedTimeline({ silent: true });
+    }, 5000);
 
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{statusText[task.status]}</span>
-        <span className="text-xs text-foreground">{task.progress}%</span>
-      </div>
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [loadActiveRun, reloadRuns, reloadSelectedTimeline]);
 
-      <button
-        type="button"
-        onClick={() => setIsTimelineOpen((prev) => !prev)}
-        className="mt-4 flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/60"
-      >
-        <span>{isTimelineOpen ? 'Hide timeline' : 'Show timeline'}</span>
-        {isTimelineOpen ? (
-          <ChevronUp className="h-4 w-4" />
-        ) : (
-          <ChevronDown className="h-4 w-4" />
-        )}
-      </button>
+  const sortedRuns = useMemo(() => {
+    const priority: Record<string, number> = {
+      running: 0,
+      waiting_approval: 1,
+      completed: 2,
+      failed: 3,
+    };
 
-      {isTimelineOpen && (
-        <div className="mt-4">
-          <ActivityTimeline
-            events={task.timeline}
-            title="Task Activity"
-            collapsed={false}
-            maxItems={8}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CompletedTaskItem({ task }: { task: CompletedTask }) {
-  const timeAgo = (date: Date) => {
-    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
-
-    if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
-    return date.toLocaleDateString();
-  };
-
-  return (
-    <div className="flex items-start gap-4 pb-4 relative">
-      <div className="absolute left-[11px] top-8 bottom-0 w-0.5 bg-border" />
-
-      <div className="flex-shrink-0 mt-0.5 relative z-10">
-        <div className="w-6 h-6 rounded-full bg-[#A5B574] flex items-center justify-center shadow-sm">
-          <CheckCircle2 className="w-4 h-4 text-white" />
-        </div>
-      </div>
-
-      <div className="flex-1 pt-0.5">
-        <h4 className="text-sm text-foreground mb-0.5">{task.title}</h4>
-        <p className="text-xs text-muted-foreground mb-1">{task.description}</p>
-        <span className="text-xs text-muted-foreground/80">{timeAgo(task.completedAt)}</span>
-      </div>
-    </div>
-  );
-}
-
-function TasksMode() {
-  const timeline = useChatStore((state) => state.timeline);
-  const activeTask = useChatStore((state) => state.activeTask);
-  const sampleTimeline: TimelineEvent[] = useMemo(() => [], []);
-
-  const runningTasks: RunningTask[] = useMemo(() => {
-    if (activeTask && activeTask.status !== 'completed') {
-      const timelineEvents = timeline.length > 0 ? timeline : sampleTimeline;
-      const progress = activeTask.progress || deriveProgress(timelineEvents);
-      const status = activeTask.status === 'completed'
-        ? 'finalizing'
-        : progress > 0
-          ? 'processing'
-          : 'analyzing';
-
-      return [
-        {
-          id: activeTask.id,
-          title: activeTask.title,
-          description: activeTask.description,
-          status,
-          timeline: timelineEvents,
-          progress,
-        },
-      ];
-    }
-
-    return [];
-  }, [activeTask, sampleTimeline, timeline]);
-
-  const pendingApprovals = timeline
-    .filter((event) => event.kind === 'approval_request')
-    .map((event) => {
-      const payload = event.payloadInline;
-      const title =
-        typeof payload?.title === 'string'
-          ? payload.title
-          : event.title;
-      const summary =
-        typeof payload?.summary === 'string'
-          ? payload.summary
-          : event.detail ?? 'Approval required';
-      const body =
-        typeof payload?.body === 'string'
-          ? payload.body
-          : 'Open the task timeline for full context.';
-      const approveLabel =
-        typeof payload?.approveLabel === 'string'
-          ? payload.approveLabel
-          : 'Approve';
-      const alwaysApproveLabel =
-        typeof payload?.alwaysApproveLabel === 'string'
-          ? payload.alwaysApproveLabel
-          : 'Always Approve';
-      const denyLabel =
-        typeof payload?.denyLabel === 'string'
-          ? payload.denyLabel
-          : 'Deny';
-
-      return {
-        id: event.id,
-        title,
-        summary,
-        body,
-        approveLabel,
-        alwaysApproveLabel,
-        denyLabel,
-      };
+    return [...runs].sort((a, b) => {
+      const byStatus = (priority[a.status] ?? 99) - (priority[b.status] ?? 99);
+      if (byStatus !== 0) return byStatus;
+      return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
     });
+  }, [runs]);
 
-  const completedTasks: CompletedTask[] = activeTask?.status === 'completed'
-    ? [
-        {
-          id: Number(activeTask.startedAt),
-          title: activeTask.title,
-          description: activeTask.summary ?? 'Task completed',
-          completedAt: new Date(activeTask.updatedAt),
-        },
-      ]
-    : [];
+  const selectedRun = useMemo(
+    () => sortedRuns.find((run) => run.id === selectedRunId) ?? null,
+    [selectedRunId, sortedRuns]
+  );
+
+  const selectedProgress = useMemo(() => {
+    if (!selectedRun) return 0;
+    if (selectedRun.progress > 0) return Math.min(100, Math.round(selectedRun.progress));
+    return deriveProgress(selectedTimeline);
+  }, [selectedRun, selectedTimeline]);
+
+  const timeAgo = (timestamp: number) => {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 15) return 'Just now';
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  const statusMeta = (status: string) => {
+    switch (status) {
+      case 'running':
+        return { label: 'Running', chip: 'bg-[#A5B574]/15 text-[#4A7C59] border-[#A5B574]/30' };
+      case 'waiting_approval':
+        return { label: 'Needs approval', chip: 'bg-[#D4A574]/15 text-[#C87137] border-[#D4A574]/30' };
+      case 'completed':
+        return { label: 'Completed', chip: 'bg-[#4A7C59]/15 text-[#4A7C59] border-[#4A7C59]/30' };
+      case 'failed':
+        return { label: 'Failed', chip: 'bg-destructive/10 text-destructive border-destructive/30' };
+      default:
+        return { label: status, chip: 'bg-muted/50 text-muted-foreground border-border' };
+    }
+  };
+
+  const requestIdForEvent = (event: TimelineEvent) => {
+    const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+    return typeof payload?.requestId === 'string' ? payload.requestId : null;
+  };
+
+  const handleOpenChat = async () => {
+    if (!selectedRun) return;
+    try {
+      await switchSession(selectedRun.sessionId);
+      onOpenChat?.();
+    } catch (err) {
+      console.error('Failed to open chat for task session', err);
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto px-6 py-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div>
-          <div className="mb-4">
-            <h2 className="text-xl text-foreground mb-1">Active Task</h2>
-            <p className="text-sm text-muted-foreground">Live task details</p>
+      <div className="max-w-6xl mx-auto">
+        <div className="flex flex-col gap-6 lg:flex-row">
+          <div className="lg:w-[360px] lg:flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-xl text-foreground mb-1">Tasks</h2>
+                <p className="text-sm text-muted-foreground">Runs saved from previous sessions</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void loadActiveRun();
+                  void reloadRuns();
+                }}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+              >
+                <RefreshCw className={isLoadingRuns ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                Refresh
+              </button>
+            </div>
+
+            <div className="bg-card/60 backdrop-blur-xl border border-border rounded-2xl p-3 shadow-sm">
+              {sortedRuns.length === 0 && !isLoadingRuns ? (
+                <div className="rounded-xl border border-border bg-card/40 p-5 text-sm text-muted-foreground">
+                  No tasks yet.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {sortedRuns.map((run) => {
+                    const isSelected = run.id === selectedRunId;
+                    const meta = statusMeta(run.status);
+                    const icon = run.status === 'completed' ? CheckCircle2 : run.status === 'failed' ? AlertTriangle : Loader2;
+                    const Icon = icon;
+
+                    return (
+                      <button
+                        key={run.id}
+                        type="button"
+                        onClick={() => void selectRun(run.id)}
+                        className={
+                          isSelected
+                            ? 'w-full rounded-xl border border-[#A5B574]/40 bg-card/80 p-4 text-left shadow-sm transition-all duration-200'
+                            : 'w-full rounded-xl border border-border bg-muted/10 p-4 text-left transition-all duration-200 hover:bg-muted/20'
+                        }
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-foreground truncate">{run.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground truncate">{run.description}</p>
+                          </div>
+                          <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${meta.chip}`}>
+                              {meta.label}
+                            </span>
+                            <Icon
+                              className={
+                                run.status === 'running'
+                                  ? 'h-4 w-4 text-[#A5B574] animate-spin'
+                                  : run.status === 'waiting_approval'
+                                    ? 'h-4 w-4 text-[#C87137]'
+                                    : run.status === 'failed'
+                                      ? 'h-4 w-4 text-destructive'
+                                      : 'h-4 w-4 text-[#4A7C59]'
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                            <span>{timeAgo(run.updatedAt)}</span>
+                            <span className="tabular-nums">{Math.min(100, Math.round(run.progress ?? 0))}%</span>
+                          </div>
+                          <div className="mt-2 w-full h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-[#A5B574] to-[#C87137] rounded-full transition-all duration-300 ease-in-out"
+                              style={{ width: `${Math.min(100, Math.round(run.progress ?? 0))}%` }}
+                            />
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="grid gap-4">
-            {runningTasks.length > 0 ? (
-              runningTasks.map((task) => (
-                <RunningTaskCard key={task.id} task={task} />
-              ))
-            ) : (
-              <div className="rounded-xl border border-border bg-card/50 p-6 text-sm text-muted-foreground">
-                No active task yet.
+          <div className="flex-1">
+            <div className="mb-3">
+              <h2 className="text-xl text-foreground mb-1">Task Details</h2>
+              <p className="text-sm text-muted-foreground">Timeline and approvals for the selected run</p>
+            </div>
+
+            {error && (
+              <div className="mb-4 rounded-2xl border border-destructive/25 bg-destructive/5 p-4 text-sm text-destructive">
+                {error}
               </div>
             )}
-          </div>
-        </div>
 
-        {pendingApprovals.length > 0 && (
-          <div>
-            <div className="mb-4">
-              <h2 className="text-xl text-foreground mb-1">Waiting for Approval</h2>
-              <p className="text-sm text-muted-foreground">Review and approve pending actions</p>
-            </div>
-
-            <div className="grid gap-4">
-              {pendingApprovals.map((approval) => (
-                  <ApprovalCard
-                    key={approval.id}
-                    title={approval.title}
-                    summary={approval.summary}
-                    body={approval.body}
-                    primaryActionLabel={approval.approveLabel}
-                    alwaysApproveLabel={approval.alwaysApproveLabel}
-                    denyLabel={approval.denyLabel}
-                    onApprove={() => console.log('Approved', approval.id)}
-                    onAlwaysApprove={() => console.log('Always approve', approval.id)}
-                    onDeny={() => console.log('Denied', approval.id)}
-                  />
-
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div>
-          <div className="mb-4">
-            <h2 className="text-xl text-foreground mb-1">Completed Tasks</h2>
-            <p className="text-sm text-muted-foreground">Recent accomplishments</p>
-          </div>
-
-          <div className="bg-card/50 backdrop-blur-xl border border-border rounded-xl p-5">
-            {completedTasks.map((task, index) => (
-              <div key={task.id} className={index < completedTasks.length - 1 ? 'mb-2' : ''}>
-                <CompletedTaskItem task={task} />
+            {!selectedRun ? (
+              <div className="rounded-2xl border border-border bg-card/50 p-6 text-sm text-muted-foreground">
+                Select a task to view details.
               </div>
-            ))}
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base text-foreground truncate">{selectedRun.title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{selectedRun.description}</p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] ${statusMeta(selectedRun.status).chip}`}
+                    >
+                      {statusMeta(selectedRun.status).label}
+                    </span>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Progress</span>
+                      <span className="tabular-nums">{selectedProgress}%</span>
+                    </div>
+                    <div className="mt-2 w-full h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-[#A5B574] to-[#C87137] rounded-full transition-all duration-300 ease-in-out"
+                        style={{ width: `${selectedProgress}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                    <span className="rounded-full border border-border px-3 py-1">Updated {timeAgo(selectedRun.updatedAt)}</span>
+                    <span className="rounded-full border border-border px-3 py-1">Started {timeAgo(selectedRun.startedAt)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenChat}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      Open chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void reloadSelectedTimeline()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                    >
+                      <RefreshCw className={isLoadingTimeline ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      Refresh timeline
+                    </button>
+                  </div>
+                </div>
+
+                <ActivityTimeline
+                  events={selectedTimeline}
+                  title="Task Activity"
+                  collapsed={false}
+                  maxItems={12}
+                  maxItemsExpanded={200}
+                  emptyMessage={isLoadingTimeline ? 'Loading activity...' : 'No activity yet'}
+                  onApprove={(event) => {
+                    const requestId = requestIdForEvent(event);
+                    if (!requestId) return;
+                    window.flowstate.approvals.reply(requestId, 'once').then(() => {
+                      void reloadSelectedTimeline();
+                    }).catch((err) => {
+                      console.error('Failed to approve request', err);
+                    });
+                  }}
+                  onAlwaysApprove={(event) => {
+                    const requestId = requestIdForEvent(event);
+                    if (!requestId) return;
+                    window.flowstate.approvals.reply(requestId, 'always').then(() => {
+                      void reloadSelectedTimeline();
+                    }).catch((err) => {
+                      console.error('Failed to always-approve request', err);
+                    });
+                  }}
+                  onDeny={(event) => {
+                    const requestId = requestIdForEvent(event);
+                    if (!requestId) return;
+                    window.flowstate.approvals.reply(requestId, 'deny').then(() => {
+                      void reloadSelectedTimeline();
+                    }).catch((err) => {
+                      console.error('Failed to deny request', err);
+                    });
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
