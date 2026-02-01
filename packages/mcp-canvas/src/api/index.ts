@@ -98,7 +98,7 @@ let cookieHeaderCache:
   | undefined;
 
 const buildCookieHeaderFromStorageState = async (storageStatePath: string, baseUrl: string) => {
-  const host = new URL(baseUrl).host;
+  const host = new URL(baseUrl).hostname;
   let stat: { mtimeMs: number };
   try {
     stat = await fs.stat(storageStatePath);

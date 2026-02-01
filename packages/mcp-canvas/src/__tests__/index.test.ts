@@ -291,6 +291,38 @@ describe('Canvas browser storage state filtering', () => {
     await expect(api.getUpcomingAssignments()).rejects.toThrow(/no usable cookies/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('matches cookies for Canvas hosts with non-standard ports', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-canvas-'));
+    const storageStatePath = path.join(tmp, 'storage_state.json');
+    await fs.writeFile(
+      storageStatePath,
+      JSON.stringify({
+        cookies: [
+          { name: 'canvas_session', value: 'session123', domain: 'canvas.example.com', path: '/' },
+        ],
+      }),
+      'utf8'
+    );
+
+    process.env.CANVAS_API_URL = 'https://canvas.example.com:3000';
+    process.env.CANVAS_AUTH_MODE = 'browser';
+    process.env.CANVAS_STORAGE_STATE_PATH = storageStatePath;
+    delete process.env.CANVAS_API_TOKEN;
+
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Cookie).toContain('canvas_session=session123');
+      return makeResponse([], {
+        headers: { 'content-type': 'application/json' },
+        url: 'https://canvas.example.com:3000/api/v1/users/self/todo',
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await api.getUpcomingAssignments();
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });
 
 describe('Canvas file downloads', () => {

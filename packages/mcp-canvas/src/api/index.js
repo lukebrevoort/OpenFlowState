@@ -62,7 +62,7 @@ const cookieDomainMatchesHost = (cookieDomain, host) => {
 };
 let cookieHeaderCache;
 const buildCookieHeaderFromStorageState = async (storageStatePath, baseUrl) => {
-    const host = new URL(baseUrl).host;
+    const host = new URL(baseUrl).hostname;
     let stat;
     try {
         stat = await fs.stat(storageStatePath);
