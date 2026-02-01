@@ -21,6 +21,12 @@ const makeResponse = (
   for (const [k, v] of Object.entries(options?.headers ?? {})) headersLower[k.toLowerCase()] = v;
 
   const status = options?.status ?? 200;
+  const buffer =
+    data instanceof ArrayBuffer
+      ? Buffer.from(data)
+      : ArrayBuffer.isView(data)
+        ? Buffer.from(data.buffer)
+        : Buffer.from(typeof data === 'string' ? data : JSON.stringify(data));
 
   return {
     ok: status >= 200 && status < 300,
@@ -29,6 +35,7 @@ const makeResponse = (
     headers: makeHeaders(headersLower),
     json: async () => data,
     text: async () => (typeof data === 'string' ? data : JSON.stringify(data)),
+    arrayBuffer: async () => buffer,
   } as any;
 };
 
@@ -214,5 +221,123 @@ describe('Tool Definition Validation', () => {
     ];
     expect(expectedTools).toHaveLength(16);
     for (const name of expectedTools) expect(name).toMatch(/^canvas_/);
+  });
+});
+
+describe('Canvas pagination', () => {
+  it('follows next links and aggregates results', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+
+    let call = 0;
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      call += 1;
+      if (call === 1) {
+        expect(url).toBe('https://canvas.example.com/api/v1/courses?per_page=100');
+        expect(init?.headers?.Authorization).toBe('Bearer secret-token');
+        return makeResponse([{ id: 1 }], {
+          url,
+          headers: {
+            link: '<https://canvas.example.com/api/v1/courses?page=2>; rel="next"',
+          },
+        });
+      }
+      return makeResponse([{ id: 2 }], { url });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    const results = await api.getCourses();
+    expect(results).toHaveLength(2);
+  });
+
+  it('throws when a paginated endpoint returns a non-array response', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+
+    const fetchMock = vi.fn(async (url: string) =>
+      makeResponse({ error: 'nope' }, { url })
+    );
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await expect(api.getCourses()).rejects.toThrow(/pagination expected an array/i);
+  });
+});
+
+describe('Canvas browser storage state filtering', () => {
+  it('errors when storage state has no cookies for the Canvas host', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-canvas-'));
+    const storageStatePath = path.join(tmp, 'storage_state.json');
+    await fs.writeFile(
+      storageStatePath,
+      JSON.stringify({
+        cookies: [
+          { name: 'canvas_session', value: 'session123', domain: 'other.example.com', path: '/' },
+        ],
+      }),
+      'utf8'
+    );
+
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_AUTH_MODE = 'browser';
+    process.env.CANVAS_STORAGE_STATE_PATH = storageStatePath;
+    delete process.env.CANVAS_API_TOKEN;
+
+    const fetchMock = vi.fn(async (_url: string) => makeResponse([]));
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/no usable cookies/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('Canvas file downloads', () => {
+  it('includes auth headers for Canvas-hosted files and follows redirects', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+
+    let call = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      call += 1;
+      if (call === 1) {
+        expect(init?.headers?.Authorization).toBe('Bearer secret-token');
+        return makeResponse('', {
+          status: 302,
+          headers: { location: 'https://canvas.example.com/files/redirected' },
+          url: 'https://canvas.example.com/files/original',
+        });
+      }
+      expect(init?.headers?.Authorization).toBe('Bearer secret-token');
+      return makeResponse('file-body', {
+        url: 'https://canvas.example.com/files/redirected',
+        headers: { 'content-type': 'text/plain' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    const downloaded = await api.downloadFileByUrl('https://canvas.example.com/files/original');
+    expect(downloaded.contentType).toBe('text/plain');
+    expect(downloaded.finalUrl).toBe('https://canvas.example.com/files/redirected');
+  });
+
+  it('does not include auth headers for external file URLs', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Authorization).toBeUndefined();
+      return makeResponse('file-body', {
+        url: 'https://files.example.com/resource',
+        headers: { 'content-type': 'application/pdf' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+    const downloaded = await api.downloadFileByUrl('https://files.example.com/resource');
+    expect(downloaded.contentType).toBe('application/pdf');
   });
 });
