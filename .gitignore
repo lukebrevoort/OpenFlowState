@@ -11,6 +11,8 @@ build/
 .env.*.local
 # FlowState local data
 .flowstate/
+canvas.json
+canvas.json.ready-*
 # IDE
 .idea/
 .vscode/

@@ -778,51 +778,51 @@ Each integration is a standalone MCP server that can be:
 
 **Notion MCP Tools**:
 
-| Tool | Description | Autonomy |
-|------|-------------|----------|
-| `notion_search` | Search pages, databases | Auto |
-| `notion_read_page` | Read page content | Auto |
-| `notion_read_database` | Query database entries | Auto |
-| `notion_create_page` | Create new page | Requires Approval |
-| `notion_update_page` | Update existing page | Requires Approval |
-| `notion_create_database_entry` | Add database row | Requires Approval |
+| Tool                           | Description             | Autonomy          |
+| ------------------------------ | ----------------------- | ----------------- |
+| `notion_search`                | Search pages, databases | Auto              |
+| `notion_read_page`             | Read page content       | Auto              |
+| `notion_read_database`         | Query database entries  | Auto              |
+| `notion_create_page`           | Create new page         | Requires Approval |
+| `notion_update_page`           | Update existing page    | Requires Approval |
+| `notion_create_database_entry` | Add database row        | Requires Approval |
 
 **Gmail MCP Tools**:
 
-| Tool | Description | Autonomy |
-|------|-------------|----------|
-| `gmail_list` | List emails with filters | Auto |
-| `gmail_read` | Read email content | Auto |
-| `gmail_search` | Search emails | Auto |
-| `gmail_draft` | Create draft (no send) | Auto |
-| `gmail_label` | Apply/remove labels | Auto |
-| `gmail_send` | Send email | Requires Approval |
-| `gmail_reply` | Reply to email | Requires Approval |
-| `gmail_delete` | Delete email | Requires Approval |
+| Tool           | Description              | Autonomy          |
+| -------------- | ------------------------ | ----------------- |
+| `gmail_list`   | List emails with filters | Auto              |
+| `gmail_read`   | Read email content       | Auto              |
+| `gmail_search` | Search emails            | Auto              |
+| `gmail_draft`  | Create draft (no send)   | Auto              |
+| `gmail_label`  | Apply/remove labels      | Auto              |
+| `gmail_send`   | Send email               | Requires Approval |
+| `gmail_reply`  | Reply to email           | Requires Approval |
+| `gmail_delete` | Delete email             | Requires Approval |
 
 **GCal MCP Tools**:
 
-| Tool | Description | Autonomy |
-|------|-------------|----------|
-| `gcal_list_events` | List calendar events | Auto |
-| `gcal_get_event` | Get event details | Auto |
-| `gcal_free_busy` | Check availability | Auto |
-| `gcal_find_conflicts` | Identify scheduling conflicts | Auto |
-| `gcal_create_event` | Create new event | Requires Approval |
-| `gcal_update_event` | Modify event | Requires Approval |
-| `gcal_delete_event` | Delete event | Requires Approval |
+| Tool                  | Description                   | Autonomy          |
+| --------------------- | ----------------------------- | ----------------- |
+| `gcal_list_events`    | List calendar events          | Auto              |
+| `gcal_get_event`      | Get event details             | Auto              |
+| `gcal_free_busy`      | Check availability            | Auto              |
+| `gcal_find_conflicts` | Identify scheduling conflicts | Auto              |
+| `gcal_create_event`   | Create new event              | Requires Approval |
+| `gcal_update_event`   | Modify event                  | Requires Approval |
+| `gcal_delete_event`   | Delete event                  | Requires Approval |
 
 **System MCP Tools**:
 
-| Tool | Description | Autonomy |
-|------|-------------|----------|
-| `system_notify` | Send desktop notification | Auto |
-| `system_open_app` | Open application | Auto |
-| `system_open_url` | Open URL in browser | Auto |
-| `system_open_file` | Open file in default app | Auto |
-| `system_list_files` | List files in directory | Auto |
-| `system_organize_files` | Move/rename files | Requires Approval |
-| `system_shell` | Execute shell command | Requires Approval |
+| Tool                    | Description               | Autonomy          |
+| ----------------------- | ------------------------- | ----------------- |
+| `system_notify`         | Send desktop notification | Auto              |
+| `system_open_app`       | Open application          | Auto              |
+| `system_open_url`       | Open URL in browser       | Auto              |
+| `system_open_file`      | Open file in default app  | Auto              |
+| `system_list_files`     | List files in directory   | Auto              |
+| `system_organize_files` | Move/rename files         | Requires Approval |
+| `system_shell`          | Execute shell command     | Requires Approval |
 
 ### User Custom MCPs
 
@@ -993,67 +993,71 @@ Use this when your desktop is cluttered and needs organization.
 
 ## Development Milestones
 
-### Phase 1: Desktop Foundation (Weeks 1-2) - DONE
+### Phase 1: Desktop Foundation - DONE
 
-- [ ] Set up `packages/desktop/` with Electron + React + TypeScript
-- [ ] Implement four-mode layout shell
-- [ ] Port FlowState theme to Tailwind
-- [ ] Create sidebar with placeholder content
-- [ ] Set up Electron main/renderer IPC
+- [x] Electron + React + TypeScript + Tailwind skeleton in `packages/desktop/`
+- [x] Four-mode shell + navigation + sidebar
+- [x] Main/renderer IPC bridge
 
-### Phase 2: OpenCode Integration (Weeks 3-4) - DONE
+### Phase 2: Headless OpenCode Integration - DONE
 
-- [ ] Implement process manager for headless OpenCode
-- [ ] Create SDK bridge in main process
-- [ ] Build Chat mode with message streaming
-- [ ] Connect to existing MCP servers
-- [ ] Test basic conversation flow
+- [x] ProcessManager starts OpenCode + streams events
+- [x] Chat mode streaming with session management
 
-### Phase 3: Integrations & Config (Weeks 5-6) - DONE
+### Phase 3: Integrations + Config Baseline - MOSTLY DONE
 
-- [ ] Implement config store (read/write `config.json`)
-- [ ] Build Integrations mode UI
-- [ ] Implement OAuth server for Google services
-- [ ] Port auth manager from core package
-- [ ] Test OAuth flow end-to-end
+Value: users can connect core services (Gmail/GCal/Notion/Canvas) and persist config.
 
-### Phase 3.5: Mockup Parity & UI Wiring (Week 6-7)
+- [x] Config store persisted to disk
+- [x] Auth manager + OAuth server
+- [x] Integrations UI + connect/disconnect
+- [ ] Confirm OAuth end-to-end with real credentials across Gmail + GCal (and Notion OAuth if we keep it)
+- [ ] Decide + implement secrets storage policy: keep encrypted files vs move to macOS Keychain
+- [ ] Implement Custom MCP add/configure UI (currently placeholder)
 
-- [ ] Port `appmockup/` theme + layout to `packages/desktop/renderer`
-- [ ] Implement app shell: header, toggleable sidebar, zen background
-- [ ] Implement navigation state (Home, Settings, 4 main modes)
-- [ ] Add conversation list + open thread (recent 3 + title-search)
-- [ ] Enforce/generated unique conversation titles; apply 90-day retention policy
-- [ ] Implement zen status indicator + live activity bar (combined, minimal signal)
-- [ ] Define typed IPC contracts for UI ↔ main (chat, tasks, workflows, integrations, settings)
-- [ ] Add inline approval card component (`Approve` / `Always Approve` / `Deny`)
-- [ ] Implement approval policy storage: per task run/session + per workflow opt-in (workflow runs can auto-approve tool requests)
-- [ ] Implement task promotion + Chat handoff card (with “keep in chat” override)
-- [ ] Introduce renderer stores for mockup screens (empty/loading/error states)
-- [ ] Replace mock data with real adapters incrementally (leave stubs where backend isn’t ready)
-- [ ] Add baseline UX polish: focus states, keyboard nav, window resizing, reduced motion
+### Phase 4: Execution Core (Timeline + Approvals + Tasks)
 
-### 3.75: Implement new Canvas MCP and Workflows (Week 7)
+Value: users can see what the agent is doing and approve risky actions; Tasks become a real first-class system (not just derived UI state).
 
-- [] Change current Canvas MCP system to implement a Playwrite version for schools which don't allow token creation.
-- [] Reference /Users/lbrevoort/assignmentTracker for how this works.
-- [] Update Onboarding to include Canvas and this option.
-- [] Update Integrations page to indicate new way of linking canvas MCP together.
-- [] Treat workflows as Opencode Commands that are sent to the running backend
-- [] Create Three Basic Common Cammands for users (Pull Assignments from Canvas, Clean up Desktop, and Read Email and create Drafts)
-- [] Implement on the Workflows page a easy UI for the user to specify what they want to workflow to do in a natural language way.
-- [] Tranform that natrual language into a specific command using opencode
-- [] Test full end to end with Canvas MCP and Workflows
+- [x] Timeline storage (SQLite + blob refs) and renderer timeline UI
+- [x] Approval request/response surfaced; Approve/Always Approve/Deny wired to OpenCode permission API
+- [x] Implement real TaskRun persistence + IPC (`tasks:listRuns`, `tasks:getActiveRun`, optional cancel)
+- [x ] Add Task run routing (Task list -> Task details) so Workflows/Chat can link to a stable task page
+- [x ] Connect per-workflow approval opt-in (`approval-policies.json`) to workflow runs (not just per-session)
 
-### Phase 4: Onboarding & Polish (Weeks 7-8)
+### Phase 5: Workflows + Commands Productization
 
-- [ ] Build complete onboarding flow
-- [ ] Implement provider selection
-- [ ] Create suggested prompts for wow moment
-- [ ] Add approval flow UI (inline + notifications)
-- [ ] Implement Tasks mode (view running tasks)
+Value: workflows feel immediate, have durable outputs, and are organized (no global-command clutter).
 
-#### Phase 4 Additions: OpenCode Observability UX — Unified Real-Time Timeline
+- [x] Workflows list + generator + runner exist (MVP-level)
+- [ ] Always create a Task immediately when a workflow starts (no delayed promotion path)
+- [ ] Persist WorkflowRuns + outputs (today runs are in-memory only)
+- [ ] Add Output/Artifacts for each run (final output, summary, exports) and show them in Task details
+- [ ] Add workflow run history (last N runs with status, duration, output preview)
+- [ ] Split Workflows view into `Workflows` vs `Commands` (power-user global commands like `tdd`)
+- [ ] Replace the current per-workflow menu with a Workflow Details drawer (Always Approve, inputs, export/duplicate/delete)
+- [ ] Persist pins and enforce pinned limit (3 max) consistently
+
+### Phase 6: Onboarding + UX Polish
+
+Value: first-run success rate goes up and the product feels coherent (less "stub" UI).
+
+- [x] Onboarding flow exists (apps, connect, provider/model, wow prompt)
+- [ ] Tighten the onboarding -> integrations handshake (clear "connected" feedback, fewer dead-ends)
+- [ ] Add missing UI wiring: workflow edit/duplicate/delete, custom MCP add, integration settings link
+- [ ] Notifications for approvals + task completion (macOS)
+- [ ] Reliability policy enforcement: retry/backoff + user messaging when MCP drops mid-task
+
+### Phase 7: Testing + Launch Prep
+
+Value: repeatable builds, fewer regressions, and a shippable beta.
+
+- [ ] Add e2e happy-path tests: onboarding -> connect -> run a workflow -> approve -> output saved
+- [ ] Add regression tests for timeline normalization + storage
+- [ ] Performance pass (timeline virtualization, memory usage, native module rebuild ergonomics)
+- [ ] Package unsigned DMG + docs + demo video
+
+#### Legacy Spec: Unified Real-Time Timeline
 
 > Goal: show users what FlowState is doing _in real time_ via a single, chronological activity feed. No tabs—just a live stream of steps, tool calls, and approvals that auto-scrolls as work progresses.
 
@@ -1100,11 +1104,11 @@ type TimelineEvent = {
 
 **Storage strategy (performance-first)**:
 
-| Data | Location | Reason |
-|------|----------|--------|
-| `TimelineEvent` metadata | SQLite row | Fast queries, pagination |
-| Payload < 10 KB | `payloadInline` (JSON in SQLite) | Single read, no extra I/O |
-| Payload ≥ 10 KB | Disk blob (`~/Library/Application Support/FlowState/blobs/<id>.json`) + `payloadRef` | Keeps DB lean; lazy-load on expand |
+| Data                     | Location                                                                             | Reason                             |
+| ------------------------ | ------------------------------------------------------------------------------------ | ---------------------------------- |
+| `TimelineEvent` metadata | SQLite row                                                                           | Fast queries, pagination           |
+| Payload < 10 KB          | `payloadInline` (JSON in SQLite)                                                     | Single read, no extra I/O          |
+| Payload ≥ 10 KB          | Disk blob (`~/Library/Application Support/FlowState/blobs/<id>.json`) + `payloadRef` | Keeps DB lean; lazy-load on expand |
 
 **Implementation checklist**:
 
@@ -1146,7 +1150,7 @@ Tasks Mode "Run Details": same timeline, always expanded, virtualized for long r
 
 ---
 
-#### Phase 4 Additions: MCP Efficiency (Gmail-first) — Smart Metadata Defaults
+#### Legacy Spec: MCP Efficiency (Gmail-first) — Smart Metadata Defaults
 
 > Goal: reduce LLM context/token cost by returning lean, structured data by default. Full bodies are fetched _only_ on explicit request.
 
@@ -1171,11 +1175,11 @@ Tasks Mode "Run Details": same timeline, always expanded, virtualized for long r
 
 **Controlled expansion** via optional params on `gmail_read`:
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `detailLevel` | `'ids'` \| `'metadata'` \| `'full'` | `'metadata'` | How much data to return |
-| `maxBodyChars` | `number` | `2000` | Truncate body to N chars (full mode) |
-| `includeHtml` | `boolean` | `false` | Return HTML part if available |
+| Param          | Type                                | Default      | Description                          |
+| -------------- | ----------------------------------- | ------------ | ------------------------------------ |
+| `detailLevel`  | `'ids'` \| `'metadata'` \| `'full'` | `'metadata'` | How much data to return              |
+| `maxBodyChars` | `number`                            | `2000`       | Truncate body to N chars (full mode) |
+| `includeHtml`  | `boolean`                           | `false`      | Return HTML part if available        |
 
 **New tool**: `gmail_get_thread`
 
@@ -1199,23 +1203,13 @@ gmail_get_thread({
 
 **Token savings estimate**: typical inbox scan drops from ~80K tokens (full payloads for 20 emails) to ~4K tokens (metadata only), with selective reads adding ~2K per expanded email.
 
-### Phase 5: Workflows (Weeks 9-10)
+### Phase 3.75: Canvas + School-Friendly Login (Folded Into Phases 3/6)
 
-- [ ] Build Workflows mode UI
-- [ ] Create pre-built workflow templates
-- [ ] Implement workflow runner
-- [ ] Add "pin to sidebar" functionality
-- [ ] Add per-workflow "Always Approve" toggle (on the workflow card)
-- [ ] Test workflow execution end-to-end
+Canvas is already present in the codebase (Canvas MCP + integration surface). Remaining work belongs in integrations/onboarding polish:
 
-### Phase 6: Testing & Launch Prep (Weeks 11-12)
-
-- [ ] End-to-end testing
-- [ ] Performance optimization
-- [ ] Create documentation
-- [ ] Build unsigned DMG for distribution
-- [ ] Create demo video
-- [ ] GitHub release v0.1.0
+- [ ] Decide the supported Canvas auth modes for MVP (API token vs browser storage-state)
+- [ ] If browser login is required: implement the Playwright storage-state flow and wire it into onboarding + integrations
+- [ ] Add 2-3 student workflows that use Canvas (pull assignments, summarize upcoming deadlines, generate study plan)
 
 ---
 
