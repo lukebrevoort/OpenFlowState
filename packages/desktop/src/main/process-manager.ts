@@ -16,7 +16,6 @@ import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
-import { authManager } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
