@@ -28,6 +28,7 @@ declare const flowstateAPI: {
         getStatus: (service: string) => Promise<any>;
         getAllStatuses: () => Promise<any>;
         removeToken: (service: string) => Promise<any>;
+        reauthenticate: (service: string) => Promise<any>;
         setCredentials: (service: string, credentials: unknown) => Promise<any>;
         getCredentials: (service: string) => Promise<any>;
         removeCredentials: (service: string) => Promise<any>;

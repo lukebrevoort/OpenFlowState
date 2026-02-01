@@ -60,6 +60,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
     getAllStatuses: () => ipcRenderer.invoke('auth:getAllStatuses'),
     removeToken: (service: string) => ipcRenderer.invoke('auth:removeToken', service),
 
+    reauthenticate: (service: string) => ipcRenderer.invoke('auth:reauthenticate', service),
+
     // Client credentials management
     setCredentials: (service: string, credentials: ClientCredentials) =>
       ipcRenderer.invoke('auth:setCredentials', service, credentials),

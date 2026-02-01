@@ -144,6 +144,18 @@ export function useOpenCode() {
       }
     });
 
+    const refreshChatMessagesForSession = async (sessionId?: string) => {
+      if (!sessionId) return;
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+      try {
+        const messages = await window.flowstate.opencode.getMessages();
+        loadMessages(messages);
+      } catch (err) {
+        console.error('Failed to refresh chat messages after task completion:', err);
+      }
+    };
+
     const applyTimelineEvent = (event: TimelineEvent) => {
       addTimelineEvent(event);
       if (event.kind === 'status' && event.title === 'Task promoted') {
@@ -164,6 +176,7 @@ export function useOpenCode() {
 
       if (event.kind === 'status' && event.title === 'Task completed') {
         updateActiveTask({ status: 'completed' });
+        void refreshChatMessagesForSession(event.sessionId);
       }
 
       if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
@@ -209,6 +222,13 @@ export function useOpenCode() {
       }
 
       if (Object.keys(updates).length > 0) store.updateActiveTask(updates);
+
+      if (events.some((event) => event.kind === 'status' && event.title === 'Task completed')) {
+        const completedSessionId = events.find(
+          (event) => event.kind === 'status' && event.title === 'Task completed'
+        )?.sessionId;
+        void refreshChatMessagesForSession(completedSessionId);
+      }
     });
 
     // Initial status check
@@ -224,7 +244,7 @@ export function useOpenCode() {
       removeTimelineListener();
       listenersInitialized = false;
     };
-  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError]);
+  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError, loadMessages]);
 
   // Note: We intentionally do not auto-inject task summaries into chat.
   // The chat response already arrives via `opencode:message`, and injecting the

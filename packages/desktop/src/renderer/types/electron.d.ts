@@ -215,6 +215,7 @@ export interface FlowstateAPI {
     getStatus: (service: string) => Promise<AuthStatus>;
     getAllStatuses: () => Promise<AuthStatus[]>;
     removeToken: (service: string) => Promise<void>;
+    reauthenticate: (service: string) => Promise<AuthToken>;
 
     // Client credentials management
     setCredentials: (service: string, credentials: ClientCredentials) => Promise<void>;

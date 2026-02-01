@@ -163,7 +163,7 @@ function App() {
       case 'chat':
         return <ChatMode onViewTask={() => setCurrentPage('tasks')} />;
       case 'tasks':
-        return <TasksMode />;
+        return <TasksMode onOpenChat={() => setCurrentPage('chat')} />;
       case 'workflows':
         return <WorkflowsMode />;
       case 'integrations':
