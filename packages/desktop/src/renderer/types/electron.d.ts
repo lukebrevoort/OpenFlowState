@@ -187,6 +187,16 @@ export interface McpServerStatus {
   error?: string;
 }
 
+export interface GoogleCalendarListEntry {
+  id: string;
+  summary?: string;
+  primary?: boolean;
+  selected?: boolean;
+  accessRole?: string;
+  timeZone?: string;
+  backgroundColor?: string;
+}
+
 export interface FlowstateAPI {
   app: {
     getInfo: () => Promise<AppInfo>;
@@ -207,6 +217,7 @@ export interface FlowstateAPI {
   config: {
     get: () => Promise<FlowstateConfig>;
     set: (config: Partial<FlowstateConfig>) => Promise<FlowstateConfig>;
+    getPath: () => Promise<string>;
   };
 
   auth: {
@@ -347,6 +358,10 @@ export interface FlowstateAPI {
     onApiTokenSuccess: (callback: (event: ApiTokenSuccessEvent) => void) => () => void;
   };
 
+  gcal: {
+    listCalendars: () => Promise<GoogleCalendarListEntry[]>;
+  };
+
   settings: {
     get: () => Promise<FlowstateConfig>;
     update: (config: Partial<FlowstateConfig>) => Promise<FlowstateConfig>;
@@ -384,6 +399,12 @@ export interface FlowstateConfig {
      * When undefined, the renderer should default to 'animated'.
      */
     backgroundMotion?: 'animated' | 'static';
+  };
+  integrations?: {
+    gcal?: {
+      readCalendarIds?: string[];
+      writeCalendarId?: string;
+    };
   };
   onboardingComplete?: boolean;
 }

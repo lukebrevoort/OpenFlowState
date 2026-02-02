@@ -2,7 +2,6 @@
 name: executor
 description: System automation specialist
 mode: subagent
-model: opencode/minimax-m2.1-free
 temperature: 0.1
 tools:
   system_*: true

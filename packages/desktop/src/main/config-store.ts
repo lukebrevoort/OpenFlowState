@@ -66,6 +66,24 @@ export interface UserPreferences {
   backgroundMotion?: 'animated' | 'static';
 }
 
+export interface GoogleCalendarPreferences {
+  /**
+   * Calendars the agent should read/check for conflicts.
+   * Defaults to ['primary'] when unset.
+   */
+  readCalendarIds?: string[];
+
+  /**
+   * Default calendar to create events in.
+   * When unset, the MCP server will use 'primary' unless only one read calendar is selected.
+   */
+  writeCalendarId?: string;
+}
+
+export interface IntegrationPreferences {
+  gcal?: GoogleCalendarPreferences;
+}
+
 /**
  * Complete FlowState configuration
  */
@@ -74,6 +92,7 @@ export interface FlowStateConfig {
   provider: ProviderConfig;
   mcpServers: Record<string, MCPServerConfig>;
   preferences: UserPreferences;
+  integrations?: IntegrationPreferences;
   onboardingComplete?: boolean;
 }
 
@@ -113,6 +132,7 @@ const DEFAULT_CONFIG: FlowStateConfig = {
       taskComplete: true,
     },
   },
+  integrations: {},
   onboardingComplete: false,
 };
 

@@ -50,6 +50,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (config: Partial<FlowstateConfig>) => ipcRenderer.invoke('config:set', config),
+    getPath: () => ipcRenderer.invoke('config:path'),
   },
 
   // Authentication
@@ -292,6 +293,10 @@ const flowstateAPI: FlowstateAPIDefinition = {
       ipcRenderer.on('auth:apiTokenSuccess', handler);
       return () => ipcRenderer.removeListener('auth:apiTokenSuccess', handler);
     },
+  },
+
+  gcal: {
+    listCalendars: () => ipcRenderer.invoke('gcal:listCalendars'),
   },
 
   settings: {

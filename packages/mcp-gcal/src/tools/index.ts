@@ -27,8 +27,17 @@ const formatToolError = (error: unknown): string => {
 // Tool definitions with autonomy levels
 const GCAL_TOOLS = [
   {
+    name: 'gcal_list_calendars',
+    description: 'List calendars available in the connected Google account',
+    autonomy: 'auto',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'gcal_list_events',
-    description: 'List calendar events within a time range',
+    description: 'List calendar events within a time range. By default, queries all calendars selected by the user in FlowState settings. Use calendarId or calendarIds parameters to override and query specific calendars.',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
@@ -43,11 +52,16 @@ const GCAL_TOOLS = [
         },
         maxResults: {
           type: 'number',
-          description: 'Maximum number of events to return (default: 10)',
+          description: 'Maximum number of events to return per calendar (default: 10)',
         },
         calendarId: {
           type: 'string',
-          description: 'Calendar ID (default: primary)',
+          description: 'Specific calendar ID to query (optional, defaults to user-selected calendars)',
+        },
+        calendarIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of specific calendar IDs to query (optional, overrides default selection)',
         },
       },
     },
@@ -73,7 +87,7 @@ const GCAL_TOOLS = [
   },
   {
     name: 'gcal_free_busy',
-    description: 'Check availability/free-busy times for calendars',
+    description: 'Check availability/free-busy times for calendars. By default, checks all calendars selected by the user in FlowState settings.',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
@@ -89,7 +103,7 @@ const GCAL_TOOLS = [
         calendarIds: {
           type: 'array',
           items: { type: 'string' },
-          description: 'List of calendar IDs to check',
+          description: 'List of specific calendar IDs to check (optional, defaults to user-selected calendars)',
         },
       },
       required: ['timeMin', 'timeMax'],
@@ -97,7 +111,7 @@ const GCAL_TOOLS = [
   },
   {
     name: 'gcal_find_conflicts',
-    description: 'Find scheduling conflicts within a time range',
+    description: 'Find scheduling conflicts within a time range across all selected calendars. Checks all calendars the user has selected in FlowState settings.',
     autonomy: 'auto',
     inputSchema: {
       type: 'object',
@@ -109,6 +123,11 @@ const GCAL_TOOLS = [
         timeMax: {
           type: 'string',
           description: 'End of time range (ISO 8601 format)',
+        },
+        calendarIds: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'List of specific calendar IDs to check (optional, defaults to user-selected calendars)',
         },
       },
       required: ['timeMin', 'timeMax'],
@@ -229,9 +248,22 @@ export function registerTools(server: Server): void {
 
     try {
       switch (name) {
+        case 'gcal_list_calendars': {
+          const calendars = await gcalApi.listCalendars();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(calendars, null, 2),
+              },
+            ],
+          };
+        }
+
         case 'gcal_list_events': {
           const events = await gcalApi.listEvents({
             calendarId: args?.calendarId as string | undefined,
+            calendarIds: args?.calendarIds as string[] | undefined,
             timeMin: args?.timeMin as string | undefined,
             timeMax: args?.timeMax as string | undefined,
             maxResults: args?.maxResults as number | undefined,
@@ -283,7 +315,8 @@ export function registerTools(server: Server): void {
         case 'gcal_find_conflicts': {
           const conflicts = await gcalApi.findConflicts(
             args?.timeMin as string,
-            args?.timeMax as string
+            args?.timeMax as string,
+            args?.calendarIds as string[] | undefined
           );
           
           if (conflicts.length === 0) {

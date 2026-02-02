@@ -9,6 +9,7 @@
  */
 
 import { google, calendar_v3 } from 'googleapis';
+import { getGcalDefaults, parseCalendarIdsEnv, isReadAllCalendarsEnv } from '../config.js';
 
 let calendarClient: calendar_v3.Calendar | null = null;
 
@@ -75,17 +76,92 @@ export async function getCalendarClient(): Promise<calendar_v3.Calendar> {
   return calendarClient;
 }
 
+const CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedCalendarIds: string[] | null = null;
+let cachedCalendarIdsAt = 0;
+
+const normalizeCalendarIds = (ids: string[]): string[] =>
+  ids.map((id) => id.trim()).filter((id) => id.length > 0);
+
+const getCachedCalendarIds = (): string[] | null => {
+  if (!cachedCalendarIds) return null;
+  if (Date.now() - cachedCalendarIdsAt > CALENDAR_CACHE_TTL_MS) return null;
+  return cachedCalendarIds;
+};
+
+const setCachedCalendarIds = (ids: string[]): void => {
+  cachedCalendarIds = ids;
+  cachedCalendarIdsAt = Date.now();
+};
+
+const resolveReadCalendarIds = async (explicit?: string[]): Promise<string[]> => {
+  if (explicit && explicit.length > 0) return normalizeCalendarIds(explicit);
+
+  const defaults = getGcalDefaults();
+  
+  // If user explicitly selected "All Calendars", return all available calendars
+  if (defaults.readAllCalendars) {
+    try {
+      const calendars = await listCalendars();
+      const ids = normalizeCalendarIds(calendars.map((c) => c.id));
+      if (ids.length > 0) {
+        return ids;
+      }
+    } catch (error) {
+      console.error('[mcp-gcal] Failed to list all calendars:', error);
+    }
+    return ['primary'];
+  }
+
+  // Use configured calendar IDs from environment
+  const envSelection = parseCalendarIdsEnv(process.env.GCAL_READ_CALENDAR_IDS);
+  if (envSelection && envSelection.length > 0) return envSelection;
+
+  // Fall back to primary if nothing configured
+  return ['primary'];
+};
+
 export async function listEvents(options: {
   calendarId?: string;
+  calendarIds?: string[];
   timeMin?: string;
   timeMax?: string;
   maxResults?: number;
 }) {
+  if (Array.isArray(options.calendarIds) && options.calendarIds.length > 0) {
+    return listEventsMulti({
+      calendarIds: options.calendarIds,
+      timeMin: options.timeMin,
+      timeMax: options.timeMax,
+      maxResultsPerCalendar: options.maxResults,
+    });
+  }
+
+  if (!options.calendarId || options.calendarId === 'primary') {
+    const defaultIds = await resolveReadCalendarIds();
+    if (defaultIds.length > 1) {
+      return listEventsMulti({
+        calendarIds: defaultIds,
+        timeMin: options.timeMin,
+        timeMax: options.timeMax,
+        maxResultsPerCalendar: options.maxResults,
+      });
+    }
+    if (defaultIds.length === 1 && !options.calendarId) {
+      return listEvents({
+        ...options,
+        calendarId: defaultIds[0],
+        calendarIds: undefined,
+      });
+    }
+  }
+
   const client = await getCalendarClient();
-  
+  const defaults = getGcalDefaults();
+
   // Clean up parameters to avoid "invalid_request"
   const params: calendar_v3.Params$Resource$Events$List = {
-    calendarId: options.calendarId || 'primary',
+    calendarId: options.calendarId || defaults.readCalendarIds[0] || 'primary',
     maxResults: options.maxResults || 10,
     singleEvents: true,
     orderBy: 'startTime',
@@ -106,6 +182,109 @@ export async function listEvents(options: {
   return response.data.items || [];
 }
 
+export type GcalCalendarListEntry = {
+  id: string;
+  summary?: string;
+  primary?: boolean;
+  selected?: boolean;
+  accessRole?: string;
+  timeZone?: string;
+  backgroundColor?: string;
+};
+
+export async function listCalendars(): Promise<GcalCalendarListEntry[]> {
+  const client = await getCalendarClient();
+
+  const calendars: GcalCalendarListEntry[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await client.calendarList.list({
+      maxResults: 250,
+      pageToken,
+    });
+
+    const items = response.data.items ?? [];
+    for (const item of items) {
+      if (!item.id) continue;
+      calendars.push({
+        id: item.id,
+        summary: item.summary ?? undefined,
+        primary: item.primary ?? undefined,
+        selected: item.selected ?? undefined,
+        accessRole: item.accessRole ?? undefined,
+        timeZone: item.timeZone ?? undefined,
+        backgroundColor: item.backgroundColor ?? undefined,
+      });
+    }
+
+    pageToken = response.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  calendars.sort((a, b) => {
+    const ap = a.primary ? 0 : 1;
+    const bp = b.primary ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return (a.summary ?? a.id).localeCompare(b.summary ?? b.id);
+  });
+
+  const ids = normalizeCalendarIds(calendars.map((c) => c.id));
+  if (ids.length > 0) setCachedCalendarIds(ids);
+
+  return calendars;
+}
+
+type EventWithCalendar = calendar_v3.Schema$Event & { calendarId?: string };
+
+const getEventStartIso = (event: calendar_v3.Schema$Event): string | null => {
+  const start = event.start?.dateTime ?? event.start?.date;
+  if (!start) return null;
+  try {
+    return new Date(start).toISOString();
+  } catch {
+    return null;
+  }
+};
+
+export async function listEventsMulti(options: {
+  calendarIds: string[];
+  timeMin?: string;
+  timeMax?: string;
+  maxResultsPerCalendar?: number;
+}): Promise<EventWithCalendar[]> {
+  const client = await getCalendarClient();
+
+  const timeMin = options.timeMin ?? new Date().toISOString();
+  const maxResults = options.maxResultsPerCalendar ?? 10;
+  const calendarIds = normalizeCalendarIds(options.calendarIds);
+
+  const results = await Promise.all(
+    calendarIds.map(async (calendarId) => {
+      const params: calendar_v3.Params$Resource$Events$List = {
+        calendarId,
+        maxResults,
+        singleEvents: true,
+        orderBy: 'startTime',
+        timeMin,
+      };
+      if (options.timeMax) params.timeMax = options.timeMax;
+
+      const response = await client.events.list(params);
+      const items = response.data.items ?? [];
+      return items.map((event) => ({ ...event, calendarId }));
+    })
+  );
+
+  const flattened = results.flat();
+  flattened.sort((a, b) => {
+    const as = getEventStartIso(a) ?? '';
+    const bs = getEventStartIso(b) ?? '';
+    return as.localeCompare(bs);
+  });
+
+  return flattened;
+}
+
 export async function getEvent(eventId: string, calendarId: string = 'primary') {
   const client = await getCalendarClient();
   
@@ -123,20 +302,30 @@ export async function getFreeBusy(options: {
   calendarIds?: string[];
 }) {
   const client = await getCalendarClient();
+  const defaults = getGcalDefaults();
+  const calendarIds = await resolveReadCalendarIds(options.calendarIds);
   
   const response = await client.freebusy.query({
     requestBody: {
       timeMin: options.timeMin,
       timeMax: options.timeMax,
-      items: (options.calendarIds || ['primary']).map(id => ({ id })),
+      items: (calendarIds.length > 0 ? calendarIds : defaults.readCalendarIds || ['primary']).map((id) => ({ id })),
     },
   });
 
   return response.data.calendars;
 }
 
-export async function findConflicts(timeMin: string, timeMax: string) {
-  const events = await listEvents({ timeMin, timeMax, maxResults: 100 });
+export async function findConflicts(timeMin: string, timeMax: string, calendarIds?: string[]) {
+  const defaults = getGcalDefaults();
+  const ids = await resolveReadCalendarIds(calendarIds && calendarIds.length > 0 ? calendarIds : undefined);
+
+  const events = await listEventsMulti({
+    calendarIds: ids.length > 0 ? ids : defaults.readCalendarIds,
+    timeMin,
+    timeMax,
+    maxResultsPerCalendar: 2500,
+  });
   
   const conflicts: Array<{ event1: any; event2: any }> = [];
   
@@ -145,6 +334,8 @@ export async function findConflicts(timeMin: string, timeMax: string) {
       const event1 = events[i];
       const event2 = events[j];
       
+      if (event1.status === 'cancelled' || event2.status === 'cancelled') continue;
+
       const start1 = new Date(event1.start?.dateTime || event1.start?.date || '');
       const end1 = new Date(event1.end?.dateTime || event1.end?.date || '');
       const start2 = new Date(event2.start?.dateTime || event2.start?.date || '');
@@ -170,9 +361,10 @@ export async function createEvent(event: {
   calendarId?: string;
 }) {
   const client = await getCalendarClient();
+  const defaults = getGcalDefaults();
   
   const response = await client.events.insert({
-    calendarId: event.calendarId || 'primary',
+    calendarId: event.calendarId || defaults.writeCalendarId || 'primary',
     requestBody: {
       summary: event.summary,
       description: event.description,
@@ -196,7 +388,7 @@ export async function updateEvent(
     attendees?: string[];
     location?: string;
   },
-  calendarId: string = 'primary'
+  calendarId: string = getGcalDefaults().writeCalendarId || 'primary'
 ) {
   const client = await getCalendarClient();
   
@@ -217,7 +409,10 @@ export async function updateEvent(
   return response.data;
 }
 
-export async function deleteEvent(eventId: string, calendarId: string = 'primary') {
+export async function deleteEvent(
+  eventId: string,
+  calendarId: string = getGcalDefaults().writeCalendarId || 'primary'
+) {
   const client = await getCalendarClient();
   
   await client.events.delete({

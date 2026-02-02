@@ -22,6 +22,7 @@ import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 import { taskStore } from './task-store.js';
 import type { TaskRunRecord } from './task-types.js';
+import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -127,6 +128,35 @@ const buildOpenCodeError = (
 const clampMessage = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}…`;
+};
+
+const redactSecrets = (input: string): string => {
+  const patterns: RegExp[] = [
+    /\bsk-[A-Za-z0-9]{16,}\b/g,
+    /\brk-[A-Za-z0-9]{16,}\b/g,
+    /\bAIza[0-9A-Za-z\-_]{30,}\b/g,
+    /\bghp_[A-Za-z0-9]{30,}\b/g,
+    /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/g,
+    /\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/g,
+    /\bBearer\s+[A-Za-z0-9_\-\.~=]{20,}\b/gi,
+    /\bBasic\s+[A-Za-z0-9_\-\.~=]{20,}\b/gi,
+  ];
+
+  let redacted = input;
+  for (const pattern of patterns) {
+    redacted = redacted.replace(pattern, '[REDACTED]');
+  }
+
+  redacted = redacted.replace(
+    /(api[_-]?key|token|secret|password)\s*[:=]\s*[^\s\n]{8,}/gi,
+    (_m, key) => `${String(key)}=[REDACTED]`
+  );
+
+  if (redacted.length > 2000) {
+    redacted = `${redacted.slice(0, 2000)}...`;
+  }
+
+  return redacted;
 };
 
 class ProcessManager {
@@ -276,6 +306,78 @@ class ProcessManager {
     };
   }
 
+  private async generateTaskTitleFromPrompt(prompt: string, fallbackTitle: string): Promise<string> {
+    const fallback = sanitizeTaskTitle(fallbackTitle) ?? heuristicTaskTitleFromPrompt(prompt);
+
+    // Keep things fast (and avoid extra calls) when heuristics are good enough.
+    if (!shouldAttemptLlmTitle(prompt, fallback)) {
+      return fallback;
+    }
+
+    if (!this.instance?.client) {
+      return fallback;
+    }
+
+    const redactedPrompt = redactSecrets(prompt);
+    const titlePrompt = [
+      'You are a task title generator.',
+      '',
+      'Create a short, specific task title for the user request.',
+      'Rules:',
+      '- Return ONLY the title text (no quotes, no markdown, no punctuation at the end).',
+      '- 3 to 7 words, <= 60 characters.',
+      '- Start with a verb when possible.',
+      '- Do NOT include filler like "Can you" / "Please" / "Yes" / "No".',
+      '- Do NOT include private data or secrets.',
+      '',
+      `User request: "${redactedPrompt.replace(/[\r\n]+/g, ' ').trim()}"`,
+    ].join('\n');
+
+    try {
+      // Use a dedicated short-lived session to avoid polluting the current conversation.
+      const created = await this.instance.client.session.create({});
+      if (created.error || !created.data?.id) {
+        return fallback;
+      }
+      const titleSessionId = created.data.id;
+
+      const result = await this.instance.client.session.prompt({
+        path: { id: titleSessionId },
+        body: {
+          agent: this.defaultAgent,
+          system: undefined,
+          parts: [{ type: 'text', text: titlePrompt }],
+        },
+      });
+
+      // Best-effort cleanup.
+      try {
+        await this.instance.client.session.delete({ path: { id: titleSessionId } });
+      } catch {
+        // ignore
+      }
+
+      if (result.error || !result.data) {
+        return fallback;
+      }
+
+      const parts = (result.data as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
+      const textContent = parts
+        .filter((p) => p.type === 'text')
+        .map((p) => p.text || '')
+        .join('')
+        .trim();
+
+      const sanitized = sanitizeTaskTitle(textContent);
+      if (!sanitized) return fallback;
+      if (sanitized.length > 60) return fallback;
+      return sanitized;
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to generate LLM task title:', error);
+      return fallback;
+    }
+  }
+
   private handleTaskStoreFromNormalizedEvent(
     rawType: string,
     normalized: {
@@ -301,6 +403,28 @@ class ProcessManager {
           progress: 0,
         };
         taskStore.upsertRun(run);
+
+        // Async: improve the title after promotion via LLM, fallback to heuristics.
+        const record = normalized.payload && typeof normalized.payload === 'object' ? (normalized.payload as Record<string, unknown>) : null;
+        const promptFromPayload = typeof record?.summary === 'string'
+          ? record.summary
+          : typeof record?.message === 'string'
+            ? record.message
+            : typeof record?.detail === 'string'
+              ? record.detail
+              : null;
+
+        if (promptFromPayload && promptFromPayload.trim().length > 0) {
+          void this.generateTaskTitleFromPrompt(promptFromPayload, run.title).then((betterTitle) => {
+            if (betterTitle && betterTitle !== run.title) {
+              try {
+                taskStore.updateRun(id, { title: betterTitle, updatedAt: Date.now() });
+              } catch (error) {
+                console.warn('[ProcessManager] Failed to update task title:', error);
+              }
+            }
+          });
+        }
         return;
       }
 
@@ -512,6 +636,35 @@ class ProcessManager {
       path.join(repoRoot, 'agents', 'flowstate.md'),
     ];
 
+    const stripModelFromAgentFile = async (agentPath: string): Promise<void> => {
+      try {
+        if (!fs.existsSync(agentPath)) return;
+        const raw = await fsPromises.readFile(agentPath, 'utf8');
+        const lines = raw.split('\n');
+        const firstDelimiter = lines.indexOf('---');
+        const secondDelimiter = lines.indexOf('---', firstDelimiter + 1);
+        if (firstDelimiter === -1 || secondDelimiter === -1) return;
+
+        const before = lines.join('\n');
+        const frontmatterLines = lines.slice(firstDelimiter + 1, secondDelimiter);
+        const filtered = frontmatterLines.filter((line) => !line.trim().startsWith('model:'));
+        if (filtered.length === frontmatterLines.length) return;
+
+        const updatedLines = [
+          ...lines.slice(0, firstDelimiter + 1),
+          ...filtered,
+          ...lines.slice(secondDelimiter),
+        ];
+
+        const after = updatedLines.join('\n');
+        if (after !== before) {
+          await fsPromises.writeFile(agentPath, after);
+        }
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to strip model from agent file:', agentPath, error);
+      }
+    };
+
     for (const agentPath of agentPaths) {
       try {
         if (!fs.existsSync(agentPath)) {
@@ -545,6 +698,18 @@ class ProcessManager {
       } catch (error) {
         console.warn('[ProcessManager] Failed to update agent model file:', agentPath, error);
       }
+    }
+
+    // Subagents should inherit the base model, so they must NOT declare a model.
+    const subagentNames = ['scheduler', 'organizer', 'communicator', 'executor'];
+    const subagentPaths: string[] = [];
+    for (const name of subagentNames) {
+      subagentPaths.push(path.join(repoRoot, '.opencode', 'agent', `${name}.md`));
+      subagentPaths.push(path.join(repoRoot, 'agents', 'subagents', `${name}.md`));
+    }
+
+    for (const agentPath of subagentPaths) {
+      await stripModelFromAgentFile(agentPath);
     }
 
     const configPath = path.join(repoRoot, 'flowstate.config.json');
@@ -628,6 +793,30 @@ class ProcessManager {
     const gcalCreds = await authManager.getClientCredentials('gcal');
     const gcalPath = this.verifyMcpServer(packagesDir, 'mcp-gcal');
     if (gcalToken && gcalPath) {
+      const gcalPrefs = configStore.get()?.integrations?.gcal;
+      const readCalendarIds = Array.isArray(gcalPrefs?.readCalendarIds)
+        ? gcalPrefs?.readCalendarIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
+        : undefined;
+      const writeCalendarId = typeof gcalPrefs?.writeCalendarId === 'string'
+        ? gcalPrefs.writeCalendarId.trim()
+        : '';
+
+      // Build calendar IDs env var:
+      // - If readCalendarIds is undefined/null: not configured, use default (primary)
+      // - If readCalendarIds is empty array: user selected "All Calendars"
+      // - If readCalendarIds has items: use those specific calendars
+      let calendarIdsEnv: string | undefined;
+      if (readCalendarIds === undefined || readCalendarIds === null) {
+        // Not configured - don't set env var, MCP will default to primary
+        calendarIdsEnv = undefined;
+      } else if (readCalendarIds.length === 0) {
+        // Explicitly empty - user wants all calendars, use '*' marker
+        calendarIdsEnv = '*';
+      } else {
+        // Specific calendars selected
+        calendarIdsEnv = readCalendarIds.join(',');
+      }
+
       mcpConfig['flowstate-gcal'] = {
         type: 'local',
         command: ['node', gcalPath],
@@ -636,6 +825,12 @@ class ProcessManager {
           GCAL_REFRESH_TOKEN: gcalToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gcalCreds?.clientId || '',
           GOOGLE_CLIENT_SECRET: gcalCreds?.clientSecret || '',
+          ...(calendarIdsEnv !== undefined
+            ? { GCAL_READ_CALENDAR_IDS: calendarIdsEnv }
+            : {}),
+          ...(writeCalendarId.length > 0
+            ? { GCAL_WRITE_CALENDAR_ID: writeCalendarId }
+            : {}),
         },
         enabled: true,
         timeout: 10000,

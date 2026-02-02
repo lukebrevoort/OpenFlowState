@@ -202,6 +202,15 @@ Move an email to trash.
 
 ## Google Calendar MCP (`@flowstate/mcp-gcal`)
 
+### `gcal_list_calendars`
+List calendars available in the connected Google account.
+
+| Property | Required | Type | Description |
+|----------|----------|------|-------------|
+| (none) | - | - | No parameters required |
+
+**Autonomy**: `auto`
+
 ### `gcal_list_events`
 List calendar events within a time range.
 
@@ -211,6 +220,7 @@ List calendar events within a time range.
 | `timeMax` | No | `string` | End of time range (ISO 8601 format) |
 | `maxResults` | No | `number` | Maximum number of events to return (default: 10) |
 | `calendarId` | No | `string` | Calendar ID (default: primary) |
+| `calendarIds` | No | `string[]` | List of calendar IDs to aggregate (overrides calendarId) |
 
 **Autonomy**: `auto`
 
@@ -248,6 +258,7 @@ Find scheduling conflicts within a time range.
 |----------|----------|------|-------------|
 | `timeMin` | **Yes** | `string` | Start of time range (ISO 8601 format) |
 | `timeMax` | **Yes** | `string` | End of time range (ISO 8601 format) |
+| `calendarIds` | No | `string[]` | List of calendar IDs to include (defaults to selected calendars) |
 
 **Autonomy**: `auto`
 

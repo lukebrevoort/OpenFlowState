@@ -18,6 +18,7 @@ import { timelineStore } from './timeline-store.js';
 import { taskStore } from './task-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
+import { listGoogleCalendars } from './google-calendar.js';
 import type { ApprovalReply } from './approval-policy-store.js';
 import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { workflowsRunner } from './workflows-runner.js';
@@ -284,6 +285,10 @@ ipcMain.handle('config:get', async () => {
 ipcMain.handle('config:set', async (_event, config: Parameters<typeof configStore.update>[0]) => {
   await configStore.update(config);
   return configStore.get();
+});
+
+ipcMain.handle('config:path', () => {
+  return configStore.getConfigPath();
 });
 
 // ============================================================================
@@ -705,6 +710,10 @@ ipcMain.handle('settings:getAppInfo', () => {
     platform: process.platform,
     isDev,
   };
+});
+
+ipcMain.handle('gcal:listCalendars', async () => {
+  return listGoogleCalendars();
 });
 
 ipcMain.handle('integrations:listAuthStatuses', async () => {

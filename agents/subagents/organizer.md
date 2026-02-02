@@ -2,7 +2,6 @@
 name: organizer
 description: Task and project organization specialist
 mode: subagent
-model: opencode/minimax-m2.1-free
 temperature: 0.2
 tools:
   notion_*: true

@@ -19,6 +19,16 @@ import {
   AuthOption,
 } from "../stores/integrationsStore";
 
+type GoogleCalendarListEntry = {
+  id: string;
+  summary?: string;
+  primary?: boolean;
+  selected?: boolean;
+  accessRole?: string;
+  timeZone?: string;
+  backgroundColor?: string;
+};
+
 /**
  * Auth Method Selector - Choose between OAuth and API Token
  */
@@ -716,6 +726,308 @@ function ConnectionModal({
   );
 }
 
+function GcalCalendarsModal({ onClose }: { onClose: () => void }) {
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [calendars, setCalendars] = useState<GoogleCalendarListEntry[]>([]);
+  const [query, setQuery] = useState("");
+  const [selectedReadIds, setSelectedReadIds] = useState<Set<string>>(new Set());
+  const [writeCalendarId, setWriteCalendarId] = useState<string>("primary");
+  const [isSaving, setIsSaving] = useState(false);
+  const [configPath, setConfigPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        if (!window.flowstate.gcal?.listCalendars) {
+          throw new Error(
+            "Calendar listing is not available. Restart FlowState after updating."
+          );
+        }
+
+        const [config, list, path] = await Promise.all([
+          window.flowstate.config.get(),
+          window.flowstate.gcal.listCalendars(),
+          window.flowstate.config.getPath(),
+        ]);
+
+        if (!mounted) return;
+
+        const configuredRead = config.integrations?.gcal?.readCalendarIds ?? [];
+        const configuredWrite = config.integrations?.gcal?.writeCalendarId;
+
+        setCalendars(list);
+        setConfigPath(path);
+
+        const primaryId = list.find((c) => c.primary)?.id ?? "primary";
+        const initialReadIds =
+          configuredRead.length > 0
+            ? configuredRead
+            : [primaryId];
+        setSelectedReadIds(new Set(initialReadIds));
+
+        const write =
+          typeof configuredWrite === "string" && configuredWrite.trim().length > 0
+            ? configuredWrite
+            : initialReadIds.length === 1
+              ? initialReadIds[0]
+              : primaryId;
+        setWriteCalendarId(write);
+      } catch (e) {
+        if (!mounted) return;
+        const message = e instanceof Error ? e.message : "Failed to load calendars";
+        setError(
+          message.includes("No handler registered for 'gcal:listCalendars'")
+            ? "Calendar listing is not available yet. Restart FlowState after updating."
+            : message
+        );
+      } finally {
+        if (!mounted) return;
+        setIsLoading(false);
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const filteredCalendars = calendars.filter((c) => {
+    const label = (c.summary ?? c.id).toLowerCase();
+    return label.includes(query.trim().toLowerCase());
+  });
+
+  const primaryId = calendars.find((c) => c.primary)?.id ?? "primary";
+
+  const selectAll = () => {
+    setSelectedReadIds(new Set(calendars.map((c) => c.id)));
+  };
+
+  const selectPrimaryOnly = () => {
+    setSelectedReadIds(new Set([primaryId]));
+  };
+
+  const clearSelection = () => {
+    setSelectedReadIds(new Set());
+  };
+
+  const toggleRead = (id: string) => {
+    setSelectedReadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const current = await window.flowstate.config.get();
+      const readIds = Array.from(selectedReadIds).filter((id) => id.trim().length > 0);
+      const primaryId = calendars.find((c) => c.primary)?.id ?? "primary";
+
+      const normalizedReadIds = readIds.length > 0 ? readIds : undefined;
+      const normalizedWriteId =
+        writeCalendarId.trim().length > 0 ? writeCalendarId.trim() : primaryId;
+
+      await window.flowstate.config.set({
+        integrations: {
+          ...(current.integrations ?? {}),
+          gcal: {
+            readCalendarIds: normalizedReadIds,
+            writeCalendarId: normalizedWriteId,
+          },
+        },
+      });
+
+      await window.flowstate.mcp.reload();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save calendar settings");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fs-modal-overlay"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="fs-modal">
+        <div className="fs-modal-header">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📅</span>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                Calendar Selection
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Choose which calendars FlowState should read for conflicts
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="fs-modal-body space-y-4">
+          {error && (
+            <div className="text-sm text-semantic-denied">{error}</div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Search calendars
+            </label>
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Schedule, Meetings, ..."
+              className="fs-input"
+              disabled={isLoading}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-foreground">
+              Read calendars
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="fs-button-ghost text-xs"
+                disabled={isLoading || isSaving || calendars.length === 0}
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                onClick={selectPrimaryOnly}
+                className="fs-button-ghost text-xs"
+                disabled={isLoading || isSaving || calendars.length === 0}
+              >
+                Primary only
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="fs-button-ghost text-xs"
+                disabled={isLoading || isSaving}
+              >
+                Clear
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {selectedReadIds.size === 0
+                  ? "All calendars"
+                  : `${selectedReadIds.size} selected`}
+              </span>
+            </div>
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+              {isLoading ? (
+                <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading calendars...
+                </div>
+              ) : filteredCalendars.length === 0 ? (
+                <div className="p-4 text-sm text-muted-foreground">
+                  No calendars found
+                </div>
+              ) : (
+                filteredCalendars.map((c) => {
+                  const checked = selectedReadIds.has(c.id);
+                  const label = c.summary ?? c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => toggleRead(c.id)}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-muted/40"
+                      disabled={isSaving}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-foreground truncate">
+                          {label}
+                          {c.primary ? " (Primary)" : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {c.id}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {checked ? (
+                          <Check className="w-4 h-4 text-primary" />
+                        ) : (
+                          <div className="w-4 h-4 rounded border border-border" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              FlowState uses these calendars for availability checks and conflict detection.
+              Clear selection to include all calendars.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Create events in
+            </label>
+            <select
+              className="fs-input"
+              value={writeCalendarId}
+              onChange={(e) => setWriteCalendarId(e.target.value)}
+              disabled={isLoading || isSaving}
+            >
+              {calendars.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.summary ?? c.id}{c.primary ? " (Primary)" : ""}
+                </option>
+              ))}
+              {calendars.length === 0 && (
+                <option value="primary">Primary</option>
+              )}
+            </select>
+          </div>
+
+          {configPath && (
+            <p className="text-xs text-muted-foreground">
+              Preferences saved to {configPath}
+            </p>
+          )}
+        </div>
+
+        <div className="fs-modal-footer">
+          <button
+            type="button"
+            onClick={onClose}
+            className="fs-button-ghost"
+            disabled={isSaving}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="fs-button-primary"
+            disabled={isSaving || isLoading}
+          >
+            {isSaving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * IntegrationsMode - Connect and manage external services
  */
@@ -740,6 +1052,7 @@ function IntegrationsMode() {
   const [showModal, setShowModal] = useState(false);
   const [selectedIntegration, setSelectedIntegration] =
     useState<Integration | null>(null);
+  const [showGcalCalendarsModal, setShowGcalCalendarsModal] = useState(false);
 
   useEffect(() => {
     if (!showModal) {
@@ -885,11 +1198,11 @@ function IntegrationsMode() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
+        <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
           {isConnected ? (
             <>
               <button
-                className="fs-button-ghost text-sm py-1.5 flex items-center gap-1"
+                className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
                 onClick={handleRefresh}
                 disabled={isLoading}
               >
@@ -898,8 +1211,20 @@ function IntegrationsMode() {
                 />
                 Sync
               </button>
+
+              {integration.id === "gcal" && (
+                <button
+                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => setShowGcalCalendarsModal(true)}
+                  disabled={isLoading}
+                >
+                  <Settings className="w-3 h-3" />
+                  Calendars
+                </button>
+              )}
+
               <button
-                className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 text-semantic-denied hover:text-semantic-denied"
+                className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 text-semantic-denied hover:text-semantic-denied w-full sm:w-auto"
                 onClick={() => handleDisconnect(integration.id)}
               >
                 <X className="w-3 h-3" />
@@ -908,7 +1233,7 @@ function IntegrationsMode() {
             </>
           ) : (
             <button
-              className="fs-button-primary text-sm py-1.5 flex items-center gap-1"
+              className="fs-button-primary text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
               onClick={() => handleConnect(integration)}
               disabled={isConnecting}
             >
@@ -1051,6 +1376,12 @@ function IntegrationsMode() {
             onOAuthSubmit={handleOAuthSubmit}
             onApiTokenSubmit={handleApiTokenSubmit}
             isLoading={connectingService === selectedIntegration.id}
+          />
+        )}
+
+        {showGcalCalendarsModal && (
+          <GcalCalendarsModal
+            onClose={() => setShowGcalCalendarsModal(false)}
           />
         )}
       </div>
