@@ -10,6 +10,7 @@
  */
 
 import { app } from 'electron';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
@@ -21,6 +22,8 @@ import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 import { taskStore } from './task-store.js';
+import { workflowRunStore } from './workflow-run-store.js';
+import { clampText, requiresUserInput } from './workflow-response-utils.js';
 import type { TaskRunRecord } from './task-types.js';
 import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
 
@@ -1295,6 +1298,8 @@ class ProcessManager {
         parts: parts,
       };
 
+      this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+
       if (webContents) {
         webContents.send('opencode:message', assistantMessage);
         webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
@@ -1392,6 +1397,8 @@ class ProcessManager {
         timestamp: new Date().toISOString(),
         parts: parts,
       };
+
+      this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
 
       console.log('[ProcessManager] Sending message to renderer:', assistantMessage.id, 'content length:', assistantMessage.content.length);
       webContents.send('opencode:message', assistantMessage);
@@ -1646,6 +1653,50 @@ class ProcessManager {
     }
 
     this.taskPromotionState.set(sessionId, state);
+  }
+
+  private syncWorkflowRunFromAssistant(sessionId: string, content: string, assistantMessageId?: string): void {
+    if (!sessionId || !content.trim()) return;
+
+    try {
+      workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+      taskStore.configure({ dataDir: configStore.getDataDir() });
+
+      const run = workflowRunStore.getRunBySessionId(sessionId);
+      if (!run) return;
+
+      const needsInput = requiresUserInput(content);
+      const now = Date.now();
+      const runStatus = needsInput ? 'waiting_approval' : 'completed';
+
+      workflowRunStore.updateRun(run.id, {
+        status: runStatus,
+        ...(needsInput ? {} : { finishedAt: now }),
+        ...(assistantMessageId ? { assistantMessageId } : {}),
+        outputPreview: clampText(content, 280),
+      });
+
+      workflowRunStore.createArtifact({
+        artifactId: randomUUID(),
+        workflowRunId: run.id,
+        kind: 'final_output',
+        title: 'Final output',
+        mime: 'text/plain',
+        createdAt: now,
+        payloadText: content,
+      });
+
+      if (run.taskRunId) {
+        taskStore.updateRun(run.taskRunId, {
+          status: needsInput ? 'waiting_approval' : 'completed',
+          progress: needsInput ? 50 : 100,
+          updatedAt: now,
+          ...(needsInput ? { description: 'Waiting for input...' } : {}),
+        });
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to sync workflow run from assistant response:', error);
+    }
   }
 
   private clearTaskTracking(sessionId: string) {

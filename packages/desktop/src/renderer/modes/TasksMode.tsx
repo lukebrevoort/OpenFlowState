@@ -1,5 +1,5 @@
-import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare } from 'lucide-react';
-import { useEffect, useMemo } from 'react';
+import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
 import { useTasksStore } from '../stores/tasksStore';
@@ -42,7 +42,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const selectRun = useTasksStore((state) => state.selectRun);
   const reloadSelectedTimeline = useTasksStore((state) => state.reloadSelectedTimeline);
   const reloadSelectedArtifacts = useTasksStore((state) => state.reloadSelectedArtifacts);
-  const { switchSession } = useOpenCode();
+  const { switchSession, sendMessage } = useOpenCode();
+
+  const [showReplyModal, setShowReplyModal] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [isSendingReply, setIsSendingReply] = useState(false);
 
   useEffect(() => {
     void loadActiveRun();
@@ -94,6 +99,33 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     const summary = pickLatest(byKind('summary'));
     return { finalOutput, summary };
   }, [selectedArtifacts, selectedWorkflow]);
+
+  const canRespond = Boolean(selectedWorkflow && selectedRun?.status === 'waiting_approval');
+
+  const handleSendReply = async () => {
+    if (!selectedRun || !replyText.trim()) return;
+    setIsSendingReply(true);
+    setReplyError(null);
+
+    try {
+      await switchSession(selectedRun.sessionId);
+      const result = await sendMessage(replyText.trim());
+      if (!result || !result.success) {
+        setReplyError(result?.error ?? 'Failed to send response.');
+        return;
+      }
+
+      setShowReplyModal(false);
+      setReplyText('');
+      await reloadRuns({ silent: true });
+      await reloadSelectedTimeline({ silent: true });
+      await reloadSelectedArtifacts({ silent: true });
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Failed to send response.');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
 
   const selectedProgress = useMemo(() => {
     if (!selectedRun) return 0;
@@ -312,6 +344,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
+                        {canRespond && (
+                          <button
+                            type="button"
+                            onClick={() => setShowReplyModal(true)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
+                          >
+                            Respond
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={handleOpenChat}
@@ -400,6 +441,70 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
           </div>
         </div>
       </div>
+
+      {showReplyModal && selectedRun && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card/90 p-6 shadow-xl backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Respond to workflow</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Your response will continue the workflow and update this task.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReplyModal(false)}
+                className="rounded-lg border border-border bg-muted/20 p-2 text-muted-foreground transition hover:bg-muted/40"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {workflowArtifacts?.finalOutput?.payloadText && (
+              <div className="mt-4 rounded-xl border border-border bg-muted/10 p-3 text-xs text-muted-foreground line-clamp-4">
+                {workflowArtifacts.finalOutput.payloadText}
+              </div>
+            )}
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold text-muted-foreground">Your response</label>
+              <textarea
+                value={replyText}
+                onChange={(event) => setReplyText(event.target.value)}
+                placeholder="Type your response..."
+                rows={4}
+                className="mt-2 w-full rounded-xl border border-border bg-muted/10 p-3 text-sm text-foreground outline-none focus:border-[#A5B574]/60"
+              />
+              {replyError && (
+                <div className="mt-2 rounded-lg border border-destructive/25 bg-destructive/5 p-2 text-xs text-destructive">
+                  {replyError}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReplyModal(false)}
+                className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition hover:bg-muted/40"
+                disabled={isSendingReply}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReply}
+                disabled={isSendingReply || !replyText.trim()}
+                className="rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/15 px-4 py-2 text-xs text-[#4A7C59] transition hover:bg-[#A5B574]/25 disabled:opacity-60"
+              >
+                {isSendingReply ? 'Sending...' : 'Send response'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

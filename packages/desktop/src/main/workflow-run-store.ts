@@ -278,6 +278,17 @@ export class WorkflowRunStore {
     return rowToRunRecord(row);
   }
 
+  getRunBySessionId(sessionId: string): WorkflowRunRecord | null {
+    this.initialize();
+    if (!this.db) return null;
+
+    const row = this.db
+      .prepare('SELECT * FROM workflow_runs WHERE session_id = ? ORDER BY started_at DESC LIMIT 1')
+      .get(sessionId) as WorkflowRunRow | undefined;
+
+    return row ? rowToRunRecord(row) : null;
+  }
+
   listRunsByWorkflow(workflowId: string, query: WorkflowRunListQuery = {}): WorkflowRunRecord[] {
     this.initialize();
     if (!this.db) return [];

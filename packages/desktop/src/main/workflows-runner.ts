@@ -8,6 +8,7 @@ import { processManager } from './process-manager.js';
 import { taskStore } from './task-store.js';
 import type { TaskRunRecord } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
+import { clampText, requiresUserInput } from './workflow-response-utils.js';
 import { workflowsStore } from './workflows-store.js';
 
 type IpcErrorCode = 'NOT_IMPLEMENTED' | 'INVALID_REQUEST' | 'UNAVAILABLE' | 'UNKNOWN';
@@ -51,11 +52,6 @@ const extractTextFromParts = (parts: unknown): string => {
     .filter((p) => p && typeof p === 'object' && (p as { type?: string }).type === 'text')
     .map((p) => ((p as { text?: string }).text ?? ''))
     .join('');
-};
-
-const clampText = (value: string, maxLen: number): string => {
-  if (value.length <= maxLen) return value;
-  return `${value.slice(0, maxLen)}...`;
 };
 
 const safeJsonStringify = (input: unknown): string | undefined => {
@@ -285,10 +281,12 @@ class WorkflowsRunner {
 
         const response = await processManager.promptSession(workflowSessionId, prompt);
         const finishedAt = Date.now();
+        const needsInput = requiresUserInput(response.content);
+        const runStatus = needsInput ? 'waiting_approval' : 'completed';
 
         workflowRunStore.updateRun(workflowRunId, {
-          status: 'completed',
-          finishedAt,
+          status: runStatus,
+          ...(needsInput ? {} : { finishedAt }),
           assistantMessageId: response.assistantMessageId,
           outputPreview: clampText(response.content, 280),
         });
@@ -303,18 +301,19 @@ class WorkflowsRunner {
         });
 
         taskStore.updateRun(taskRunId, {
-          status: 'completed',
-          progress: 100,
+          status: needsInput ? 'waiting_approval' : 'completed',
+          progress: needsInput ? 50 : 100,
           updatedAt: finishedAt,
+          ...(needsInput ? { description: 'Waiting for input...' } : {}),
         });
 
         const completed = workflowsStore.updateRun(workflowRunId, {
-          status: 'completed',
-          finishedAt,
+          status: runStatus,
+          ...(needsInput ? {} : { finishedAt }),
           assistantMessageId: response.assistantMessageId,
           output: { content: response.content, parts: response.parts },
         });
-        return { ok: true, data: completed ?? { ...baseRun, status: 'completed', finishedAt } };
+        return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput ? {} : { finishedAt }) } };
       }
 
       processManager.registerTaskSession(workflowSessionId, `command:${id}`);
@@ -353,11 +352,13 @@ class WorkflowsRunner {
 
       const finishedAt = Date.now();
       const text = extractTextFromParts((result.data as { parts?: unknown })?.parts);
+      const needsInput = requiresUserInput(text);
+      const runStatus = needsInput ? 'waiting_approval' : 'completed';
 
       const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
       workflowRunStore.updateRun(workflowRunId, {
-        status: 'completed',
-        finishedAt,
+        status: runStatus,
+        ...(needsInput ? {} : { finishedAt }),
         assistantMessageId,
         outputPreview: clampText(text, 280),
       });
@@ -372,19 +373,20 @@ class WorkflowsRunner {
       });
 
       taskStore.updateRun(taskRunId, {
-        status: 'completed',
-        progress: 100,
+        status: needsInput ? 'waiting_approval' : 'completed',
+        progress: needsInput ? 50 : 100,
         updatedAt: finishedAt,
+        ...(needsInput ? { description: 'Waiting for input...' } : {}),
       });
 
       const completed = workflowsStore.updateRun(workflowRunId, {
-        status: 'completed',
-        finishedAt,
+        status: runStatus,
+        ...(needsInput ? {} : { finishedAt }),
         ...(assistantMessageId ? { assistantMessageId } : {}),
         output: { content: text, raw: result.data },
       });
 
-      return { ok: true, data: completed ?? { ...baseRun, status: 'completed', finishedAt } };
+      return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput ? {} : { finishedAt }) } };
     } catch (error) {
       const finishedAt = Date.now();
       const message = error instanceof Error ? error.message : String(error);
