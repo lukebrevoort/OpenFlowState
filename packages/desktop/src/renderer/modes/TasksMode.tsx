@@ -42,6 +42,10 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const selectRun = useTasksStore((state) => state.selectRun);
   const reloadSelectedTimeline = useTasksStore((state) => state.reloadSelectedTimeline);
   const reloadSelectedArtifacts = useTasksStore((state) => state.reloadSelectedArtifacts);
+  const cancelRun = useTasksStore((state) => state.cancelRun);
+  const removeRun = useTasksStore((state) => state.removeRun);
+  const markRunning = useTasksStore((state) => state.markRunning);
+  const markComplete = useTasksStore((state) => state.markComplete);
   const { switchSession, sendMessage } = useOpenCode();
 
   const [showReplyModal, setShowReplyModal] = useState(false);
@@ -49,6 +53,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  const isRefreshing = isLoadingRuns || isLoadingTimeline || isLoadingArtifacts;
+
+  const handleRefreshAll = () => {
+    void loadActiveRun();
+    void reloadRuns();
+    void reloadSelectedTimeline();
+    void reloadSelectedArtifacts();
+  };
 
   useEffect(() => {
     void loadActiveRun();
@@ -102,6 +115,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   }, [selectedArtifacts, selectedWorkflow]);
 
   const canRespond = Boolean(selectedWorkflow && selectedRun?.status === 'waiting_approval');
+  const canCancel = Boolean(selectedRun && (selectedRun.status === 'running' || selectedRun.status === 'waiting_approval'));
+  const canMarkComplete = Boolean(selectedRun && selectedRun.status !== 'completed' && selectedRun.status !== 'cancelled');
+  const canRemove = Boolean(selectedRun && (selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'cancelled'));
 
   const handleSendReply = async () => {
     if (!selectedRun || !replyText.trim()) return;
@@ -116,8 +132,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
         return;
       }
 
+      // Close immediately on success; background polling will pick up new events.
       setShowReplyModal(false);
       setReplyText('');
+      setIsSendingReply(false);
+      await markRunning(selectedRun.id);
       setToast('Response sent — continuing workflow');
       window.setTimeout(() => setToast(null), 2500);
 
@@ -159,6 +178,8 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
         return { label: 'Completed', chip: 'bg-[#4A7C59]/15 text-[#4A7C59] border-[#4A7C59]/30' };
       case 'failed':
         return { label: 'Failed', chip: 'bg-destructive/10 text-destructive border-destructive/30' };
+      case 'cancelled':
+        return { label: 'Cancelled', chip: 'bg-muted/50 text-muted-foreground border-border' };
       default:
         return { label: status, chip: 'bg-muted/50 text-muted-foreground border-border' };
     }
@@ -179,6 +200,45 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     }
   };
 
+  const handleCancelRun = async () => {
+    if (!selectedRun) return;
+    const confirmCancel = window.confirm('Cancel this task? It may still finish in the background.');
+    if (!confirmCancel) return;
+
+    const ok = await cancelRun(selectedRun.id);
+    if (ok) {
+      setToast('Task cancelled');
+      window.setTimeout(() => setToast(null), 2000);
+      void reloadRuns({ silent: true });
+    }
+  };
+
+  const handleRemoveRun = async () => {
+    if (!selectedRun) return;
+    const confirmRemove = window.confirm('Remove this task from history?');
+    if (!confirmRemove) return;
+
+    const ok = await removeRun(selectedRun.id);
+    if (ok) {
+      setToast('Task removed');
+      window.setTimeout(() => setToast(null), 2000);
+      void reloadRuns({ silent: true });
+    }
+  };
+
+  const handleMarkComplete = async () => {
+    if (!selectedRun) return;
+    const confirmComplete = window.confirm('Mark this task as complete?');
+    if (!confirmComplete) return;
+
+    const ok = await markComplete(selectedRun.id);
+    if (ok) {
+      setToast('Task marked complete');
+      window.setTimeout(() => setToast(null), 2000);
+      void reloadRuns({ silent: true });
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto px-6 py-6">
       <div className="max-w-6xl mx-auto">
@@ -189,17 +249,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 <h2 className="text-xl text-foreground mb-1">Tasks</h2>
                 <p className="text-sm text-muted-foreground">Runs saved from previous sessions</p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  void loadActiveRun();
-                  void reloadRuns();
-                }}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
-              >
-                <RefreshCw className={isLoadingRuns ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                Refresh
-              </button>
             </div>
 
             <div className="bg-card/60 backdrop-blur-xl border border-border rounded-2xl p-3 shadow-sm">
@@ -321,34 +370,59 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-foreground">Controls</h3>
-                  <div className="flex items-center gap-2">
-                    {canRespond && (
+                    <div className="flex items-center gap-2">
+                      {canRespond && (
+                        <button
+                          type="button"
+                          onClick={() => setShowReplyModal(true)}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
+                        >
+                          Respond
+                        </button>
+                      )}
+                      {canMarkComplete && (
+                        <button
+                          type="button"
+                          onClick={handleMarkComplete}
+                          className="inline-flex items-center gap-2 rounded-lg border border-[#4A7C59]/30 bg-[#4A7C59]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#4A7C59]/20"
+                        >
+                          Mark complete
+                        </button>
+                      )}
+                      {canCancel ? (
+                        <button
+                          type="button"
+                          onClick={handleCancelRun}
+                          className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive transition-all duration-300 hover:bg-destructive/10"
+                        >
+                          Cancel task
+                        </button>
+                      ) : canRemove ? (
+                        <button
+                          type="button"
+                          onClick={handleRemoveRun}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                        >
+                          Remove task
+                        </button>
+                      ) : null}
                       <button
                         type="button"
-                        onClick={() => setShowReplyModal(true)}
-                        className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
-                      >
-                        Respond
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleOpenChat}
-                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                        onClick={handleOpenChat}
+                      disabled={!selectedRun}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <MessageSquare className="h-4 w-4" />
                       Open chat
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        void reloadSelectedTimeline({ silent: true });
-                        void reloadSelectedArtifacts({ silent: true });
-                      }}
-                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                      onClick={handleRefreshAll}
+                      disabled={isRefreshing}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      <RefreshCw className={(isLoadingTimeline || isLoadingArtifacts) ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                      Refresh
+                      <RefreshCw className={isRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      Refresh all
                     </button>
                   </div>
                 </div>
@@ -362,7 +436,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                           Workflow run {selectedWorkflow.workflowRunId}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2" />
                     </div>
 
                     {artifactsError && (

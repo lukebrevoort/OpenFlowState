@@ -210,6 +210,14 @@ export class TaskStore {
     return rowToRecord(row);
   }
 
+  deleteRun(id: string): boolean {
+    this.initialize();
+    if (!this.db) return false;
+
+    const result = this.db.prepare('DELETE FROM task_runs WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
+
   listRuns(query: TaskRunListQuery = {}): TaskRunRecord[] {
     this.initialize();
     if (!this.db) return [];

@@ -14,6 +14,7 @@ import {
   PanelRight,
   X,
   Clock,
+  Check,
 } from 'lucide-react';
 import { useWorkflowsStore } from '../stores/workflowsStore';
 import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
@@ -362,7 +363,10 @@ function WorkflowsMode({
   const ensureRunsLoaded = useWorkflowsStore((state) => state.ensureRunsLoaded);
   const [drawerWorkflowId, setDrawerWorkflowId] = useState<string | null>(null);
   const [startingWorkflowId, setStartingWorkflowId] = useState<string | null>(null);
-  const [startToast, setStartToast] = useState<string | null>(null);
+  const [startToast, setStartToast] = useState<{
+    message: string;
+    variant: 'loading' | 'success' | 'error';
+  } | null>(null);
 
   const [builderIntent, setBuilderIntent] = useState('');
   const [builderPreview, setBuilderPreview] = useState<string | null>(null);
@@ -405,20 +409,30 @@ function WorkflowsMode({
 
   const handleRun = async (id: string) => {
     setStartingWorkflowId(id);
-    setStartToast('Starting workflow...');
+    setStartToast({ message: 'Starting workflow...', variant: 'loading' });
     const result = await runWorkflow(id);
     void ensureRunsLoaded(id, 5);
 
     setStartingWorkflowId(null);
-    window.setTimeout(() => setStartToast(null), 1200);
-
-    if (result?.taskRunId && onOpenTaskRun) {
-      onOpenTaskRun(result.taskRunId);
-    }
-
     if (drawerWorkflowId === id) {
       setDrawerWorkflowId(null);
     }
+
+    if (result?.taskRunId) {
+      if (onOpenTaskRun) {
+        // Keep feedback visible until this view is replaced by task details.
+        setStartToast({ message: 'Opening task...', variant: 'loading' });
+        onOpenTaskRun(result.taskRunId);
+        return;
+      }
+
+      setStartToast({ message: 'Workflow started', variant: 'success' });
+      window.setTimeout(() => setStartToast(null), 1400);
+      return;
+    }
+
+    setStartToast({ message: 'Failed to start workflow', variant: 'error' });
+    window.setTimeout(() => setStartToast(null), 2600);
   };
 
   const handleGeneratePreview = async () => {
@@ -696,9 +710,25 @@ function WorkflowsMode({
 
       {startToast && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
-          <div className="flex items-center gap-2 rounded-full border border-border bg-card/90 px-4 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {startToast}
+          <div
+            className={
+              startToast.variant === 'success'
+                ? 'flex items-center gap-2 rounded-full border border-[#4A7C59]/30 bg-[#4A7C59]/10 px-4 py-2 text-xs text-[#4A7C59] shadow-lg backdrop-blur'
+                : startToast.variant === 'error'
+                  ? 'flex items-center gap-2 rounded-full border border-destructive/25 bg-destructive/5 px-4 py-2 text-xs text-destructive shadow-lg backdrop-blur'
+                  : 'flex items-center gap-2 rounded-full border border-border bg-card/90 px-4 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur'
+            }
+            role="status"
+            aria-live="polite"
+          >
+            {startToast.variant === 'success' ? (
+              <Check className="h-4 w-4" />
+            ) : startToast.variant === 'error' ? (
+              <AlertCircle className="h-4 w-4" />
+            ) : (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
+            {startToast.message}
           </div>
         </div>
       )}

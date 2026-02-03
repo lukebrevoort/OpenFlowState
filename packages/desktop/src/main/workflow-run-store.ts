@@ -362,6 +362,14 @@ export class WorkflowRunStore {
 
     return rows.map(rowToArtifactRecord);
   }
+
+  deleteRun(id: string): boolean {
+    this.initialize();
+    if (!this.db) return false;
+
+    const result = this.db.prepare('DELETE FROM workflow_runs WHERE id = ?').run(id);
+    return result.changes > 0;
+  }
 }
 
 export const workflowRunStore = new WorkflowRunStore();

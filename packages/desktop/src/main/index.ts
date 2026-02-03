@@ -979,6 +979,158 @@ ipcMain.handle('tasks:getActiveRun', async () => {
   }
 });
 
+ipcMain.handle('tasks:cancel', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'cancelled',
+      updatedAt: Date.now(),
+      description: 'Cancelled by user.',
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to cancel task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'cancelled',
+          finishedAt: Date.now(),
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to cancel task run:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to cancel task run.');
+  }
+});
+
+ipcMain.handle('tasks:markRunning', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'running',
+      updatedAt: Date.now(),
+      ...(record.description === 'Waiting for input...' ? { description: 'Running...' } : {}),
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to update task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'running',
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to mark task run running:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to update task run.');
+  }
+});
+
+ipcMain.handle('tasks:markComplete', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'completed',
+      progress: 100,
+      updatedAt: Date.now(),
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to complete task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'completed',
+          finishedAt: Date.now(),
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to mark task run complete:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to complete task run.');
+  }
+});
+
+ipcMain.handle('tasks:remove', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<{ removed: boolean }>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<{ removed: boolean }>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const removed = taskStore.deleteRun(id);
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.deleteRun(workflowRunId);
+      }
+    }
+
+    return ipcOk<{ removed: boolean }>({ removed });
+  } catch (error) {
+    console.warn('[IPC] Failed to remove task run:', error);
+    return ipcError<{ removed: boolean }>('UNKNOWN', 'Failed to remove task run.');
+  }
+});
+
 ipcMain.handle('workflows:list', async () => {
   const result = await workflowsRunner.listDefinitions();
   if (result.ok) {

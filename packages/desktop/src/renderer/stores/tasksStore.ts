@@ -35,6 +35,10 @@ type TasksState = {
   selectRun: (id: string) => Promise<void>;
   reloadSelectedTimeline: (opts?: { silent?: boolean }) => Promise<void>;
   reloadSelectedArtifacts: (opts?: { silent?: boolean }) => Promise<void>;
+  cancelRun: (id: string) => Promise<boolean>;
+  removeRun: (id: string) => Promise<boolean>;
+  markRunning: (id: string) => Promise<boolean>;
+  markComplete: (id: string) => Promise<boolean>;
 };
 
 const statusPriority: Record<TaskRun['status'], number> = {
@@ -42,6 +46,7 @@ const statusPriority: Record<TaskRun['status'], number> = {
   waiting_approval: 1,
   completed: 2,
   failed: 3,
+  cancelled: 4,
 };
 
 const sortRuns = (runs: TaskRun[]) => {
@@ -198,5 +203,74 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     }
 
     set({ selectedArtifacts: result.data, isLoadingArtifacts: false, artifactsError: null });
+  },
+
+  cancelRun: async (id) => {
+    const result = await tasksAdapter.cancelRun(id);
+    if (!result.ok) {
+      set({ error: result.error.message });
+      return false;
+    }
+
+    set((state) => ({
+      runs: state.runs.map((run) => (run.id === id ? result.data : run)),
+    }));
+    return true;
+  },
+
+  removeRun: async (id) => {
+    const result = await tasksAdapter.removeRun(id);
+    if (!result.ok) {
+      set({ error: result.error.message });
+      return false;
+    }
+
+    set((state) => {
+      const nextRuns = state.runs.filter((run) => run.id !== id);
+      const nextSelected =
+        state.selectedRunId === id
+          ? pickDefaultSelectedRunId(nextRuns, state.activeRun && state.activeRun.id === id ? null : state.activeRun)
+          : state.selectedRunId;
+      return {
+        runs: nextRuns,
+        selectedRunId: nextSelected,
+        selectedTimeline: nextSelected ? state.selectedTimeline : [],
+        selectedWorkflow: nextSelected ? state.selectedWorkflow : null,
+        selectedArtifacts: nextSelected ? state.selectedArtifacts : null,
+      };
+    });
+
+    if (get().selectedRunId) {
+      await get().reloadSelectedTimeline({ silent: true });
+      await get().reloadSelectedArtifacts({ silent: true });
+    }
+
+    return true;
+  },
+
+  markRunning: async (id) => {
+    const result = await tasksAdapter.markRunning(id);
+    if (!result.ok) {
+      set({ error: result.error.message });
+      return false;
+    }
+
+    set((state) => ({
+      runs: state.runs.map((run) => (run.id === id ? result.data : run)),
+    }));
+    return true;
+  },
+
+  markComplete: async (id) => {
+    const result = await tasksAdapter.markComplete(id);
+    if (!result.ok) {
+      set({ error: result.error.message });
+      return false;
+    }
+
+    set((state) => ({
+      runs: state.runs.map((run) => (run.id === id ? result.data : run)),
+    }));
+    return true;
   },
 }));

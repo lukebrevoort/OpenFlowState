@@ -26,9 +26,7 @@ export const toRendererTaskRun = (record: TaskRunRecord): RendererTaskRun => {
   const status: RendererTaskRun['status'] =
     record.status === 'starting'
       ? 'running'
-      : record.status === 'cancelled'
-        ? 'failed'
-        : record.status;
+      : record.status;
 
   return {
     id: record.id,

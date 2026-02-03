@@ -92,7 +92,7 @@ export interface TaskRun {
   sessionId: string;
   title: string;
   description: string;
-  status: 'running' | 'waiting_approval' | 'completed' | 'failed';
+  status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
   startedAt: number;
   updatedAt: number;
   progress: number;
@@ -350,6 +350,10 @@ export interface FlowstateAPI {
   tasks: {
     listRuns: () => Promise<IpcResult<TaskRun[]>>;
     getActiveRun: () => Promise<IpcResult<TaskRun | null>>;
+    cancelRun: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
+    removeRun: (taskRunId: string) => Promise<IpcResult<{ removed: boolean }>>;
+    markRunning: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
+    markComplete: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
   };
 
   workflows: {

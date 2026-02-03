@@ -358,7 +358,7 @@ function App() {
       )}
 
       <div
-        className={`relative z-10 h-full flex flex-col transition-all duration-300 ease-out ${
+        className={`relative h-full flex flex-col transition-all duration-300 ease-out ${
           showMainShell && isSidebarOpen && isDesktop ? 'pl-80' : 'pl-0'
         }`}
       >

@@ -399,8 +399,14 @@ class ProcessManager {
     sessionId: string
   ): void {
     try {
+      const inferredId = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+      const existingRun = taskStore.getRun(inferredId);
+      if (existingRun?.status === 'cancelled') {
+        return;
+      }
+
       if (rawType === 'task.promoted') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const id = inferredId;
         const text = this.pickTaskText(normalized.payload, normalized.event.title, normalized.event.detail);
 
         const run: TaskRunRecord = {
@@ -441,7 +447,7 @@ class ProcessManager {
       }
 
       if (rawType === 'task.completed') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const id = inferredId;
         const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
         if (!updated) {
           const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
@@ -461,7 +467,7 @@ class ProcessManager {
       }
 
       if (rawType === 'task.summary') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const id = inferredId;
         const summary = (() => {
           const record =
             normalized.payload && typeof normalized.payload === 'object'

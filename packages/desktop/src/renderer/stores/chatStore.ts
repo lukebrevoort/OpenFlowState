@@ -24,7 +24,7 @@ export interface TaskRun {
   sessionId: string;
   title: string;
   description: string;
-  status: 'running' | 'waiting_approval' | 'completed' | 'failed';
+  status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
   startedAt: number;
   updatedAt: number;
   progress: number;

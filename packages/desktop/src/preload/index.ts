@@ -258,6 +258,10 @@ const flowstateAPI: FlowstateAPIDefinition = {
   tasks: {
     listRuns: () => ipcRenderer.invoke('tasks:listRuns'),
     getActiveRun: () => ipcRenderer.invoke('tasks:getActiveRun'),
+    cancelRun: (taskRunId: string) => ipcRenderer.invoke('tasks:cancel', taskRunId),
+    removeRun: (taskRunId: string) => ipcRenderer.invoke('tasks:remove', taskRunId),
+    markRunning: (taskRunId: string) => ipcRenderer.invoke('tasks:markRunning', taskRunId),
+    markComplete: (taskRunId: string) => ipcRenderer.invoke('tasks:markComplete', taskRunId),
   },
 
   workflows: {
