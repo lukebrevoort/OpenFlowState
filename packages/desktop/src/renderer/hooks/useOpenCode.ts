@@ -253,11 +253,11 @@ export function useOpenCode() {
   /**
    * Send a message to OpenCode
    */
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, opts?: { allowWhileRunning?: boolean }) => {
     if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
 
-    if (activeTask && activeTask.status === 'running') {
+    if (activeTask && activeTask.status === 'running' && !opts?.allowWhileRunning) {
       if (DEV) console.log('[Renderer] Task already running, blocking message');
       setError('Another task is already running for this conversation.');
       return { success: false, error: 'Task already running' };

@@ -109,7 +109,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     try {
       await switchSession(selectedRun.sessionId);
-      const result = await sendMessage(replyText.trim());
+      const result = await sendMessage(replyText.trim(), { allowWhileRunning: true });
       if (!result || !result.success) {
         setReplyError(result?.error ?? 'Failed to send response.');
         return;
