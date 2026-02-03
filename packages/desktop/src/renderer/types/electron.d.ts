@@ -275,6 +275,9 @@ export interface FlowstateAPI {
     // Send a message (triggers streaming response via events)
     send: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
 
+    // Fire-and-forget send (response still streams via events)
+    sendAsync: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
+
     // Get status
     status: () => Promise<OpenCodeStatus>;
     restart: () => Promise<{ success: boolean; error?: string }>;

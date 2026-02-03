@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X, Check } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
@@ -48,6 +48,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [replyText, setReplyText] = useState('');
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     void loadActiveRun();
@@ -109,7 +110,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     try {
       await switchSession(selectedRun.sessionId);
-      const result = await sendMessage(replyText.trim(), { allowWhileRunning: true });
+      const result = await sendMessage(replyText.trim(), { allowWhileRunning: true, fireAndForget: true });
       if (!result || !result.success) {
         setReplyError(result?.error ?? 'Failed to send response.');
         return;
@@ -117,9 +118,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
       setShowReplyModal(false);
       setReplyText('');
-      await reloadRuns({ silent: true });
-      await reloadSelectedTimeline({ silent: true });
-      await reloadSelectedArtifacts({ silent: true });
+      setToast('Response sent — continuing workflow');
+      window.setTimeout(() => setToast(null), 2500);
+
+      // Give the session a moment to start streaming, then refresh once.
+      window.setTimeout(() => {
+        void reloadRuns({ silent: true });
+        void reloadSelectedTimeline({ silent: true });
+        void reloadSelectedArtifacts({ silent: true });
+      }, 600);
     } catch (err) {
       setReplyError(err instanceof Error ? err.message : 'Failed to send response.');
     } finally {
@@ -313,8 +320,17 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-foreground">Activity</h3>
+                  <h3 className="text-sm font-semibold text-foreground">Controls</h3>
                   <div className="flex items-center gap-2">
+                    {canRespond && (
+                      <button
+                        type="button"
+                        onClick={() => setShowReplyModal(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
+                      >
+                        Respond
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={handleOpenChat}
@@ -325,11 +341,14 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => void reloadSelectedTimeline()}
+                      onClick={() => {
+                        void reloadSelectedTimeline({ silent: true });
+                        void reloadSelectedArtifacts({ silent: true });
+                      }}
                       className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
                     >
-                      <RefreshCw className={isLoadingTimeline ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                      Refresh timeline
+                      <RefreshCw className={(isLoadingTimeline || isLoadingArtifacts) ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      Refresh
                     </button>
                   </div>
                 </div>
@@ -343,33 +362,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                           Workflow run {selectedWorkflow.workflowRunId}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {canRespond && (
-                          <button
-                            type="button"
-                            onClick={() => setShowReplyModal(true)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
-                          >
-                            Respond
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleOpenChat}
-                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          Open output chat
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void reloadSelectedArtifacts()}
-                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
-                        >
-                          <RefreshCw className={isLoadingArtifacts ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
-                          Refresh outputs
-                        </button>
-                      </div>
+                      <div className="flex items-center gap-2" />
                     </div>
 
                     {artifactsError && (
@@ -502,6 +495,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 {isSendingReply ? 'Sending...' : 'Send response'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-[#4A7C59]/30 bg-[#4A7C59]/10 px-4 py-2 text-xs text-[#4A7C59] shadow-lg backdrop-blur">
+            <Check className="h-4 w-4" />
+            {toast}
           </div>
         </div>
       )}

@@ -577,6 +577,39 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
 });
 
 /**
+ * Fire-and-forget send. Returns success once the request is enqueued.
+ * The response (and any errors) still stream via IPC events.
+ */
+ipcMain.handle('opencode:sendAsync', async (event, message: string) => {
+  console.log('[IPC] opencode:sendAsync called with message length:', message.length);
+
+  if (!processManager.running) {
+    console.error('[IPC] OpenCode not running!');
+    return {
+      error: 'OpenCode not running',
+      content: 'The AI assistant is not available. Please restart the application.',
+    };
+  }
+
+  try {
+    const webContents = event.sender;
+    void processManager.streamMessage(message, webContents).catch((error) => {
+      console.error('[IPC] Error in opencode:sendAsync background stream:', error);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error in opencode:sendAsync:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const msg = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
+    return {
+      error: msg,
+      content: msg,
+      errorDetails: opencodeError,
+    };
+  }
+});
+
+/**
  * Get OpenCode status
  */
 ipcMain.handle('opencode:status', async () => {

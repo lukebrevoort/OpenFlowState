@@ -117,6 +117,9 @@ const flowstateAPI: FlowstateAPIDefinition = {
     // Send a message and trigger streaming response
     send: (message: string) => ipcRenderer.invoke('opencode:send', message),
 
+    // Fire-and-forget send (response streams via events)
+    sendAsync: (message: string) => ipcRenderer.invoke('opencode:sendAsync', message),
+
     // Get OpenCode status
     status: () => ipcRenderer.invoke('opencode:status'),
 

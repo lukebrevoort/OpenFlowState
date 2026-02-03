@@ -105,12 +105,14 @@ function WorkflowCard({
   onRun,
   onOpenDetails,
   lastRun,
+  isStarting,
 }: {
   workflow: Workflow;
   onTogglePin: (id: string) => void;
   onRun: (id: string) => void;
   onOpenDetails: (id: string) => void;
   lastRun: WorkflowRun | null;
+  isStarting: boolean;
 }) {
   const runMeta = lastRun ? statusLabel(lastRun.status) : null;
   const durationLabel = lastRun ? formatDuration(lastRun.durationMs) : null;
@@ -178,10 +180,20 @@ function WorkflowCard({
       <div className="flex items-center gap-2">
         <button
           onClick={() => onRun(workflow.id)}
-          className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm flex items-center justify-center gap-2 shadow-sm"
+          disabled={isStarting}
+          className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 ease-in-out text-sm flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
         >
-          <Play className="w-4 h-4" />
-          Run
+          {isStarting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Starting...
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4" />
+              Run
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -349,6 +361,8 @@ function WorkflowsMode({
   const runsByWorkflowId = useWorkflowsStore((state) => state.runsByWorkflowId);
   const ensureRunsLoaded = useWorkflowsStore((state) => state.ensureRunsLoaded);
   const [drawerWorkflowId, setDrawerWorkflowId] = useState<string | null>(null);
+  const [startingWorkflowId, setStartingWorkflowId] = useState<string | null>(null);
+  const [startToast, setStartToast] = useState<string | null>(null);
 
   const [builderIntent, setBuilderIntent] = useState('');
   const [builderPreview, setBuilderPreview] = useState<string | null>(null);
@@ -390,8 +404,13 @@ function WorkflowsMode({
   };
 
   const handleRun = async (id: string) => {
+    setStartingWorkflowId(id);
+    setStartToast('Starting workflow...');
     const result = await runWorkflow(id);
     void ensureRunsLoaded(id, 5);
+
+    setStartingWorkflowId(null);
+    window.setTimeout(() => setStartToast(null), 1200);
 
     if (result?.taskRunId && onOpenTaskRun) {
       onOpenTaskRun(result.taskRunId);
@@ -634,6 +653,7 @@ function WorkflowsMode({
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
+                  isStarting={startingWorkflowId === workflow.id}
                 />
               ))}
             </div>
@@ -652,6 +672,7 @@ function WorkflowsMode({
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
+                  isStarting={startingWorkflowId === workflow.id}
                 />
               ))}
             </div>
@@ -672,6 +693,15 @@ function WorkflowsMode({
           onOpenTaskRun={(taskRunId) => onOpenTaskRun?.(taskRunId)}
         />
       ) : null}
+
+      {startToast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card/90 px-4 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {startToast}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
