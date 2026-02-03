@@ -168,10 +168,19 @@ class ProcessManager {
   private timelineInitialized = false;
   private reauthCooldown = new Map<string, number>();
   private readonly reauthCooldownMs = 5 * 60 * 1000;
+
+  // Sessions whose timeline events should be persisted, even when not active.
+  // This is used by workflow sessions so the Tasks UI can load their timelines.
+  private persistedTimelineSessions = new Set<string>();
   private taskPromotionState = new Map<
     string,
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
+
+  private registerTimelineSession(sessionId: string): void {
+    if (!sessionId || typeof sessionId !== 'string') return;
+    this.persistedTimelineSessions.add(sessionId);
+  }
 
   // Batch timeline IPC events to reduce renderer churn during high-volume streams.
   private timelineEventBuffer: unknown[] = [];
@@ -1144,7 +1153,8 @@ class ProcessManager {
    */
   registerTaskSession(sessionId: string, message?: string): void {
     if (!sessionId || typeof sessionId !== 'string') return;
-    this.startTaskPromotionTracking(sessionId, { message });
+    void message;
+    this.registerTimelineSession(sessionId);
   }
 
   /**
@@ -1490,7 +1500,7 @@ class ProcessManager {
                 normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
               const shouldStore =
                 isApprovalEvent ||
-                (this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
+                (this.persistedTimelineSessions.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
               if (!shouldStore) {
                 continue;
               }
@@ -1724,6 +1734,7 @@ class ProcessManager {
   }
 
   private startTaskPromotionTracking(sessionId: string, payload?: { message?: string }) {
+    this.registerTimelineSession(sessionId);
     const existing = this.taskPromotionState.get(sessionId);
     if (existing) {
       existing.startAt = Date.now();
