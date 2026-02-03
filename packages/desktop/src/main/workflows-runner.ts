@@ -5,6 +5,9 @@ import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron
 import { approvalPolicyStore } from './approval-policy-store.js';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
+import { taskStore } from './task-store.js';
+import type { TaskRunRecord } from './task-types.js';
+import { workflowRunStore } from './workflow-run-store.js';
 import { workflowsStore } from './workflows-store.js';
 
 type IpcErrorCode = 'NOT_IMPLEMENTED' | 'INVALID_REQUEST' | 'UNAVAILABLE' | 'UNKNOWN';
@@ -48,6 +51,20 @@ const extractTextFromParts = (parts: unknown): string => {
     .filter((p) => p && typeof p === 'object' && (p as { type?: string }).type === 'text')
     .map((p) => ((p as { text?: string }).text ?? ''))
     .join('');
+};
+
+const clampText = (value: string, maxLen: number): string => {
+  if (value.length <= maxLen) return value;
+  return `${value.slice(0, maxLen)}...`;
+};
+
+const safeJsonStringify = (input: unknown): string | undefined => {
+  if (input === undefined) return undefined;
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return JSON.stringify(String(input));
+  }
 };
 
 const parseFrontmatter = (raw: string): { name?: string; description?: string; template?: string } | null => {
@@ -123,40 +140,45 @@ class WorkflowsRunner {
   }
 
   async listDefinitions(): Promise<{ ok: true; data: WorkflowDefinition[] } | { ok: false; code: IpcErrorCode; message: string }>{
-    const client = processManager.client;
     const directory = processManager.getProjectDirectory?.() ?? undefined;
     const userDataDir = configStore.getDataDir();
 
-    const fromSdk: WorkflowDefinition[] = [];
-    if (client) {
-      try {
-        const result = await client.command.list({
-          query: {
-            directory,
-          },
-        });
+    const fromDisk = directory ? await this.loadWorkflowSkillsFromDir(directory) : [];
+    const fromUserData = userDataDir ? await this.loadWorkflowSkillsFromDir(userDataDir) : [];
 
-        if (!result.error && result.data) {
-          for (const command of result.data as Array<{ name: string; description?: string }>) {
-            if (!command?.name) continue;
-            // Heuristic: hide built-in dotted commands (session.list, prompt.clear, etc.)
-            if (command.name.includes('.')) continue;
-            fromSdk.push({
-              id: command.name,
-              title: humanizeId(command.name),
-              description: command.description,
-            });
+    // Future hook: allow-list a small set of global (SDK) commands.
+    // Default behavior must remain: zero global commands shown.
+    const allowlistedGlobalCommands: string[] = [];
+    const fromSdk: WorkflowDefinition[] = [];
+    if (allowlistedGlobalCommands.length > 0) {
+      const client = processManager.client;
+      if (client) {
+        try {
+          const result = await client.command.list({
+            query: {
+              directory,
+            },
+          });
+
+          if (!result.error && result.data) {
+            for (const command of result.data as Array<{ name: string; description?: string }>) {
+              if (!command?.name) continue;
+              if (!allowlistedGlobalCommands.includes(command.name)) continue;
+              fromSdk.push({
+                id: command.name,
+                title: humanizeId(command.name),
+                description: command.description,
+              });
+            }
           }
+        } catch (error) {
+          console.warn('[WorkflowsRunner] Failed to list allowlisted SDK commands:', error);
         }
-      } catch (error) {
-        console.warn('[WorkflowsRunner] Failed to list commands via SDK:', error);
       }
     }
 
-    const fromDisk = directory ? await this.loadWorkflowSkillsFromDir(directory) : [];
-    const fromUserData = userDataDir ? await this.loadWorkflowSkillsFromDir(userDataDir) : [];
     const merged = new Map<string, WorkflowDefinition>();
-    for (const def of [...fromSdk, ...fromDisk, ...fromUserData]) {
+    for (const def of [...fromDisk, ...fromUserData, ...fromSdk]) {
       merged.set(def.id, def);
     }
 
@@ -167,7 +189,7 @@ class WorkflowsRunner {
       return {
         ok: false,
         code: 'UNAVAILABLE',
-        message: 'No workflows found. Ensure OpenCode is running or add workflows under workflows/*/SKILL.md.',
+        message: 'No workflows found. Add workflows under workflows/*/SKILL.md (project) or workflows/*/SKILL.md (user data).',
       };
     }
 
@@ -186,30 +208,68 @@ class WorkflowsRunner {
     }
 
     const directory = processManager.getProjectDirectory?.() ?? undefined;
-    const sessionId = processManager.sessionId ?? (await processManager.createSession('FlowState Workflows'));
 
+    // Persist workflow runs + tasks alongside other local data (memory.db).
+    const dataDir = configStore.getDataDir();
+    taskStore.configure({ dataDir });
+    workflowRunStore.configure({ dataDir });
+
+    const workflowRunId = randomUUID();
+    const taskRunId = randomUUID();
+    const startedAt = Date.now();
+
+    const workflowSessionTitle = `Workflow: ${humanizeId(id)}`;
+    const workflowSessionId = await processManager.createDetachedSession(workflowSessionTitle);
+
+    // Apply per-workflow approval opt-in to the workflow session.
     try {
       const optedIn = await approvalPolicyStore.getWorkflowOptIn(id);
       if (optedIn) {
-        approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+        approvalPolicyStore.setSessionAlwaysApprove(workflowSessionId, true);
       }
     } catch (error) {
       // Never block a workflow run on policy state.
       console.warn('[WorkflowsRunner] Failed to apply per-workflow Always Approve:', error);
     }
 
-    const runId = randomUUID();
-    const startedAt = Date.now();
+    // Create TaskRun immediately so Tasks UI can load the timeline by sessionId.
+    const taskRun: TaskRunRecord = {
+      id: taskRunId,
+      sessionId: workflowSessionId,
+      kind: 'workflow',
+      title: humanizeId(id),
+      description: 'Running workflow...',
+      status: 'running',
+      startedAt,
+      updatedAt: startedAt,
+      progress: 0,
+      metadata: {
+        workflowId: id,
+        workflowRunId,
+      },
+    };
+    taskStore.upsertRun(taskRun);
+
+    workflowRunStore.createRun({
+      id: workflowRunId,
+      workflowId: id,
+      taskRunId,
+      sessionId: workflowSessionId,
+      status: 'running',
+      startedAt,
+      inputJson: safeJsonStringify(input),
+    });
 
     const baseRun: WorkflowRun = {
-      id: runId,
+      id: workflowRunId,
       workflowId: id,
-      status: 'queued',
+      taskRunId,
+      sessionId: workflowSessionId,
+      status: 'running',
       startedAt,
     };
 
     workflowsStore.createRun(baseRun);
-    workflowsStore.updateRun(runId, { status: 'running' });
 
     const args = serializeArguments(input);
     try {
@@ -222,18 +282,44 @@ class WorkflowsRunner {
           '',
           args.length ? `Input: ${args}` : 'Input: (none)',
         ].join('\n');
-        const response = await processManager.sendMessage(prompt);
+
+        const response = await processManager.promptSession(workflowSessionId, prompt);
         const finishedAt = Date.now();
-        const completed = workflowsStore.updateRun(runId, {
+
+        workflowRunStore.updateRun(workflowRunId, {
           status: 'completed',
           finishedAt,
+          assistantMessageId: response.assistantMessageId,
+          outputPreview: clampText(response.content, 280),
+        });
+        workflowRunStore.createArtifact({
+          artifactId: randomUUID(),
+          workflowRunId,
+          kind: 'final_output',
+          title: 'Final output',
+          mime: 'text/plain',
+          createdAt: finishedAt,
+          payloadText: response.content,
+        });
+
+        taskStore.updateRun(taskRunId, {
+          status: 'completed',
+          progress: 100,
+          updatedAt: finishedAt,
+        });
+
+        const completed = workflowsStore.updateRun(workflowRunId, {
+          status: 'completed',
+          finishedAt,
+          assistantMessageId: response.assistantMessageId,
           output: { content: response.content, parts: response.parts },
         });
         return { ok: true, data: completed ?? { ...baseRun, status: 'completed', finishedAt } };
       }
 
+      processManager.registerTaskSession(workflowSessionId, `command:${id}`);
       const result = await client.session.command({
-        path: { id: sessionId },
+        path: { id: workflowSessionId },
         query: { directory },
         body: {
           command: id,
@@ -245,7 +331,18 @@ class WorkflowsRunner {
         const finishedAt = Date.now();
         const errorRecord = result.error as unknown as Record<string, unknown>;
         const messageFromError = typeof errorRecord.message === 'string' ? errorRecord.message : undefined;
-        const failed = workflowsStore.updateRun(runId, {
+
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'failed',
+          finishedAt,
+          error: messageFromError ?? JSON.stringify(result.error),
+        });
+        taskStore.updateRun(taskRunId, {
+          status: 'failed',
+          updatedAt: finishedAt,
+        });
+
+        const failed = workflowsStore.updateRun(workflowRunId, {
           status: 'failed',
           finishedAt,
           error: messageFromError ?? JSON.stringify(result.error),
@@ -256,9 +353,34 @@ class WorkflowsRunner {
 
       const finishedAt = Date.now();
       const text = extractTextFromParts((result.data as { parts?: unknown })?.parts);
-      const completed = workflowsStore.updateRun(runId, {
+
+      const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
+      workflowRunStore.updateRun(workflowRunId, {
         status: 'completed',
         finishedAt,
+        assistantMessageId,
+        outputPreview: clampText(text, 280),
+      });
+      workflowRunStore.createArtifact({
+        artifactId: randomUUID(),
+        workflowRunId,
+        kind: 'final_output',
+        title: 'Final output',
+        mime: 'text/plain',
+        createdAt: finishedAt,
+        payloadText: text,
+      });
+
+      taskStore.updateRun(taskRunId, {
+        status: 'completed',
+        progress: 100,
+        updatedAt: finishedAt,
+      });
+
+      const completed = workflowsStore.updateRun(workflowRunId, {
+        status: 'completed',
+        finishedAt,
+        ...(assistantMessageId ? { assistantMessageId } : {}),
         output: { content: text, raw: result.data },
       });
 
@@ -266,7 +388,18 @@ class WorkflowsRunner {
     } catch (error) {
       const finishedAt = Date.now();
       const message = error instanceof Error ? error.message : String(error);
-      const failed = workflowsStore.updateRun(runId, {
+
+      workflowRunStore.updateRun(workflowRunId, {
+        status: 'failed',
+        finishedAt,
+        error: message,
+      });
+      taskStore.updateRun(taskRunId, {
+        status: 'failed',
+        updatedAt: finishedAt,
+      });
+
+      const failed = workflowsStore.updateRun(workflowRunId, {
         status: 'failed',
         finishedAt,
         error: message,

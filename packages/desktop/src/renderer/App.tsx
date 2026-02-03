@@ -16,6 +16,7 @@ import { useConfigStore } from './stores/configStore';
 import { useIntegrationsStore } from './stores/integrationsStore';
 import { useOnboardingStore } from './stores/onboardingStore';
 import { useProviderStore } from './stores/providerStore';
+import { useTasksStore } from './stores/tasksStore';
 import { providerDefinitions } from './data/providerData';
 import { onboardingWowPrompts } from './data/onboardingData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
@@ -165,7 +166,32 @@ function App() {
       case 'tasks':
         return <TasksMode onOpenChat={() => setCurrentPage('chat')} />;
       case 'workflows':
-        return <WorkflowsMode />;
+        return (
+          <WorkflowsMode
+            onOpenTaskRun={(taskRunId) => {
+              setCurrentPage('tasks');
+              const tasks = useTasksStore.getState();
+
+              const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+              const focus = async () => {
+                for (let attempt = 0; attempt < 8; attempt += 1) {
+                  await tasks.loadActiveRun({ silent: true });
+                  await tasks.reloadRuns({ silent: true });
+                  await tasks.selectRun(taskRunId);
+
+                  const latest = useTasksStore.getState().runs;
+                  if (latest.some((run) => run.id === taskRunId)) {
+                    return;
+                  }
+
+                  await sleep(250);
+                }
+              };
+
+              void focus();
+            }}
+          />
+        );
       case 'integrations':
         return <IntegrationsMode />;
       case 'settings':

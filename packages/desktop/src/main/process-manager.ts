@@ -1113,6 +1113,106 @@ class ProcessManager {
   }
 
   /**
+   * Create a new OpenCode session without changing the active chat session.
+   * Used by workflows so they do not pollute the current conversation.
+   */
+  async createDetachedSession(title?: string): Promise<string> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    const result = await this.instance.client.session.create(
+      title && title.trim().length
+        ? {
+            body: {
+              title: title.trim(),
+            },
+          }
+        : {}
+    );
+
+    if (result.error || !result.data?.id) {
+      throw new Error(`Failed to create session: ${JSON.stringify(result.error ?? 'unknown error')}`);
+    }
+
+    return result.data.id;
+  }
+
+  /**
+   * Register a session so timeline events are persisted.
+   * This opt-in gates storage for non-active sessions.
+   */
+  registerTaskSession(sessionId: string, message?: string): void {
+    if (!sessionId || typeof sessionId !== 'string') return;
+    this.startTaskPromotionTracking(sessionId, { message });
+  }
+
+  /**
+   * Prompt an explicit session (used for workflow sessions).
+   * Does not stream to renderer and does not change the active session.
+   */
+  async promptSession(
+    sessionId: string,
+    content: string
+  ): Promise<{ content: string; parts: unknown[]; assistantMessageId?: string }> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Invalid sessionId');
+    }
+
+    const systemPrompt = this.flowstatePrompt ?? undefined;
+    this.registerTaskSession(sessionId, content);
+
+    try {
+      const result = await this.instance.client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          agent: this.defaultAgent,
+          system: systemPrompt,
+          parts: [{ type: 'text', text: content }],
+        },
+      });
+
+      if (result.error) {
+        const errorPayload = buildOpenCodeError(result.error, {
+          model: configStore.get()?.provider.default,
+        });
+        const thrown = new Error(errorPayload.error);
+        (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+        throw thrown;
+      }
+
+      if (!result.data) {
+        throw new Error('No data in prompt result');
+      }
+
+      const parts = (result.data as { parts?: unknown[] }).parts ?? [];
+      const textContent = (parts as Array<{ type?: string; text?: string }>)
+        .filter((p) => p?.type === 'text')
+        .map((p) => p.text || '')
+        .join('');
+
+      const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
+
+      return {
+        content: textContent,
+        parts,
+        ...(assistantMessageId ? { assistantMessageId } : {}),
+      };
+    } catch (error) {
+      const errorPayload =
+        (error as Error & { opencode?: OpenCodeErrorPayload }).opencode ??
+        buildOpenCodeError(error, { model: configStore.get()?.provider.default });
+      const thrown = new Error(errorPayload.error);
+      (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+      throw thrown;
+    }
+  }
+
+  /**
    * Send a message to the active session and get a response
    */
   async sendMessage(content: string, webContents?: Electron.WebContents): Promise<{

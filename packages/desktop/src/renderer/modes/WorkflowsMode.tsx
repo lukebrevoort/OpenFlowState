@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Star,
-  Edit2,
   Play,
-  MoreVertical,
-  Copy,
-  Trash2,
   Newspaper,
   PenLine,
   BarChart3,
@@ -15,9 +11,12 @@ import {
   Loader2,
   AlertCircle,
   RefreshCw,
+  PanelRight,
+  X,
+  Clock,
 } from 'lucide-react';
 import { useWorkflowsStore } from '../stores/workflowsStore';
-import type { WorkflowDefinition } from '../types/electron';
+import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
 
 interface Workflow {
   id: string;
@@ -25,15 +24,11 @@ interface Workflow {
   description: string;
   icon: typeof Newspaper;
   isPinned: boolean;
-  lastRun?: Date;
-  runCount: number;
   color: string;
 }
 
-const DEFAULT_PINNED_IDS = new Set(['daily-briefing', 'content-generator', 'research-helper']);
 const CARD_ICONS = [Newspaper, PenLine, BarChart3, Mic, Search, Mail];
 const CARD_COLORS = ['#C87137', '#A5B574', '#3E2F27', '#E8BFA0'];
-const MOCK_BASE_DATE = new Date('2026-01-01T00:00:00.000Z');
 
 function hashString(value: string) {
   let hash = 0;
@@ -46,17 +41,13 @@ function hashString(value: string) {
 
 function workflowToCardModel(
   workflow: WorkflowDefinition,
-  pinnedOverrides: Record<string, boolean>,
+  pinnedIds: Set<string>,
 ): Workflow {
   const safeDescription = workflow.description ?? 'No description provided.';
   const hash = hashString(workflow.id);
-  const pinnedDefault = DEFAULT_PINNED_IDS.has(workflow.id);
-  const isPinned = pinnedOverrides[workflow.id] ?? pinnedDefault;
+  const isPinned = pinnedIds.has(workflow.id);
   const icon = CARD_ICONS[hash % CARD_ICONS.length] ?? Newspaper;
   const color = CARD_COLORS[hash % CARD_COLORS.length] ?? '#A5B574';
-  const runCount = 8 + (hash % 240);
-  const daysAgo = hash % 21;
-  const lastRun = new Date(MOCK_BASE_DATE.getTime() - daysAgo * 24 * 60 * 60 * 1000);
 
   return {
     id: workflow.id,
@@ -64,30 +55,89 @@ function workflowToCardModel(
     description: safeDescription,
     icon,
     isPinned,
-    lastRun,
-    runCount,
     color,
   };
+}
+
+function statusLabel(status: string) {
+  switch (status) {
+    case 'queued':
+      return { label: 'Queued', chip: 'bg-muted/50 text-muted-foreground border-border' };
+    case 'running':
+      return { label: 'Running', chip: 'bg-[#A5B574]/15 text-[#4A7C59] border-[#A5B574]/30' };
+    case 'completed':
+      return { label: 'Completed', chip: 'bg-[#4A7C59]/15 text-[#4A7C59] border-[#4A7C59]/30' };
+    case 'failed':
+      return { label: 'Failed', chip: 'bg-destructive/10 text-destructive border-destructive/30' };
+    case 'cancelled':
+      return { label: 'Cancelled', chip: 'bg-muted/50 text-muted-foreground border-border' };
+    default:
+      return { label: status, chip: 'bg-muted/50 text-muted-foreground border-border' };
+  }
+}
+
+function formatDuration(durationMs?: number) {
+  if (!durationMs || durationMs <= 0) return null;
+  if (durationMs < 1000) return `${durationMs}ms`;
+  const seconds = Math.round(durationMs / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return `${minutes}m ${rem}s`;
+}
+
+function timeAgo(timestampMs: number) {
+  const diffMs = Date.now() - timestampMs;
+  if (!Number.isFinite(diffMs)) return '';
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return new Date(timestampMs).toLocaleDateString();
 }
 
 function WorkflowCard({
   workflow,
   onTogglePin,
-  onEdit,
   onRun,
+  onOpenDetails,
+  lastRun,
 }: {
   workflow: Workflow;
   onTogglePin: (id: string) => void;
-  onEdit: (id: string) => void;
   onRun: (id: string) => void;
+  onOpenDetails: (id: string) => void;
+  lastRun: WorkflowRun | null;
 }) {
-  const [showMenu, setShowMenu] = useState(false);
+  const runMeta = lastRun ? statusLabel(lastRun.status) : null;
+  const durationLabel = lastRun ? formatDuration(lastRun.durationMs) : null;
+  const preview = lastRun?.error ? lastRun.error : lastRun?.outputPreview;
 
   return (
     <div className="group relative bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm hover:shadow-lg transition-all duration-300 ease-in-out hover:scale-[1.02]">
-      {workflow.isPinned && (
-        <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-[#A5B574] shadow-sm" />
-      )}
+      <div className="absolute top-4 right-4 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onTogglePin(workflow.id)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-200"
+          aria-label={workflow.isPinned ? 'Unpin workflow' : 'Pin workflow'}
+        >
+          <Star
+            className={`h-4 w-4 ${workflow.isPinned ? 'fill-current text-[#A5B574]' : ''}`}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={() => onOpenDetails(workflow.id)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-200"
+          aria-label="Open workflow details"
+        >
+          <PanelRight className="h-4 w-4" />
+        </button>
+      </div>
 
       <div className="mb-4">
         <div
@@ -103,12 +153,26 @@ function WorkflowCard({
         <p className="text-sm text-muted-foreground line-clamp-2">{workflow.description}</p>
       </div>
 
-      <div className="flex items-center gap-4 mb-4 text-xs text-muted-foreground">
-        <div className="flex items-center gap-1">
-          <Play className="w-3 h-3" />
-          <span>{workflow.runCount} runs</span>
-        </div>
-        {workflow.lastRun && <div>Last: {workflow.lastRun.toLocaleDateString()}</div>}
+      <div className="mb-4">
+        {!lastRun ? (
+          <p className="text-xs text-muted-foreground">No runs yet</p>
+        ) : (
+          <div className="flex items-center justify-between gap-3">
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${runMeta?.chip}`}
+            >
+              {runMeta?.label}
+            </span>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              <span>{timeAgo(lastRun.startedAt)}</span>
+              {durationLabel ? <span className="tabular-nums">• {durationLabel}</span> : null}
+            </div>
+          </div>
+        )}
+        {preview ? (
+          <p className="mt-2 text-xs text-muted-foreground line-clamp-2">{preview}</p>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2">
@@ -119,64 +183,156 @@ function WorkflowCard({
           <Play className="w-4 h-4" />
           Run
         </button>
-        <button
-          onClick={() => onEdit(workflow.id)}
-          className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-300 ease-in-out text-sm shadow-sm"
-        >
-          <Edit2 className="w-4 h-4" />
-        </button>
-        <div className="relative">
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-300 ease-in-out text-sm shadow-sm"
-          >
-            <MoreVertical className="w-4 h-4" />
-          </button>
+      </div>
+    </div>
+  );
+}
 
-          {showMenu && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
-              <div className="absolute right-0 top-12 z-20 w-40 bg-card border border-border rounded-lg shadow-lg overflow-hidden backdrop-blur-xl">
-                <button
-                  onClick={() => {
-                    onTogglePin(workflow.id);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-foreground"
-                >
-                  <Star className={`w-4 h-4 ${workflow.isPinned ? 'fill-current text-[#A5B574]' : ''}`} />
-                  {workflow.isPinned ? 'Unpin' : 'Pin'}
-                </button>
-                <button
-                  onClick={() => {
-                    console.log('Duplicate workflow');
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-foreground"
-                >
-                  <Copy className="w-4 h-4" />
-                  Duplicate
-                </button>
-                <button
-                  onClick={() => {
-                    console.log('Delete workflow');
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-destructive/10 flex items-center gap-2 text-destructive"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete
-                </button>
+function WorkflowDetailsDrawer({
+  workflow,
+  pinned,
+  pinsError,
+  runs,
+  isRunning,
+  onClose,
+  onTogglePin,
+  onRun,
+  onOpenTaskRun,
+}: {
+  workflow: WorkflowDefinition;
+  pinned: boolean;
+  pinsError: string | null;
+  runs: WorkflowRun[];
+  isRunning: boolean;
+  onClose: () => void;
+  onTogglePin: () => void;
+  onRun: () => void;
+  onOpenTaskRun: (taskRunId: string) => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50"
+      role="dialog"
+      aria-modal="true"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+      <div className="absolute right-0 top-0 h-full w-full max-w-[480px] bg-card/95 border-l border-border shadow-2xl backdrop-blur-xl">
+        <div className="flex h-full flex-col">
+          <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Workflow</p>
+              <h3 className="mt-1 text-lg text-foreground truncate">{workflow.title}</h3>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-200"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-5 py-4">
+            <p className="text-sm text-muted-foreground">{workflow.description ?? 'No description provided.'}</p>
+
+            <div className="mt-5 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={onTogglePin}
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/40"
+              >
+                <Star className={`h-4 w-4 ${pinned ? 'fill-current text-[#A5B574]' : ''}`} />
+                {pinned ? 'Pinned' : 'Pin'}
+              </button>
+              {pinsError ? (
+                <p className="text-xs text-destructive">{pinsError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-foreground">Recent runs</h4>
+                <p className="text-xs text-muted-foreground">Last 5</p>
               </div>
-            </>
-          )}
+
+              {runs.length === 0 ? (
+                <div className="mt-3 rounded-xl border border-border bg-muted/10 p-4 text-sm text-muted-foreground">
+                  No runs yet.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {runs.map((run) => {
+                    const meta = statusLabel(run.status);
+                    const durationLabel = formatDuration(run.durationMs);
+                    const preview = run.error ? run.error : run.outputPreview;
+
+                    return (
+                      <div
+                        key={run.id}
+                        className="rounded-xl border border-border bg-muted/10 p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${meta.chip}`}
+                              >
+                                {meta.label}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">{timeAgo(run.startedAt)}</span>
+                              {durationLabel ? (
+                                <span className="text-[11px] text-muted-foreground tabular-nums">• {durationLabel}</span>
+                              ) : null}
+                            </div>
+                            {preview ? (
+                              <p className="mt-2 text-xs text-muted-foreground line-clamp-3">{preview}</p>
+                            ) : null}
+                          </div>
+
+                          {run.taskRunId ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenTaskRun(run.taskRunId as string)}
+                              className="flex-shrink-0 rounded-lg border border-border bg-card/60 px-3 py-2 text-xs text-foreground transition-all duration-200 hover:bg-card"
+                            >
+                              View task
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-border px-5 py-4">
+            <button
+              type="button"
+              onClick={onRun}
+              disabled={isRunning}
+              className="w-full px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-300 ease-in-out text-sm flex items-center justify-center gap-2 shadow-sm"
+            >
+              <Play className="w-4 h-4" />
+              Run workflow
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function WorkflowsMode() {
+function WorkflowsMode({
+  onOpenTaskRun,
+}: {
+  onOpenTaskRun?: (taskRunId: string) => void;
+}) {
   const workflows = useWorkflowsStore((state) => state.workflows);
   const isLoading = useWorkflowsStore((state) => state.isLoading);
   const error = useWorkflowsStore((state) => state.error);
@@ -186,7 +342,13 @@ function WorkflowsMode() {
   const generateFromIntent = useWorkflowsStore((state) => state.generateFromIntent);
   const isGenerating = useWorkflowsStore((state) => state.isGenerating);
   const generateError = useWorkflowsStore((state) => state.generateError);
-  const [pinnedOverrides, setPinnedOverrides] = useState<Record<string, boolean>>({});
+  const pinnedIds = useWorkflowsStore((state) => state.pinnedIds);
+  const loadPins = useWorkflowsStore((state) => state.loadPins);
+  const setPinned = useWorkflowsStore((state) => state.setPinned);
+  const pinsError = useWorkflowsStore((state) => state.pinsError);
+  const runsByWorkflowId = useWorkflowsStore((state) => state.runsByWorkflowId);
+  const ensureRunsLoaded = useWorkflowsStore((state) => state.ensureRunsLoaded);
+  const [drawerWorkflowId, setDrawerWorkflowId] = useState<string | null>(null);
 
   const [builderIntent, setBuilderIntent] = useState('');
   const [builderPreview, setBuilderPreview] = useState<string | null>(null);
@@ -201,18 +363,43 @@ function WorkflowsMode() {
 
   useEffect(() => {
     reload();
-  }, [reload]);
+    loadPins();
+  }, [loadPins, reload]);
 
-  const handleTogglePin = (id: string) => {
-    setPinnedOverrides((current) => {
-      const pinnedDefault = DEFAULT_PINNED_IDS.has(id);
-      const currentPinned = current[id] ?? pinnedDefault;
-      return { ...current, [id]: !currentPinned };
-    });
+  useEffect(() => {
+    if (!workflows || workflows.length === 0) return;
+    const ids = workflows.map((workflow) => workflow.id);
+
+    let cancelled = false;
+    const run = async () => {
+      for (const id of ids) {
+        if (cancelled) return;
+        await ensureRunsLoaded(id, 1);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureRunsLoaded, workflows]);
+
+  const handleTogglePin = async (id: string) => {
+    const isPinned = new Set(pinnedIds).has(id);
+    await setPinned(id, !isPinned);
   };
 
-  const handleEdit = (id: string) => {
-    console.log('Editing workflow:', id);
+  const handleRun = async (id: string) => {
+    const result = await runWorkflow(id);
+    void ensureRunsLoaded(id, 5);
+
+    if (result?.taskRunId && onOpenTaskRun) {
+      onOpenTaskRun(result.taskRunId);
+    }
+
+    if (drawerWorkflowId === id) {
+      setDrawerWorkflowId(null);
+    }
   };
 
   const handleGeneratePreview = async () => {
@@ -239,18 +426,30 @@ function WorkflowsMode() {
 
   const handleRunPreview = () => {
     if (!generatedDefinition) return;
-    runWorkflow(generatedDefinition.id);
+    void handleRun(generatedDefinition.id);
   };
 
   const activeBuilderError = builderError ?? generateError;
 
+  const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+
   const workflowCards = useMemo(
-    () => workflows.map((workflow) => workflowToCardModel(workflow, pinnedOverrides)),
-    [workflows, pinnedOverrides],
+    () => workflows.map((workflow) => workflowToCardModel(workflow, pinnedSet)),
+    [workflows, pinnedSet],
   );
 
   const pinnedWorkflows = workflowCards.filter((workflow) => workflow.isPinned);
   const unpinnedWorkflows = workflowCards.filter((workflow) => !workflow.isPinned);
+
+  const drawerWorkflow = useMemo(() => {
+    if (!drawerWorkflowId) return null;
+    return workflows.find((workflow) => workflow.id === drawerWorkflowId) ?? null;
+  }, [drawerWorkflowId, workflows]);
+
+  useEffect(() => {
+    if (!drawerWorkflowId) return;
+    void ensureRunsLoaded(drawerWorkflowId, 5);
+  }, [drawerWorkflowId, ensureRunsLoaded]);
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
@@ -431,9 +630,10 @@ function WorkflowsMode() {
                 <WorkflowCard
                   key={workflow.id}
                   workflow={workflow}
-                  onTogglePin={handleTogglePin}
-                  onEdit={handleEdit}
-                  onRun={(id) => runWorkflow(id)}
+                  onTogglePin={(id) => void handleTogglePin(id)}
+                  onRun={(id) => void handleRun(id)}
+                  onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                 />
               ))}
             </div>
@@ -448,15 +648,30 @@ function WorkflowsMode() {
                 <WorkflowCard
                   key={workflow.id}
                   workflow={workflow}
-                  onTogglePin={handleTogglePin}
-                  onEdit={handleEdit}
-                  onRun={(id) => runWorkflow(id)}
+                  onTogglePin={(id) => void handleTogglePin(id)}
+                  onRun={(id) => void handleRun(id)}
+                  onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                 />
               ))}
             </div>
           </div>
         )}
       </div>
+
+      {drawerWorkflow ? (
+        <WorkflowDetailsDrawer
+          workflow={drawerWorkflow}
+          pinned={pinnedSet.has(drawerWorkflow.id)}
+          pinsError={pinsError}
+          runs={(runsByWorkflowId[drawerWorkflow.id] ?? []) as WorkflowRun[]}
+          isRunning={isRunning}
+          onClose={() => setDrawerWorkflowId(null)}
+          onTogglePin={() => void handleTogglePin(drawerWorkflow.id)}
+          onRun={() => void handleRun(drawerWorkflow.id)}
+          onOpenTaskRun={(taskRunId) => onOpenTaskRun?.(taskRunId)}
+        />
+      ) : null}
     </div>
   );
 }

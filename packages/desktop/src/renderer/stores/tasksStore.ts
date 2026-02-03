@@ -1,21 +1,40 @@
 import { create } from 'zustand';
 
 import { tasksAdapter } from '../lib/tasksAdapter';
-import type { TaskRun, TimelineEvent } from '../types/electron';
+import type { TaskRun, TimelineEvent, WorkflowArtifact } from '../types/electron';
+
+type WorkflowRunMetadata = {
+  workflowId: string;
+  workflowRunId: string;
+};
+
+const isWorkflowRunMetadata = (value: unknown): value is WorkflowRunMetadata => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  const maybe = value as Record<string, unknown>;
+  return typeof maybe.workflowId === 'string' && typeof maybe.workflowRunId === 'string';
+};
 
 type TasksState = {
   runs: TaskRun[];
   activeRun: TaskRun | null;
   selectedRunId: string | null;
   selectedTimeline: TimelineEvent[];
+  selectedWorkflow: WorkflowRunMetadata | null;
+  selectedArtifacts: WorkflowArtifact[] | null;
   isLoadingRuns: boolean;
   isLoadingTimeline: boolean;
+  isLoadingArtifacts: boolean;
   error: string | null;
+  artifactsError: string | null;
 
   reloadRuns: (opts?: { silent?: boolean }) => Promise<void>;
   loadActiveRun: (opts?: { silent?: boolean }) => Promise<void>;
   selectRun: (id: string) => Promise<void>;
   reloadSelectedTimeline: (opts?: { silent?: boolean }) => Promise<void>;
+  reloadSelectedArtifacts: (opts?: { silent?: boolean }) => Promise<void>;
 };
 
 const statusPriority: Record<TaskRun['status'], number> = {
@@ -46,9 +65,13 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   activeRun: null,
   selectedRunId: null,
   selectedTimeline: [],
+  selectedWorkflow: null,
+  selectedArtifacts: null,
   isLoadingRuns: false,
   isLoadingTimeline: false,
+  isLoadingArtifacts: false,
   error: null,
+  artifactsError: null,
 
   reloadRuns: async (opts) => {
     if (!opts?.silent) {
@@ -70,9 +93,16 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         : pickDefaultSelectedRunId(result.data, activeRun);
 
     if (nextSelected !== selectedRunId) {
-      set({ selectedRunId: nextSelected, selectedTimeline: [] });
+      set({
+        selectedRunId: nextSelected,
+        selectedTimeline: [],
+        selectedWorkflow: null,
+        selectedArtifacts: null,
+        artifactsError: null,
+      });
       if (nextSelected) {
         await get().reloadSelectedTimeline({ silent: opts?.silent });
+        await get().reloadSelectedArtifacts({ silent: opts?.silent });
       }
     }
   },
@@ -95,15 +125,25 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     set({ activeRun, selectedRunId: nextSelected, isLoadingRuns: false });
 
     if (nextSelected && nextSelected !== prevSelected) {
+      set({ selectedTimeline: [], selectedWorkflow: null, selectedArtifacts: null, artifactsError: null });
       await get().reloadSelectedTimeline({ silent: opts?.silent });
+      await get().reloadSelectedArtifacts({ silent: opts?.silent });
     }
   },
 
   selectRun: async (id) => {
     const current = get().selectedRunId;
     if (current === id) return;
-    set({ selectedRunId: id, selectedTimeline: [], error: null });
+    set({
+      selectedRunId: id,
+      selectedTimeline: [],
+      selectedWorkflow: null,
+      selectedArtifacts: null,
+      error: null,
+      artifactsError: null,
+    });
     await get().reloadSelectedTimeline();
+    await get().reloadSelectedArtifacts();
   },
 
   reloadSelectedTimeline: async (opts) => {
@@ -128,5 +168,35 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         error: err instanceof Error ? err.message : 'Failed to load timeline.',
       });
     }
+  },
+
+  reloadSelectedArtifacts: async (opts) => {
+    const { selectedRunId, runs } = get();
+    const run = runs.find((candidate) => candidate.id === selectedRunId);
+
+    if (!run) {
+      set({ selectedWorkflow: null, selectedArtifacts: null, artifactsError: null, isLoadingArtifacts: false });
+      return;
+    }
+
+    const workflow = isWorkflowRunMetadata(run.metadata) ? run.metadata : null;
+    if (!workflow) {
+      set({ selectedWorkflow: null, selectedArtifacts: null, artifactsError: null, isLoadingArtifacts: false });
+      return;
+    }
+
+    set({ selectedWorkflow: workflow });
+
+    if (!opts?.silent) {
+      set({ isLoadingArtifacts: true, artifactsError: null });
+    }
+
+    const result = await window.flowstate.workflows.listArtifacts(workflow.workflowRunId);
+    if (!result.ok) {
+      set({ isLoadingArtifacts: false, artifactsError: result.error.message, selectedArtifacts: [] });
+      return;
+    }
+
+    set({ selectedArtifacts: result.data, isLoadingArtifacts: false, artifactsError: null });
   },
 }));

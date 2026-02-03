@@ -30,13 +30,18 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const runs = useTasksStore((state) => state.runs);
   const selectedRunId = useTasksStore((state) => state.selectedRunId);
   const selectedTimeline = useTasksStore((state) => state.selectedTimeline);
+  const selectedWorkflow = useTasksStore((state) => state.selectedWorkflow);
+  const selectedArtifacts = useTasksStore((state) => state.selectedArtifacts);
   const isLoadingRuns = useTasksStore((state) => state.isLoadingRuns);
   const isLoadingTimeline = useTasksStore((state) => state.isLoadingTimeline);
+  const isLoadingArtifacts = useTasksStore((state) => state.isLoadingArtifacts);
   const error = useTasksStore((state) => state.error);
+  const artifactsError = useTasksStore((state) => state.artifactsError);
   const reloadRuns = useTasksStore((state) => state.reloadRuns);
   const loadActiveRun = useTasksStore((state) => state.loadActiveRun);
   const selectRun = useTasksStore((state) => state.selectRun);
   const reloadSelectedTimeline = useTasksStore((state) => state.reloadSelectedTimeline);
+  const reloadSelectedArtifacts = useTasksStore((state) => state.reloadSelectedArtifacts);
   const { switchSession } = useOpenCode();
 
   useEffect(() => {
@@ -49,12 +54,13 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
       void loadActiveRun({ silent: true });
       void reloadRuns({ silent: true });
       void reloadSelectedTimeline({ silent: true });
+      void reloadSelectedArtifacts({ silent: true });
     }, 5000);
 
     return () => {
       window.clearInterval(interval);
     };
-  }, [loadActiveRun, reloadRuns, reloadSelectedTimeline]);
+  }, [loadActiveRun, reloadRuns, reloadSelectedTimeline, reloadSelectedArtifacts]);
 
   const sortedRuns = useMemo(() => {
     const priority: Record<string, number> = {
@@ -75,6 +81,19 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     () => sortedRuns.find((run) => run.id === selectedRunId) ?? null,
     [selectedRunId, sortedRuns]
   );
+
+  const workflowArtifacts = useMemo(() => {
+    if (!selectedWorkflow || !selectedArtifacts) return null;
+    const byKind = (kind: string) => selectedArtifacts.filter((artifact) => artifact.kind === kind);
+    const pickLatest = (items: typeof selectedArtifacts) => {
+      if (items.length === 0) return null;
+      return items.reduce((latest, current) => (current.createdAt > latest.createdAt ? current : latest));
+    };
+
+    const finalOutput = pickLatest(byKind('final_output'));
+    const summary = pickLatest(byKind('summary'));
+    return { finalOutput, summary };
+  }, [selectedArtifacts, selectedWorkflow]);
 
   const selectedProgress = useMemo(() => {
     if (!selectedRun) return 0;
@@ -282,6 +301,64 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     </button>
                   </div>
                 </div>
+
+                {selectedWorkflow && (
+                  <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-semibold text-foreground">Outputs</h3>
+                        <p className="mt-1 text-xs text-muted-foreground truncate">
+                          Workflow run {selectedWorkflow.workflowRunId}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleOpenChat}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Open output chat
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void reloadSelectedArtifacts()}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                        >
+                          <RefreshCw className={isLoadingArtifacts ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                          Refresh outputs
+                        </button>
+                      </div>
+                    </div>
+
+                    {artifactsError && (
+                      <div className="mt-4 rounded-xl border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">
+                        {artifactsError}
+                      </div>
+                    )}
+
+                    {isLoadingArtifacts && !workflowArtifacts?.finalOutput?.payloadText && !artifactsError ? (
+                      <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                        Loading outputs...
+                      </div>
+                    ) : !workflowArtifacts?.finalOutput?.payloadText && !artifactsError ? (
+                      <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                        No outputs yet.
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-4" aria-busy={isLoadingArtifacts ? 'true' : 'false'}>
+                        {workflowArtifacts?.summary?.payloadText && (
+                          <p className="text-sm text-muted-foreground">{workflowArtifacts.summary.payloadText}</p>
+                        )}
+                        {workflowArtifacts?.finalOutput?.payloadText && (
+                          <pre className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-foreground whitespace-pre-wrap break-words overflow-x-auto">
+                            {workflowArtifacts.finalOutput.payloadText}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <ActivityTimeline
                   events={selectedTimeline}

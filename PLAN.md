@@ -151,7 +151,7 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 | Jan 2026 | **Desktop App (Electron)**              | TUI too complex for non-technical users, Cowork-style UX              | **New**  |
 | Jan 2026 | **Headless OpenCode**                   | Run OpenCode silently, control via SDK/API                            | **New**  |
 | Jan 2026 | **Four-Mode UI**                        | Chat, Tasks, Workflows, Integrations                                  | **New**  |
-| Jan 2026 | **Workflows as Commands/Skills**        | Use OpenCode's .md-based command system, not JSON                     | **New**  |
+| Jan 2026 | **Workflows as Curated Commands**       | Use OpenCode's .md-based command system; hide global commands by default | **New**  |
 | Jan 2026 | **Claude Desktop-style MCP Config**     | Local JSON file for MCP configuration                                 | **New**  |
 | Jan 2026 | **Fresh UI Design**                     | New React UI inspired by FlowState 1.0 aesthetic                      | **New**  |
 | Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen                               | **New**  |
@@ -162,6 +162,9 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 | Jan 2026 | **Redact Secrets Even in Dev Mode**     | Always strip tokens/keys; export bundle requires explicit action      | **New**  |
 | Jan 2026 | **Hybrid Task Promotion**               | Agent-led promotion + heuristic escalation; no user override          | **New**  |
 | Jan 2026 | **Task Summary from Timeline**          | Final task summary auto-generated from timeline; last chat message    | **New**  |
+| Jan 2026 | **Workflow Runs in SQLite**             | Durable history + queryable run metadata                              | **New**  |
+| Jan 2026 | **WorkflowRun + TaskRun Linking**       | Separate workflowRunId; reference taskRunId + chat message/session    | **New**  |
+| Jan 2026 | **Workflow Auto-Route to Tasks**        | Starting a workflow always switches to Tasks                          | **New**  |
 
 ---
 
@@ -1034,6 +1037,8 @@ Value: workflows feel immediate, have durable outputs, and are organized (no glo
 - [ ] Persist WorkflowRuns + outputs (today runs are in-memory only)
 - [ ] Add Output/Artifacts for each run (final output, summary, exports) and show them in Task details
 - [ ] Add workflow run history (last N runs with status, duration, output preview)
+- [ ] Ensure workflow runs use dedicated OpenCode sessions; persist session + assistant message linkage
+- [ ] Surface approval requests/responses for workflow runs in Tasks (tie to workflow run + task run)
 - [ ] Split Workflows view into `Workflows` vs `Commands` (power-user global commands like `tdd`)
 - [ ] Replace the current per-workflow menu with a Workflow Details drawer (Always Approve, inputs, export/duplicate/delete)
 - [ ] Persist pins and enforce pinned limit (3 max) consistently

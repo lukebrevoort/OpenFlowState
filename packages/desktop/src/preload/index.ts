@@ -261,6 +261,13 @@ const flowstateAPI: FlowstateAPIDefinition = {
     list: () => ipcRenderer.invoke('workflows:list'),
     run: (workflowId: string, input?: unknown) => ipcRenderer.invoke('workflows:run', workflowId, input),
     generateFromIntent: (intent: string) => ipcRenderer.invoke('workflows:generateFromIntent', intent),
+
+    listRuns: (workflowId: string, limit?: number, offset?: number) =>
+      ipcRenderer.invoke('workflows:runs:list', workflowId, limit, offset),
+    listArtifacts: (workflowRunId: string) => ipcRenderer.invoke('workflows:artifacts:list', workflowRunId),
+
+    getPins: () => ipcRenderer.invoke('workflows:pins:get'),
+    setPinned: (workflowId: string, pinned: boolean) => ipcRenderer.invoke('workflows:pins:set', workflowId, pinned),
   },
 
   integrations: {

@@ -20,10 +20,19 @@ import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import { listGoogleCalendars } from './google-calendar.js';
 import type { ApprovalReply } from './approval-policy-store.js';
-import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import type {
+  IpcError,
+  IpcResult,
+  TaskRun,
+  WorkflowArtifact,
+  WorkflowDefinition,
+  WorkflowRun,
+} from '../renderer/types/electron';
 import { workflowsRunner } from './workflows-runner.js';
 import { workflowsGenerator } from './workflows-generator.js';
 import { toRendererTaskRun } from './task-types.js';
+import { workflowRunStore } from './workflow-run-store.js';
+import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -686,6 +695,15 @@ const configureTaskStore = (): void => {
   taskStore.configure({ dataDir: configStore.getDataDir() });
 };
 
+const configureWorkflowRunStore = (): void => {
+  // Keep workflow run history persisted in memory.db.
+  workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureWorkflowsPinsStore = (): void => {
+  workflowsPinsStore.configure({ dataDir: configStore.getDataDir() });
+};
+
 ipcMain.handle('settings:get', async () => {
   try {
     return configStore.get();
@@ -942,6 +960,69 @@ ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unkno
     return ipcOk<WorkflowRun>(result.data);
   }
   return ipcError<WorkflowRun>(result.code, result.message, result.details);
+});
+
+ipcMain.handle('workflows:runs:list', async (_event, workflowId: string, limit?: number, offset?: number) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<WorkflowRun[]>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowRunStore();
+    const runs = workflowRunStore.listRunsByWorkflow(id, { limit, offset }) as unknown as WorkflowRun[];
+    return ipcOk<WorkflowRun[]>(runs);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow runs:', error);
+    return ipcError<WorkflowRun[]>('UNKNOWN', 'Failed to list workflow runs.');
+  }
+});
+
+ipcMain.handle('workflows:artifacts:list', async (_event, workflowRunId: string) => {
+  const id = typeof workflowRunId === 'string' ? workflowRunId.trim() : '';
+  if (!id) {
+    return ipcError<WorkflowArtifact[]>('INVALID_REQUEST', 'workflowRunId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowRunStore();
+    const artifacts = workflowRunStore.listArtifactsByRun(id) as unknown as WorkflowArtifact[];
+    return ipcOk<WorkflowArtifact[]>(artifacts);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow artifacts:', error);
+    return ipcError<WorkflowArtifact[]>('UNKNOWN', 'Failed to list workflow artifacts.');
+  }
+});
+
+ipcMain.handle('workflows:pins:get', async () => {
+  try {
+    configureWorkflowsPinsStore();
+    const pinnedIds = workflowsPinsStore.listPins();
+    return ipcOk<string[]>(pinnedIds);
+  } catch (error) {
+    console.warn('[IPC] Failed to list pinned workflows:', error);
+    return ipcError<string[]>('UNKNOWN', 'Failed to list pinned workflows.');
+  }
+});
+
+ipcMain.handle('workflows:pins:set', async (_event, workflowId: string, pinned: boolean) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<{ pinnedIds: string[] }>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowsPinsStore();
+    workflowsPinsStore.setPinned(id, Boolean(pinned));
+    return ipcOk<{ pinnedIds: string[] }>({ pinnedIds: workflowsPinsStore.listPins() });
+  } catch (error) {
+    if (error instanceof PinnedWorkflowsLimitError) {
+      return ipcError<{ pinnedIds: string[] }>('INVALID_REQUEST', error.message, { limit: error.limit });
+    }
+
+    console.warn('[IPC] Failed to set workflow pin state:', error);
+    return ipcError<{ pinnedIds: string[] }>('UNKNOWN', 'Failed to update pinned workflows.');
+  }
 });
 
 ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) => {

@@ -32,6 +32,54 @@ export const workflowsAdapter = {
     }
   },
 
+  async listRuns(
+    workflowId: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<IpcResult<WorkflowRun[]>> {
+    const listRunsFn = window.flowstate?.workflows?.listRuns;
+    if (!listRunsFn) {
+      return unavailable('Workflows are not available in this build.');
+    }
+
+    try {
+      return await listRunsFn(workflowId, limit, offset);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to load workflow runs.');
+    }
+  },
+
+  async getPins(): Promise<IpcResult<string[]>> {
+    const getPinsFn = window.flowstate?.workflows?.getPins;
+    if (!getPinsFn) {
+      return unavailable('Workflows are not available in this build.');
+    }
+
+    try {
+      return await getPinsFn();
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to load pinned workflows.');
+    }
+  },
+
+  async setPinned(
+    workflowId: string,
+    pinned: boolean,
+  ): Promise<IpcResult<{ pinnedIds: string[] }>> {
+    const setPinnedFn = window.flowstate?.workflows?.setPinned;
+    if (!setPinnedFn) {
+      return unavailable('Workflows are not available in this build.');
+    }
+
+    try {
+      return await setPinnedFn(workflowId, pinned);
+    } catch (err) {
+      return unavailable(
+        err instanceof Error ? err.message : 'Failed to update pinned workflows.',
+      );
+    }
+  },
+
   async generateFromIntent(intent: string): Promise<IpcResult<WorkflowGenerationResult>> {
     const genFn = window.flowstate?.workflows?.generateFromIntent;
     if (!genFn) {

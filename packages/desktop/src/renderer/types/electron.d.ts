@@ -98,6 +98,7 @@ export interface TaskRun {
   progress: number;
   summary?: string;
   summarySent?: boolean;
+  metadata?: unknown;
 }
 
 export interface Session {
@@ -114,11 +115,27 @@ export interface WorkflowDefinition {
 export interface WorkflowRun {
   id: string;
   workflowId: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  taskRunId?: string;
+  sessionId?: string;
+  assistantMessageId?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | (string & {});
   startedAt: number;
   finishedAt?: number;
+  durationMs?: number;
+  inputJson?: string;
+  outputPreview?: string;
   output?: unknown;
   error?: string;
+}
+
+export interface WorkflowArtifact {
+  artifactId: string;
+  workflowRunId: string;
+  kind: 'final_output' | 'summary' | 'export' | (string & {});
+  title?: string;
+  mime?: string;
+  createdAt: number;
+  payloadText?: string;
 }
 
 export interface WorkflowGenerationResult {
@@ -336,6 +353,12 @@ export interface FlowstateAPI {
     list: () => Promise<IpcResult<WorkflowDefinition[]>>;
     run: (workflowId: string, input?: unknown) => Promise<IpcResult<WorkflowRun>>;
     generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
+
+    listRuns: (workflowId: string, limit?: number, offset?: number) => Promise<IpcResult<WorkflowRun[]>>;
+    listArtifacts: (workflowRunId: string) => Promise<IpcResult<WorkflowArtifact[]>>;
+
+    getPins: () => Promise<IpcResult<string[]>>;
+    setPinned: (workflowId: string, pinned: boolean) => Promise<IpcResult<{ pinnedIds: string[] }>>;
   };
 
   integrations: {

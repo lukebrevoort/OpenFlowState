@@ -40,5 +40,6 @@ export const toRendererTaskRun = (record: TaskRunRecord): RendererTaskRun => {
     updatedAt: record.updatedAt,
     progress: record.progress,
     ...(record.summary === undefined ? {} : { summary: record.summary }),
+    ...(record.metadata === undefined ? {} : { metadata: record.metadata }),
   };
 };
