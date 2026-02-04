@@ -281,6 +281,18 @@ class ProcessManager {
     return candidate && candidate.trim().length > 0 ? candidate : sessionId;
   }
 
+  private getWorkflowTaskRunId(sessionId: string): string | null {
+    if (!sessionId) return null;
+    try {
+      workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+      const run = workflowRunStore.getRunBySessionId(sessionId);
+      return run?.taskRunId ?? null;
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to resolve workflow task run ID:', error);
+      return null;
+    }
+  }
+
   private inferTaskRunKind(payload: unknown): TaskRunRecord['kind'] {
     const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
     const workflowId = record
@@ -399,15 +411,43 @@ class ProcessManager {
     sessionId: string
   ): void {
     try {
+      const workflowTaskRunId = this.getWorkflowTaskRunId(sessionId);
       const inferredId = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
-      const existingRun = taskStore.getRun(inferredId);
+      const resolvedId = workflowTaskRunId ?? inferredId;
+      const existingRun = taskStore.getRun(resolvedId);
       if (existingRun?.status === 'cancelled') {
         return;
       }
 
       if (rawType === 'task.promoted') {
-        const id = inferredId;
+        const id = resolvedId;
         const text = this.pickTaskText(normalized.payload, normalized.event.title, normalized.event.detail);
+
+        if (workflowTaskRunId) {
+          const updated = taskStore.updateRun(id, {
+            status: 'running',
+            updatedAt: normalized.event.timestamp,
+            description: text.description,
+            ...(text.summary ? { summary: text.summary } : {}),
+          });
+
+          if (!updated) {
+            const run: TaskRunRecord = {
+              id,
+              sessionId,
+              kind: 'workflow',
+              title: text.title,
+              description: text.description,
+              status: 'running',
+              startedAt: normalized.event.timestamp,
+              updatedAt: normalized.event.timestamp,
+              progress: 0,
+              ...(text.summary ? { summary: text.summary } : {}),
+            };
+            taskStore.upsertRun(run);
+          }
+          return;
+        }
 
         const run: TaskRunRecord = {
           id,
@@ -447,14 +487,14 @@ class ProcessManager {
       }
 
       if (rawType === 'task.completed') {
-        const id = inferredId;
+        const id = resolvedId;
         const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
         if (!updated) {
           const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
           taskStore.upsertRun({
             id,
             sessionId,
-            kind: this.inferTaskRunKind(normalized.payload),
+            kind: workflowTaskRunId ? 'workflow' : this.inferTaskRunKind(normalized.payload),
             title: text.title,
             description: text.description,
             status: 'completed',
@@ -467,7 +507,7 @@ class ProcessManager {
       }
 
       if (rawType === 'task.summary') {
-        const id = inferredId;
+        const id = resolvedId;
         const summary = (() => {
           const record =
             normalized.payload && typeof normalized.payload === 'object'
@@ -488,7 +528,7 @@ class ProcessManager {
             taskStore.upsertRun({
               id,
               sessionId,
-              kind: this.inferTaskRunKind(normalized.payload),
+              kind: workflowTaskRunId ? 'workflow' : this.inferTaskRunKind(normalized.payload),
               title: text.title,
               description: text.description,
               status: 'running',
@@ -509,7 +549,7 @@ class ProcessManager {
             ? (normalized.payload as Record<string, unknown>)
             : null;
         const explicitTaskId = record && typeof record.taskId === 'string' ? record.taskId : undefined;
-        const candidateId = explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
+        const candidateId = workflowTaskRunId ?? explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
         if (!candidateId) return;
 
         const existing = taskStore.getRun(candidateId);
@@ -1611,6 +1651,9 @@ class ProcessManager {
     event: { kind: string; title: string; detail?: string; timestamp: number },
     webContents: Electron.WebContents
   ) {
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      return;
+    }
     const state = this.taskPromotionState.get(sessionId);
     if (!state) {
       return;
@@ -1710,6 +1753,10 @@ class ProcessManager {
   }
 
   private finishTaskTracking(sessionId: string, webContents: Electron.WebContents, detail?: string) {
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      this.clearTaskTracking(sessionId);
+      return;
+    }
     const state = this.taskPromotionState.get(sessionId);
     if (!state || state.completed) {
       return;
@@ -1792,6 +1839,9 @@ class ProcessManager {
 
   private startTaskPromotionTracking(sessionId: string, payload?: { message?: string }) {
     this.registerTimelineSession(sessionId);
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      return;
+    }
     const existing = this.taskPromotionState.get(sessionId);
     if (existing) {
       existing.startAt = Date.now();

@@ -8,7 +8,7 @@ import { processManager } from './process-manager.js';
 import { taskStore } from './task-store.js';
 import type { TaskRunRecord } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
-import { clampText, requiresUserInput } from './workflow-response-utils.js';
+import { clampText, requiresUserInput, parseResponseHeader, isTaskBlocked, getCleanContent } from './workflow-response-utils.js';
 import { workflowsStore } from './workflows-store.js';
 
 type IpcErrorCode = 'NOT_IMPLEMENTED' | 'INVALID_REQUEST' | 'UNAVAILABLE' | 'UNKNOWN';
@@ -281,14 +281,35 @@ class WorkflowsRunner {
 
         const response = await processManager.promptSession(workflowSessionId, prompt);
         const finishedAt = Date.now();
+
+        // Parse the response for status headers
+        const parsed = parseResponseHeader(response.content);
+        const blocked = isTaskBlocked(response.content);
         const needsInput = requiresUserInput(response.content);
-        const runStatus = needsInput ? 'waiting_approval' : 'completed';
+        const cleanContent = getCleanContent(response.content);
+
+        // Determine run status based on parsed header
+        const runStatus = blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed';
+
+        // Generate appropriate description based on header status
+        const getTaskDescription = (): string => {
+          if (parsed.hasHeader) {
+            switch (parsed.status) {
+              case 'needs_response': return 'Waiting for your response...';
+              case 'blocked': return 'Task blocked - action required';
+              case 'in_progress': return 'Working on task...';
+              case 'complete': return 'Task completed';
+              default: return 'Processing...';
+            }
+          }
+          return needsInput ? 'Waiting for input...' : 'Task completed';
+        };
 
         workflowRunStore.updateRun(workflowRunId, {
           status: runStatus,
-          ...(needsInput ? {} : { finishedAt }),
+          ...(needsInput || blocked ? {} : { finishedAt }),
           assistantMessageId: response.assistantMessageId,
-          outputPreview: clampText(response.content, 280),
+          outputPreview: clampText(cleanContent, 280),
         });
         workflowRunStore.createArtifact({
           artifactId: randomUUID(),
@@ -297,23 +318,23 @@ class WorkflowsRunner {
           title: 'Final output',
           mime: 'text/plain',
           createdAt: finishedAt,
-          payloadText: response.content,
+          payloadText: cleanContent,
         });
 
         taskStore.updateRun(taskRunId, {
-          status: needsInput ? 'waiting_approval' : 'completed',
-          progress: needsInput ? 50 : 100,
+          status: blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed',
+          progress: blocked || needsInput ? 50 : 100,
           updatedAt: finishedAt,
-          ...(needsInput ? { description: 'Waiting for input...' } : {}),
+          description: getTaskDescription(),
         });
 
         const completed = workflowsStore.updateRun(workflowRunId, {
           status: runStatus,
-          ...(needsInput ? {} : { finishedAt }),
+          ...(needsInput || blocked ? {} : { finishedAt }),
           assistantMessageId: response.assistantMessageId,
-          output: { content: response.content, parts: response.parts },
+          output: { content: cleanContent, parts: response.parts },
         });
-        return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput ? {} : { finishedAt }) } };
+        return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput || blocked ? {} : { finishedAt }) } };
       }
 
       processManager.registerTaskSession(workflowSessionId, `command:${id}`);
@@ -352,15 +373,36 @@ class WorkflowsRunner {
 
       const finishedAt = Date.now();
       const text = extractTextFromParts((result.data as { parts?: unknown })?.parts);
+
+      // Parse the response for status headers
+      const parsed = parseResponseHeader(text);
+      const blocked = isTaskBlocked(text);
       const needsInput = requiresUserInput(text);
-      const runStatus = needsInput ? 'waiting_approval' : 'completed';
+      const cleanContent = getCleanContent(text);
+
+      // Determine run status based on parsed header
+      const runStatus = blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed';
+
+      // Generate appropriate description based on header status
+      const getTaskDescription = (): string => {
+        if (parsed.hasHeader) {
+          switch (parsed.status) {
+            case 'needs_response': return 'Waiting for your response...';
+            case 'blocked': return 'Task blocked - action required';
+            case 'in_progress': return 'Working on task...';
+            case 'complete': return 'Task completed';
+            default: return 'Processing...';
+          }
+        }
+        return needsInput ? 'Waiting for input...' : 'Task completed';
+      };
 
       const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
       workflowRunStore.updateRun(workflowRunId, {
         status: runStatus,
-        ...(needsInput ? {} : { finishedAt }),
+        ...(needsInput || blocked ? {} : { finishedAt }),
         assistantMessageId,
-        outputPreview: clampText(text, 280),
+        outputPreview: clampText(cleanContent, 280),
       });
       workflowRunStore.createArtifact({
         artifactId: randomUUID(),
@@ -369,24 +411,24 @@ class WorkflowsRunner {
         title: 'Final output',
         mime: 'text/plain',
         createdAt: finishedAt,
-        payloadText: text,
+        payloadText: cleanContent,
       });
 
       taskStore.updateRun(taskRunId, {
-        status: needsInput ? 'waiting_approval' : 'completed',
-        progress: needsInput ? 50 : 100,
+        status: blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed',
+        progress: blocked || needsInput ? 50 : 100,
         updatedAt: finishedAt,
-        ...(needsInput ? { description: 'Waiting for input...' } : {}),
+        description: getTaskDescription(),
       });
 
       const completed = workflowsStore.updateRun(workflowRunId, {
         status: runStatus,
-        ...(needsInput ? {} : { finishedAt }),
+        ...(needsInput || blocked ? {} : { finishedAt }),
         ...(assistantMessageId ? { assistantMessageId } : {}),
-        output: { content: text, raw: result.data },
+        output: { content: cleanContent, raw: result.data },
       });
 
-      return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput ? {} : { finishedAt }) } };
+      return { ok: true, data: completed ?? { ...baseRun, status: runStatus, ...(needsInput || blocked ? {} : { finishedAt }) } };
     } catch (error) {
       const finishedAt = Date.now();
       const message = error instanceof Error ? error.message : String(error);

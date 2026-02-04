@@ -4,6 +4,7 @@ import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
 import { useTasksStore } from '../stores/tasksStore';
 import { useOpenCode } from '../hooks/useOpenCode';
+import { parseResponseHeader, getCleanContent } from '../lib/responseHeaders';
 
 type ApprovalPayloadInline = {
   requestId?: string;
@@ -111,10 +112,33 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     const finalOutput = pickLatest(byKind('final_output'));
     const summary = pickLatest(byKind('summary'));
-    return { finalOutput, summary };
+
+    // Parse the final output for status headers
+    const parsed = finalOutput?.payloadText ? parseResponseHeader(finalOutput.payloadText) : null;
+
+    return {
+      finalOutput,
+      summary,
+      parsed,
+      // Clean content with header stripped
+      cleanContent: parsed?.content ?? finalOutput?.payloadText ?? null,
+      // Whether the response explicitly needs user input via header
+      needsResponse: parsed?.hasHeader && parsed.status === 'needs_response',
+    };
   }, [selectedArtifacts, selectedWorkflow]);
 
-  const canRespond = Boolean(selectedWorkflow && selectedRun?.status === 'waiting_approval');
+  // Determine if user can respond - use header-based detection when available
+  const canRespond = useMemo(() => {
+    if (!selectedWorkflow || !selectedRun) return false;
+
+    // If run status is waiting_approval, allow response
+    if (selectedRun.status === 'waiting_approval') return true;
+
+    // Also check if the latest output has NEEDS_RESPONSE header
+    if (workflowArtifacts?.needsResponse) return true;
+
+    return false;
+  }, [selectedWorkflow, selectedRun, workflowArtifacts]);
   const canCancel = Boolean(selectedRun && (selectedRun.status === 'running' || selectedRun.status === 'waiting_approval'));
   const canMarkComplete = Boolean(selectedRun && selectedRun.status !== 'completed' && selectedRun.status !== 'cancelled');
   const canRemove = Boolean(selectedRun && (selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'cancelled'));
@@ -455,11 +479,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     ) : (
                       <div className="mt-4 space-y-4" aria-busy={isLoadingArtifacts ? 'true' : 'false'}>
                         {workflowArtifacts?.summary?.payloadText && (
-                          <p className="text-sm text-muted-foreground">{workflowArtifacts.summary.payloadText}</p>
+                          <p className="text-sm text-muted-foreground">{getCleanContent(workflowArtifacts.summary.payloadText)}</p>
                         )}
-                        {workflowArtifacts?.finalOutput?.payloadText && (
+                        {workflowArtifacts?.cleanContent && (
                           <pre className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-foreground whitespace-pre-wrap break-words overflow-x-auto">
-                            {workflowArtifacts.finalOutput.payloadText}
+                            {workflowArtifacts.cleanContent}
                           </pre>
                         )}
                       </div>
@@ -528,9 +552,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
               </button>
             </div>
 
-            {workflowArtifacts?.finalOutput?.payloadText && (
+            {workflowArtifacts?.cleanContent && (
               <div className="mt-4 rounded-xl border border-border bg-muted/10 p-3 text-xs text-muted-foreground line-clamp-4">
-                {workflowArtifacts.finalOutput.payloadText}
+                {workflowArtifacts.cleanContent}
               </div>
             )}
 
