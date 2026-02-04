@@ -9,6 +9,7 @@
  */
 
 import { google, calendar_v3 } from 'googleapis';
+import { LruCache } from '@flowstate/core/cache';
 import { getGcalDefaults, parseCalendarIdsEnv, isReadAllCalendarsEnv } from '../config.js';
 
 let calendarClient: calendar_v3.Calendar | null = null;
@@ -77,21 +78,18 @@ export async function getCalendarClient(): Promise<calendar_v3.Calendar> {
 }
 
 const CALENDAR_CACHE_TTL_MS = 5 * 60 * 1000;
-let cachedCalendarIds: string[] | null = null;
-let cachedCalendarIdsAt = 0;
+const calendarIdsCache = new LruCache<string[]>({ maxEntries: 1, ttlMs: CALENDAR_CACHE_TTL_MS });
 
 const normalizeCalendarIds = (ids: string[]): string[] =>
   ids.map((id) => id.trim()).filter((id) => id.length > 0);
 
 const getCachedCalendarIds = (): string[] | null => {
-  if (!cachedCalendarIds) return null;
-  if (Date.now() - cachedCalendarIdsAt > CALENDAR_CACHE_TTL_MS) return null;
-  return cachedCalendarIds;
+  const cached = calendarIdsCache.get('calendarIds');
+  return cached ?? null;
 };
 
 const setCachedCalendarIds = (ids: string[]): void => {
-  cachedCalendarIds = ids;
-  cachedCalendarIdsAt = Date.now();
+  calendarIdsCache.set('calendarIds', ids);
 };
 
 const resolveReadCalendarIds = async (explicit?: string[]): Promise<string[]> => {
@@ -101,6 +99,10 @@ const resolveReadCalendarIds = async (explicit?: string[]): Promise<string[]> =>
   
   // If user explicitly selected "All Calendars", return all available calendars
   if (defaults.readAllCalendars) {
+    const cached = getCachedCalendarIds();
+    if (cached && cached.length > 0) {
+      return cached;
+    }
     try {
       const calendars = await listCalendars();
       const ids = normalizeCalendarIds(calendars.map((c) => c.id));

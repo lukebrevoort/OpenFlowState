@@ -33,6 +33,7 @@ import { workflowsGenerator } from './workflows-generator.js';
 import { toRendererTaskRun } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
 import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
+import { userProfile } from '@flowstate/core';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -102,6 +103,9 @@ async function initialize(): Promise<void> {
 
   // Load configuration
   await configStore.load();
+  const dataDir = configStore.getDataDir();
+  process.env.FLOWSTATE_DATA_DIR = dataDir;
+  userProfile.configure({ dataDir });
   console.log('Configuration loaded');
 
   // Initialize auth manager

@@ -15,6 +15,7 @@ import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
+import { userProfile, type UserProfile } from '@flowstate/core';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
 import { oauthServer } from './oauth-server.js';
@@ -816,9 +817,71 @@ class ProcessManager {
     }
   }
 
+  private formatUserProfileForPrompt(profile: UserProfile): string | null {
+    const lines: string[] = [];
+
+    if (profile.preferredName) {
+      lines.push(`- Preferred name: ${profile.preferredName}`);
+    }
+
+    if (profile.timezone) {
+      lines.push(`- Timezone: ${profile.timezone}`);
+    }
+
+    if (profile.location) {
+      lines.push(`- Location: ${profile.location}`);
+    }
+
+    const formatWindow = (label: string, window?: { start?: string; end?: string; days?: string[] }) => {
+      if (!window) return;
+      const parts: string[] = [];
+      if (window.days && window.days.length > 0) {
+        parts.push(window.days.join(', '));
+      }
+      if (window.start || window.end) {
+        const start = window.start ?? 'unspecified';
+        const end = window.end ?? 'unspecified';
+        parts.push(`${start}-${end}`);
+      }
+      if (parts.length > 0) {
+        lines.push(`- ${label}: ${parts.join(' | ')}`);
+      }
+    };
+
+    formatWindow('Study hours', profile.studyHours);
+    formatWindow('Working hours', profile.workingHours);
+
+    if (profile.notes) {
+      lines.push(`- Notes: ${profile.notes}`);
+    }
+
+    return lines.length > 0 ? lines.join('\n') : null;
+  }
+
+  private async getSystemPrompt(): Promise<string | undefined> {
+    if (!this.flowstatePrompt) {
+      const packagesDir = this.getMcpPackagesDir();
+      this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
+    }
+
+    const basePrompt = this.flowstatePrompt ?? undefined;
+    if (!basePrompt) return undefined;
+
+    try {
+      const profile = await userProfile.getProfile();
+      const formatted = this.formatUserProfileForPrompt(profile);
+      if (!formatted) return basePrompt;
+      return `${basePrompt}\n\n## User Profile\n${formatted}`;
+    } catch (error) {
+      console.error('[ProcessManager] Failed to load user profile:', error);
+      return basePrompt;
+    }
+  }
+
   private async buildMcpConfig(): Promise<Record<string, McpLocalConfig>> {
     const mcpConfig: Record<string, McpLocalConfig> = {};
     const packagesDir = this.getMcpPackagesDir();
+    const flowstateDataDir = configStore.getDataDir();
 
     if (!this.flowstatePrompt) {
       this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
@@ -833,6 +896,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', gmailPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           GMAIL_ACCESS_TOKEN: gmailToken.accessToken,
           GMAIL_REFRESH_TOKEN: gmailToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gmailCreds?.clientId || '',
@@ -879,6 +943,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', gcalPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           GCAL_ACCESS_TOKEN: gcalToken.accessToken,
           GCAL_REFRESH_TOKEN: gcalToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gcalCreds?.clientId || '',
@@ -905,6 +970,7 @@ class ProcessManager {
         type: 'local',
         command: ['npx', '-y', '@notionhq/notion-mcp-server'],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           NOTION_TOKEN: notionToken.accessToken,
         },
         enabled: true,
@@ -919,6 +985,9 @@ class ProcessManager {
       mcpConfig['flowstate-system'] = {
         type: 'local',
         command: ['node', systemPath],
+        environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
+        },
         enabled: true,
         timeout: 10000,
       };
@@ -936,6 +1005,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', canvasPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
           CANVAS_AUTH_MODE: useBrowserAuth ? 'browser' : 'token',
           ...(useBrowserAuth
@@ -1222,7 +1292,7 @@ class ProcessManager {
       throw new Error('Invalid sessionId');
     }
 
-    const systemPrompt = this.flowstatePrompt ?? undefined;
+    const systemPrompt = await this.getSystemPrompt();
     this.registerTaskSession(sessionId, content);
 
     try {
@@ -1287,7 +1357,7 @@ class ProcessManager {
       await this.createSession();
     }
 
-    const systemPrompt = this.flowstatePrompt ?? undefined;
+    const systemPrompt = await this.getSystemPrompt();
 
     this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
 
@@ -1385,7 +1455,7 @@ class ProcessManager {
       await this.createSession();
     }
 
-    const systemPrompt = this.flowstatePrompt ?? undefined;
+    const systemPrompt = await this.getSystemPrompt();
 
     this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
 

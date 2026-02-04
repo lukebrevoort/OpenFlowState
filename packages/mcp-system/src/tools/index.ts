@@ -10,6 +10,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as macos from '../macos/index.js';
+import { userProfile } from '@flowstate/core';
 
 // Tool definitions with autonomy levels
 const SYSTEM_TOOLS = [
@@ -124,6 +125,39 @@ const SYSTEM_TOOLS = [
         },
       },
       required: ['layout'],
+    },
+  },
+  {
+    name: 'system_user_profile_get',
+    description: 'Read the FlowState user profile preferences',
+    autonomy: 'auto',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'system_user_profile_update',
+    description: 'Update FlowState user profile preferences',
+    autonomy: 'approval',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profile: {
+          type: 'object',
+          description: 'Partial user profile fields to update',
+        },
+      },
+      required: ['profile'],
+    },
+  },
+  {
+    name: 'system_user_profile_path',
+    description: 'Get the path to the FlowState user profile file',
+    autonomy: 'auto',
+    inputSchema: {
+      type: 'object',
+      properties: {},
     },
   },
   {
@@ -256,6 +290,46 @@ export function registerTools(server: Server): void {
             },
           ],
         };
+
+      case 'system_user_profile_get': {
+        const profile = await userProfile.getProfile();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(profile, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'system_user_profile_update': {
+        const updates = args?.profile as Record<string, unknown> | undefined;
+        if (!updates || typeof updates !== 'object') {
+          throw new Error('system_user_profile_update requires a profile object');
+        }
+        const updated = await userProfile.updateProfile(updates);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(updated, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'system_user_profile_path': {
+        const profilePath = userProfile.getProfilePath();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: profilePath,
+            },
+          ],
+        };
+      }
 
       case 'system_shell':
         const output = await macos.executeShell(

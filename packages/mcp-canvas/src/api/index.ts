@@ -13,6 +13,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { LruCache } from '@flowstate/core/cache';
 
 type CanvasAuthMode = 'token' | 'browser' | 'auto';
 
@@ -96,6 +97,28 @@ let cookieHeaderCache:
       cookieHeader: string;
     }
   | undefined;
+
+const CANVAS_CACHE_TTL_MS = 2 * 60 * 1000;
+const coursesCache = new LruCache<CanvasCourse[]>({ maxEntries: 5, ttlMs: CANVAS_CACHE_TTL_MS });
+const courseCache = new LruCache<CanvasCourse>({ maxEntries: 100, ttlMs: CANVAS_CACHE_TTL_MS });
+const assignmentsCache = new LruCache<CanvasAssignment[]>({ maxEntries: 100, ttlMs: CANVAS_CACHE_TTL_MS });
+const assignmentCache = new LruCache<CanvasAssignment>({ maxEntries: 200, ttlMs: CANVAS_CACHE_TTL_MS });
+const upcomingAssignmentsCache = new LruCache<CanvasTodoItem[]>({ maxEntries: 5, ttlMs: CANVAS_CACHE_TTL_MS });
+const announcementsCache = new LruCache<CanvasAnnouncement[]>({ maxEntries: 50, ttlMs: CANVAS_CACHE_TTL_MS });
+const modulesCache = new LruCache<CanvasModule[]>({ maxEntries: 100, ttlMs: CANVAS_CACHE_TTL_MS });
+const moduleItemsCache = new LruCache<CanvasModuleItem[]>({ maxEntries: 200, ttlMs: CANVAS_CACHE_TTL_MS });
+const gradesCache = new LruCache<CanvasGrade[]>({ maxEntries: 5, ttlMs: CANVAS_CACHE_TTL_MS });
+const calendarEventsCache = new LruCache<any[]>({ maxEntries: 10, ttlMs: CANVAS_CACHE_TTL_MS });
+const courseFilesCache = new LruCache<CanvasFile[]>({ maxEntries: 50, ttlMs: CANVAS_CACHE_TTL_MS });
+const fileCache = new LruCache<CanvasFile>({ maxEntries: 200, ttlMs: CANVAS_CACHE_TTL_MS });
+
+const buildCacheKey = (prefix: string, parts: unknown[]): string => {
+  try {
+    return `${prefix}:${JSON.stringify(parts)}`;
+  } catch {
+    return `${prefix}:${String(parts)}`;
+  }
+};
 
 const buildCookieHeaderFromStorageState = async (storageStatePath: string, baseUrl: string) => {
   const host = new URL(baseUrl).hostname;
@@ -726,6 +749,13 @@ export async function getCourses(options?: {
   enrollmentState?: 'active' | 'completed' | 'all';
   includeGrades?: boolean;
 }): Promise<CanvasCourse[]> {
+  const cacheKey = buildCacheKey('courses', [
+    options?.enrollmentState ?? 'active',
+    options?.includeGrades ?? false,
+  ]);
+  const cached = coursesCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const params = new URLSearchParams();
   
   if (options?.enrollmentState) {
@@ -739,14 +769,20 @@ export async function getCourses(options?: {
   const queryString = params.toString();
   const endpoint = `/courses${queryString ? `?${queryString}` : ''}`;
 
-  return canvasFetchAllPages<CanvasCourse>(endpoint);
+  const results = await canvasFetchAllPages<CanvasCourse>(endpoint);
+  coursesCache.set(cacheKey, results);
+  return results;
 }
 
 /**
  * Get a specific course by ID
  */
 export async function getCourse(courseId: number): Promise<CanvasCourse> {
-  return canvasFetch<CanvasCourse>(`/courses/${courseId}`);
+  const cached = courseCache.get(String(courseId));
+  if (cached !== undefined) return cached;
+  const course = await canvasFetch<CanvasCourse>(`/courses/${courseId}`);
+  courseCache.set(String(courseId), course);
+  return course;
 }
 
 /**
@@ -759,6 +795,14 @@ export async function getAssignments(
     includeSubmission?: boolean;
   }
 ): Promise<CanvasAssignment[]> {
+  const cacheKey = buildCacheKey('assignments', [
+    courseId,
+    options?.orderBy ?? '',
+    options?.includeSubmission ?? false,
+  ]);
+  const cached = assignmentsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const params = new URLSearchParams();
   
   if (options?.orderBy) {
@@ -772,7 +816,9 @@ export async function getAssignments(
   const queryString = params.toString();
   const endpoint = `/courses/${courseId}/assignments${queryString ? `?${queryString}` : ''}`;
 
-  return canvasFetchAllPages<CanvasAssignment>(endpoint);
+  const results = await canvasFetchAllPages<CanvasAssignment>(endpoint);
+  assignmentsCache.set(cacheKey, results);
+  return results;
 }
 
 /**
@@ -782,16 +828,25 @@ export async function getAssignment(
   courseId: number,
   assignmentId: number
 ): Promise<CanvasAssignment> {
-  return canvasFetch<CanvasAssignment>(
+  const cacheKey = `${courseId}:${assignmentId}`;
+  const cached = assignmentCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const assignment = await canvasFetch<CanvasAssignment>(
     `/courses/${courseId}/assignments/${assignmentId}`
   );
+  assignmentCache.set(cacheKey, assignment);
+  return assignment;
 }
 
 /**
  * Get upcoming assignments across all courses
  */
 export async function getUpcomingAssignments(): Promise<CanvasTodoItem[]> {
-  return canvasFetchAllPages<CanvasTodoItem>('/users/self/todo');
+  const cached = upcomingAssignmentsCache.get('upcoming');
+  if (cached !== undefined) return cached;
+  const results = await canvasFetchAllPages<CanvasTodoItem>('/users/self/todo');
+  upcomingAssignmentsCache.set('upcoming', results);
+  return results;
 }
 
 /**
@@ -828,6 +883,15 @@ export async function getAnnouncements(
     activeOnly?: boolean;
   }
 ): Promise<CanvasAnnouncement[]> {
+  const cacheKey = buildCacheKey('announcements', [
+    [...courseIds].sort((a, b) => a - b),
+    options?.startDate ?? '',
+    options?.endDate ?? '',
+    options?.activeOnly ?? false,
+  ]);
+  const cached = announcementsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const params = new URLSearchParams();
   
   courseIds.forEach(id => {
@@ -846,14 +910,21 @@ export async function getAnnouncements(
     params.append('active_only', 'true');
   }
   
-  return canvasFetchAllPages<CanvasAnnouncement>(`/announcements?${params.toString()}`);
+  const results = await canvasFetchAllPages<CanvasAnnouncement>(`/announcements?${params.toString()}`);
+  announcementsCache.set(cacheKey, results);
+  return results;
 }
 
 /**
  * Get modules for a course
  */
 export async function getModules(courseId: number): Promise<CanvasModule[]> {
-  return canvasFetchAllPages<CanvasModule>(`/courses/${courseId}/modules`);
+  const cacheKey = `modules:${courseId}`;
+  const cached = modulesCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const results = await canvasFetchAllPages<CanvasModule>(`/courses/${courseId}/modules`);
+  modulesCache.set(cacheKey, results);
+  return results;
 }
 
 /**
@@ -863,20 +934,28 @@ export async function getModuleItems(
   courseId: number,
   moduleId: number
 ): Promise<CanvasModuleItem[]> {
-  return canvasFetchAllPages<CanvasModuleItem>(
+  const cacheKey = `${courseId}:${moduleId}`;
+  const cached = moduleItemsCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const results = await canvasFetchAllPages<CanvasModuleItem>(
     `/courses/${courseId}/modules/${moduleId}/items`
   );
+  moduleItemsCache.set(cacheKey, results);
+  return results;
 }
 
 /**
  * Get grades for all enrolled courses
  */
 export async function getGrades(): Promise<CanvasGrade[]> {
+  const cached = gradesCache.get('grades');
+  if (cached !== undefined) return cached;
+
   const enrollments = await canvasFetchAllPages<CanvasEnrollment>(
     '/users/self/enrollments?type[]=StudentEnrollment&include[]=grades'
   );
   
-  return enrollments.map(enrollment => ({
+  const results = enrollments.map(enrollment => ({
     course_id: enrollment.course_id,
     course_name: '', // Will be populated by caller if needed
     current_grade: enrollment.grades?.current_grade ?? null,
@@ -884,6 +963,8 @@ export async function getGrades(): Promise<CanvasGrade[]> {
     final_grade: enrollment.grades?.final_grade ?? null,
     final_score: enrollment.grades?.final_score ?? null,
   }));
+  gradesCache.set('grades', results);
+  return results;
 }
 
 /**
@@ -912,6 +993,14 @@ export async function getCalendarEvents(options?: {
     html_url: string;
   };
 
+  const cacheKey = buildCacheKey('calendar', [
+    options?.startDate ?? '',
+    options?.endDate ?? '',
+    options?.type ?? '',
+  ]);
+  const cached = calendarEventsCache.get(cacheKey);
+  if (cached !== undefined) return cached as any;
+
   const params = new URLSearchParams();
   
   if (options?.startDate) {
@@ -928,9 +1017,11 @@ export async function getCalendarEvents(options?: {
   
   params.append('all_events', 'true');
 
-  return canvasFetchAllPages<CanvasCalendarEvent>(
+  const results = await canvasFetchAllPages<CanvasCalendarEvent>(
     `/calendar_events?${params.toString()}`
   );
+  calendarEventsCache.set(cacheKey, results as any);
+  return results;
 }
 
 // =========================================================================
@@ -938,11 +1029,21 @@ export async function getCalendarEvents(options?: {
 // =========================================================================
 
 export async function listCourseFiles(courseId: number): Promise<CanvasFile[]> {
-  return canvasFetchAllPages<CanvasFile>(`/courses/${courseId}/files`, {}, { perPage: 100 });
+  const cacheKey = `course-files:${courseId}`;
+  const cached = courseFilesCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const results = await canvasFetchAllPages<CanvasFile>(`/courses/${courseId}/files`, {}, { perPage: 100 });
+  courseFilesCache.set(cacheKey, results);
+  return results;
 }
 
 export async function getFile(fileId: number): Promise<CanvasFile> {
-  return canvasFetch<CanvasFile>(`/files/${fileId}`);
+  const cacheKey = String(fileId);
+  const cached = fileCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  const file = await canvasFetch<CanvasFile>(`/files/${fileId}`);
+  fileCache.set(cacheKey, file);
+  return file;
 }
 
 export async function getSubmissionDetailed(

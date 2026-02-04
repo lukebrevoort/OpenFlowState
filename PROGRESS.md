@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: January 14, 2026 (Phase 3 Session 3 - MCP Debugging)
+> **Last Updated**: February 4, 2026 (Phase 3 Session 4 - User Profile + Caching)
 
 ---
 
@@ -26,6 +26,8 @@
 - **API token auth for Notion Internal Integration**
 - **Encrypted token storage (AES-256-GCM)**
 - **MCP server configuration with environment variables**
+- **User profile store (local JSON) with system tools**
+- **Shared LRU cache with TTL for MCP servers**
 
 ---
 
@@ -119,6 +121,8 @@ packages/desktop/src/
 - [x] Create IPC handlers for auth and OAuth
 - [x] Create useIntegrations hook with event listeners
 - [x] Create credentials modal for OAuth client setup
+- [x] Add user profile store + system tools
+- [x] Add shared cache module + MCP caching pass (Gmail, GCal, Notion, Canvas)
 - [ ] Test OAuth flow for Google services (needs real credentials)
 - [ ] Connect to existing MCP servers as child processes
 

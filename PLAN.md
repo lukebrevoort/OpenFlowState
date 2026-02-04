@@ -1,7 +1,7 @@
 # FlowState 2.0 - Project Plan
 
 > **Status**: Architecture Pivot - Desktop App  
-> **Last Updated**: January 2026  
+> **Last Updated**: February 2026  
 > **License**: MIT  
 > **Built On**: [OpenCode](https://opencode.ai) (Headless)
 
@@ -165,6 +165,8 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 | Jan 2026 | **Workflow Runs in SQLite**             | Durable history + queryable run metadata                              | **New**  |
 | Jan 2026 | **WorkflowRun + TaskRun Linking**       | Separate workflowRunId; reference taskRunId + chat message/session    | **New**  |
 | Jan 2026 | **Workflow Auto-Route to Tasks**        | Starting a workflow always switches to Tasks                          | **New**  |
+| Feb 2026 | **User Profile JSON + System Tools**    | Persist user preferences + inject into system prompt                  | **New**  |
+| Feb 2026 | **Shared LRU Cache Module**             | Standardize caching across MCP servers                                | **New**  |
 
 ---
 

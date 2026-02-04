@@ -12,8 +12,8 @@ import { google, gmail_v1 } from 'googleapis';
 import { LruCache } from '../cache.js';
 
 let gmailClient: gmail_v1.Gmail | null = null;
-const messageCache = new LruCache<gmail_v1.Schema$Message>(100);
-const threadCache = new LruCache<gmail_v1.Schema$Thread>(50);
+const messageCache = new LruCache<gmail_v1.Schema$Message>({ maxEntries: 100, ttlMs: 2 * 60 * 1000 });
+const threadCache = new LruCache<gmail_v1.Schema$Thread>({ maxEntries: 50, ttlMs: 2 * 60 * 1000 });
 
 /**
  * Get OAuth tokens and credentials from environment variables or @flowstate/core
