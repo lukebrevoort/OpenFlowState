@@ -1,5 +1,11 @@
 import { create } from 'zustand';
-import type { WorkflowDefinition, WorkflowGenerationResult, WorkflowRun } from '../types/electron';
+import type {
+  WorkflowDefinition,
+  WorkflowGenerationResult,
+  WorkflowRun,
+  WorkflowSkillFile,
+  WorkflowSkillSaveResult,
+} from '../types/electron';
 import { workflowsAdapter } from '../lib/workflowsAdapter';
 
 interface WorkflowsState {
@@ -26,6 +32,12 @@ interface WorkflowsState {
   ensureRunsLoaded: (workflowId: string, limit: number) => Promise<void>;
   run: (workflowId: string, input?: unknown) => Promise<WorkflowRun | null>;
   generateFromIntent: (intent: string) => Promise<WorkflowGenerationResult | null>;
+  getSkillMarkdown: (workflowId: string) => Promise<{ ok: boolean; data?: WorkflowSkillFile; error?: string }>;
+  saveSkillMarkdown: (
+    workflowId: string,
+    skillMarkdown: string,
+  ) => Promise<{ ok: boolean; data?: WorkflowSkillSaveResult; error?: string }>;
+  deleteWorkflow: (workflowId: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const upsertWorkflow = (current: WorkflowDefinition[], next: WorkflowDefinition): WorkflowDefinition[] => {
@@ -160,6 +172,46 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
 
     set({ isGenerating: false, generateError: result.error.message });
     return null;
+  },
+
+  getSkillMarkdown: async (workflowId: string) => {
+    const result = await workflowsAdapter.getSkillMarkdown(workflowId);
+    if (result.ok) {
+      return { ok: true, data: result.data };
+    }
+    return { ok: false, error: result.error.message };
+  },
+
+  saveSkillMarkdown: async (workflowId: string, skillMarkdown: string) => {
+    const result = await workflowsAdapter.saveSkillMarkdown(workflowId, skillMarkdown);
+    if (result.ok) {
+      set((state) => ({
+        workflows: upsertWorkflow(state.workflows, result.data.definition),
+      }));
+      return { ok: true, data: result.data };
+    }
+    return { ok: false, error: result.error.message };
+  },
+
+  deleteWorkflow: async (workflowId: string) => {
+    const result = await workflowsAdapter.deleteWorkflow(workflowId);
+    if (result.ok) {
+      set((state) => ({
+        workflows: state.workflows.filter((workflow) => workflow.id !== workflowId),
+        pinnedIds: state.pinnedIds.filter((id) => id !== workflowId),
+        runsByWorkflowId: Object.fromEntries(
+          Object.entries(state.runsByWorkflowId).filter(([id]) => id !== workflowId),
+        ),
+        runsMetaByWorkflowId: Object.fromEntries(
+          Object.entries(state.runsMetaByWorkflowId).filter(([id]) => id !== workflowId),
+        ),
+        runsErrorByWorkflowId: Object.fromEntries(
+          Object.entries(state.runsErrorByWorkflowId).filter(([id]) => id !== workflowId),
+        ),
+      }));
+      return { ok: true };
+    }
+    return { ok: false, error: result.error.message };
   },
 }));
 

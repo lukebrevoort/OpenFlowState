@@ -268,6 +268,10 @@ const flowstateAPI: FlowstateAPIDefinition = {
     list: () => ipcRenderer.invoke('workflows:list'),
     run: (workflowId: string, input?: unknown) => ipcRenderer.invoke('workflows:run', workflowId, input),
     generateFromIntent: (intent: string) => ipcRenderer.invoke('workflows:generateFromIntent', intent),
+    getSkillMarkdown: (workflowId: string) => ipcRenderer.invoke('workflows:skill:get', workflowId),
+    saveSkillMarkdown: (workflowId: string, skillMarkdown: string) =>
+      ipcRenderer.invoke('workflows:skill:save', workflowId, skillMarkdown),
+    deleteWorkflow: (workflowId: string) => ipcRenderer.invoke('workflows:delete', workflowId),
 
     listRuns: (workflowId: string, limit?: number, offset?: number) =>
       ipcRenderer.invoke('workflows:runs:list', workflowId, limit, offset),

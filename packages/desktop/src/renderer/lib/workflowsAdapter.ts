@@ -1,4 +1,12 @@
-import type { IpcError, IpcResult, WorkflowDefinition, WorkflowGenerationResult, WorkflowRun } from '../types/electron';
+import type {
+  IpcError,
+  IpcResult,
+  WorkflowDefinition,
+  WorkflowGenerationResult,
+  WorkflowRun,
+  WorkflowSkillFile,
+  WorkflowSkillSaveResult,
+} from '../types/electron';
 
 function unavailable<T>(message: string): IpcResult<T> {
   const error: IpcError = { code: 'UNAVAILABLE', message };
@@ -90,6 +98,48 @@ export const workflowsAdapter = {
       return await genFn(intent);
     } catch (err) {
       return unavailable(err instanceof Error ? err.message : 'Failed to generate workflow.');
+    }
+  },
+
+  async getSkillMarkdown(workflowId: string): Promise<IpcResult<WorkflowSkillFile>> {
+    const getFn = window.flowstate?.workflows?.getSkillMarkdown;
+    if (!getFn) {
+      return unavailable('Workflow editor is not available in this build.');
+    }
+
+    try {
+      return await getFn(workflowId);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to load workflow file.');
+    }
+  },
+
+  async saveSkillMarkdown(
+    workflowId: string,
+    skillMarkdown: string,
+  ): Promise<IpcResult<WorkflowSkillSaveResult>> {
+    const saveFn = window.flowstate?.workflows?.saveSkillMarkdown;
+    if (!saveFn) {
+      return unavailable('Workflow editor is not available in this build.');
+    }
+
+    try {
+      return await saveFn(workflowId, skillMarkdown);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to save workflow file.');
+    }
+  },
+
+  async deleteWorkflow(workflowId: string): Promise<IpcResult<{ removed: boolean }>> {
+    const deleteFn = window.flowstate?.workflows?.deleteWorkflow;
+    if (!deleteFn) {
+      return unavailable('Workflow deletion is not available in this build.');
+    }
+
+    try {
+      return await deleteFn(workflowId);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to delete workflow.');
     }
   },
 };

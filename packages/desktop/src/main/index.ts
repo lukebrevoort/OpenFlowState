@@ -1222,6 +1222,37 @@ ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) =>
   return ipcError(result.code, result.message, result.details);
 });
 
+ipcMain.handle('workflows:skill:get', async (_event, workflowId: string) => {
+  const result = await workflowsRunner.getSkillMarkdown(workflowId);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
+ipcMain.handle('workflows:skill:save', async (_event, workflowId: string, skillMarkdown: string) => {
+  const result = await workflowsRunner.saveSkillMarkdown(workflowId, skillMarkdown);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
+ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
+  const result = await workflowsRunner.deleteWorkflow(workflowId);
+  if (result.ok) {
+    try {
+      configureWorkflowsPinsStore();
+      workflowsPinsStore.setPinned(workflowId, false);
+      return ipcOk(result.data);
+    } catch (error) {
+      console.warn('[IPC] Failed to update pins after workflow delete:', error);
+      return ipcOk(result.data);
+    }
+  }
+  return ipcError(result.code, result.message);
+});
+
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
   try {
     const args = ['models'];

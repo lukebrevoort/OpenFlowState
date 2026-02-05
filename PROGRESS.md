@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 4, 2026 (Phase 3 Session 4 - User Profile + Caching)
+> **Last Updated**: February 4, 2026 (Phase 3 Session 5 - Workflows QoL)
 
 ---
 
@@ -28,6 +28,7 @@
 - **MCP server configuration with environment variables**
 - **User profile store (local JSON) with system tools**
 - **Shared LRU cache with TTL for MCP servers**
+- **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 
 ---
 

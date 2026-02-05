@@ -143,6 +143,18 @@ export interface WorkflowGenerationResult {
   skillMarkdown: string;
 }
 
+export interface WorkflowSkillFile {
+  workflowId: string;
+  skillMarkdown: string;
+  source: 'user' | 'project';
+}
+
+export interface WorkflowSkillSaveResult {
+  definition: WorkflowDefinition;
+  skillMarkdown: string;
+  source: 'user' | 'project';
+}
+
 export type ChatSendResult = {
   success?: boolean;
   error?: string;
@@ -360,6 +372,9 @@ export interface FlowstateAPI {
     list: () => Promise<IpcResult<WorkflowDefinition[]>>;
     run: (workflowId: string, input?: unknown) => Promise<IpcResult<WorkflowRun>>;
     generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
+    getSkillMarkdown: (workflowId: string) => Promise<IpcResult<WorkflowSkillFile>>;
+    saveSkillMarkdown: (workflowId: string, skillMarkdown: string) => Promise<IpcResult<WorkflowSkillSaveResult>>;
+    deleteWorkflow: (workflowId: string) => Promise<IpcResult<{ removed: boolean }>>;
 
     listRuns: (workflowId: string, limit?: number, offset?: number) => Promise<IpcResult<WorkflowRun[]>>;
     listArtifacts: (workflowRunId: string) => Promise<IpcResult<WorkflowArtifact[]>>;

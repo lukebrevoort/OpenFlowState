@@ -41,6 +41,63 @@ const slugify = (raw: string): string => {
   return lowered;
 };
 
+const WORKFLOW_NAME_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'to',
+  'for',
+  'of',
+  'on',
+  'in',
+  'at',
+  'with',
+  'and',
+  'or',
+  'my',
+  'your',
+  'our',
+  'their',
+  'me',
+  'you',
+  'we',
+  'they',
+  'add',
+  'create',
+  'make',
+  'build',
+  'workflow',
+  'workflows',
+  'please',
+  'that',
+  'this',
+  'from',
+  'into',
+  'every',
+  'each',
+  'daily',
+  'weekly',
+  'monthly',
+]);
+
+const buildWorkflowSlug = (intent: string): string => {
+  const tokens = intent
+    .toLowerCase()
+    .replace(/["']/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const filtered = tokens.filter((token) => !WORKFLOW_NAME_STOPWORDS.has(token));
+  const baseTokens = (filtered.length ? filtered : tokens).slice(0, 6);
+  const base = baseTokens.join(' ');
+
+  const slug = slugify(base).slice(0, 32);
+  if (slug.length > 0) return slug;
+
+  return slugify(intent).slice(0, 48);
+};
+
 const escapeYamlString = (value: string): string => {
   // Keep it single-line; YAML double-quoted string.
   const singleLine = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -173,14 +230,17 @@ class WorkflowsGenerator {
 
     const intentRedacted = redactSecrets(rawIntent);
     const baseWorkflowsDir = path.join(configStore.getDataDir(), 'workflows');
-    const slugBase = slugify(intentRedacted).slice(0, 48);
+    const slugBase = buildWorkflowSlug(intentRedacted);
     const workflowId = await ensureUniqueWorkflowId(baseWorkflowsDir, slugBase);
 
     const prompt = buildGeneratorPrompt(intentRedacted, workflowId);
 
     let generated = '';
     try {
-      const response = await processManager.sendMessage(prompt);
+      const response = await processManager.sendMessage(prompt, undefined, {
+        skipTaskTracking: true,
+        skipWorkflowSync: true,
+      });
       generated = response.content ?? '';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -15,6 +15,9 @@ import {
   X,
   Clock,
   Check,
+  Trash2,
+  FileText,
+  Save,
 } from 'lucide-react';
 import { useWorkflowsStore } from '../stores/workflowsStore';
 import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
@@ -105,15 +108,21 @@ function WorkflowCard({
   onTogglePin,
   onRun,
   onOpenDetails,
+  onDelete,
   lastRun,
   isStarting,
+  isDeleting,
+  deletePending,
 }: {
   workflow: Workflow;
   onTogglePin: (id: string) => void;
   onRun: (id: string) => void;
   onOpenDetails: (id: string) => void;
+  onDelete: (id: string) => void;
   lastRun: WorkflowRun | null;
   isStarting: boolean;
+  isDeleting: boolean;
+  deletePending: boolean;
 }) {
   const runMeta = lastRun ? statusLabel(lastRun.status) : null;
   const durationLabel = lastRun ? formatDuration(lastRun.durationMs) : null;
@@ -139,6 +148,19 @@ function WorkflowCard({
           aria-label="Open workflow details"
         >
           <PanelRight className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(workflow.id)}
+          disabled={isDeleting}
+          className={
+            deletePending
+              ? 'inline-flex h-9 w-9 items-center justify-center rounded-lg bg-destructive text-destructive-foreground transition-all duration-200'
+              : 'inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-200'
+          }
+          aria-label={deletePending ? 'Confirm delete workflow' : 'Delete workflow'}
+        >
+          {deletePending ? <Check className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
         </button>
       </div>
 
@@ -207,9 +229,20 @@ function WorkflowDetailsDrawer({
   pinsError,
   runs,
   isRunning,
+  deletePending,
+  isDeleting,
+  deleteError,
+  skillDraft,
+  skillStatus,
+  skillSource,
+  skillError,
+  isSkillDirty,
   onClose,
   onTogglePin,
   onRun,
+  onDelete,
+  onSkillChange,
+  onSaveSkill,
   onOpenTaskRun,
 }: {
   workflow: WorkflowDefinition;
@@ -217,9 +250,20 @@ function WorkflowDetailsDrawer({
   pinsError: string | null;
   runs: WorkflowRun[];
   isRunning: boolean;
+  deletePending: boolean;
+  isDeleting: boolean;
+  deleteError: string | null;
+  skillDraft: string;
+  skillStatus: 'idle' | 'loading' | 'saving' | 'saved' | 'error';
+  skillSource: 'user' | 'project' | null;
+  skillError: string | null;
+  isSkillDirty: boolean;
   onClose: () => void;
   onTogglePin: () => void;
   onRun: () => void;
+  onDelete: () => void;
+  onSkillChange: (next: string) => void;
+  onSaveSkill: () => void;
   onOpenTaskRun: (taskRunId: string) => void;
 }) {
   return (
@@ -263,6 +307,58 @@ function WorkflowDetailsDrawer({
               </button>
               {pinsError ? (
                 <p className="text-xs text-destructive">{pinsError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <h4 className="text-sm font-semibold text-foreground">Command file</h4>
+                </div>
+                {skillSource ? (
+                  <span className="text-[11px] text-muted-foreground">
+                    {skillSource === 'user' ? 'User file' : 'Project file'}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="mt-3 rounded-xl border border-border bg-background/40">
+                {skillStatus === 'loading' ? (
+                  <div className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading command...
+                  </div>
+                ) : (
+                  <textarea
+                    value={skillDraft}
+                    onChange={(event) => onSkillChange(event.target.value)}
+                    className="min-h-[220px] w-full resize-y rounded-xl bg-transparent px-4 py-3 text-xs font-mono text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    spellCheck={false}
+                  />
+                )}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onSaveSkill}
+                  disabled={!isSkillDirty || skillStatus === 'saving' || skillStatus === 'loading'}
+                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs text-primary-foreground transition-all duration-200 hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {skillStatus === 'saving' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
+                  Save
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  {skillStatus === 'saved' ? 'Saved' : isSkillDirty ? 'Unsaved changes' : 'Up to date'}
+                </span>
+              </div>
+              {skillError ? (
+                <p className="mt-2 text-xs text-destructive">{skillError}</p>
               ) : null}
             </div>
 
@@ -322,6 +418,33 @@ function WorkflowDetailsDrawer({
                 </div>
               )}
             </div>
+
+            <div className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-destructive">Delete workflow</h4>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This removes the workflow file and unpins it.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  disabled={isDeleting}
+                  className={
+                    deletePending
+                      ? 'inline-flex items-center gap-2 rounded-lg bg-destructive px-3 py-2 text-xs text-destructive-foreground transition-all duration-200'
+                      : 'inline-flex items-center gap-2 rounded-lg border border-destructive/40 px-3 py-2 text-xs text-destructive transition-all duration-200 hover:bg-destructive/10'
+                  }
+                >
+                  {deletePending ? <Check className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  {deletePending ? 'Confirm' : 'Delete'}
+                </button>
+              </div>
+              {deleteError ? (
+                <p className="mt-2 text-xs text-destructive">{deleteError}</p>
+              ) : null}
+            </div>
           </div>
 
           <div className="border-t border-border px-5 py-4">
@@ -355,6 +478,9 @@ function WorkflowsMode({
   const generateFromIntent = useWorkflowsStore((state) => state.generateFromIntent);
   const isGenerating = useWorkflowsStore((state) => state.isGenerating);
   const generateError = useWorkflowsStore((state) => state.generateError);
+  const getSkillMarkdown = useWorkflowsStore((state) => state.getSkillMarkdown);
+  const saveSkillMarkdown = useWorkflowsStore((state) => state.saveSkillMarkdown);
+  const deleteWorkflow = useWorkflowsStore((state) => state.deleteWorkflow);
   const pinnedIds = useWorkflowsStore((state) => state.pinnedIds);
   const loadPins = useWorkflowsStore((state) => state.loadPins);
   const setPinned = useWorkflowsStore((state) => state.setPinned);
@@ -373,6 +499,17 @@ function WorkflowsMode({
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [generatedDefinition, setGeneratedDefinition] = useState<WorkflowDefinition | null>(null);
   const builderIntentRef = useRef<HTMLTextAreaElement | null>(null);
+  const deleteTimerRef = useRef<number | null>(null);
+
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingWorkflowId, setDeletingWorkflowId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [skillDraft, setSkillDraft] = useState('');
+  const [skillSnapshot, setSkillSnapshot] = useState('');
+  const [skillStatus, setSkillStatus] = useState<'idle' | 'loading' | 'saving' | 'saved' | 'error'>('idle');
+  const [skillError, setSkillError] = useState<string | null>(null);
+  const [skillSource, setSkillSource] = useState<'user' | 'project' | null>(null);
 
   const keyHint = useMemo(() => {
     if (typeof navigator === 'undefined') return 'Ctrl';
@@ -405,6 +542,42 @@ function WorkflowsMode({
   const handleTogglePin = async (id: string) => {
     const isPinned = new Set(pinnedIds).has(id);
     await setPinned(id, !isPinned);
+  };
+
+  const clearDeleteTimer = () => {
+    if (deleteTimerRef.current) {
+      window.clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = null;
+    }
+  };
+
+  const handleDeleteWorkflow = async (id: string) => {
+    if (pendingDeleteId !== id) {
+      setDeleteError(null);
+      setPendingDeleteId(id);
+      clearDeleteTimer();
+      deleteTimerRef.current = window.setTimeout(() => {
+        setPendingDeleteId((current) => (current === id ? null : current));
+      }, 3500);
+      return;
+    }
+
+    clearDeleteTimer();
+    setPendingDeleteId(null);
+    setDeletingWorkflowId(id);
+    setDeleteError(null);
+
+    const result = await deleteWorkflow(id);
+    setDeletingWorkflowId(null);
+
+    if (!result.ok) {
+      setDeleteError(result.error ?? 'Failed to delete workflow.');
+      return;
+    }
+
+    if (drawerWorkflowId === id) {
+      setDrawerWorkflowId(null);
+    }
   };
 
   const handleRun = async (id: string) => {
@@ -462,6 +635,26 @@ function WorkflowsMode({
     void handleRun(generatedDefinition.id);
   };
 
+  const handleSaveSkill = async () => {
+    if (!drawerWorkflowId) return;
+    setSkillError(null);
+    setSkillStatus('saving');
+    const result = await saveSkillMarkdown(drawerWorkflowId, skillDraft);
+    if (!result.ok || !result.data) {
+      setSkillStatus('error');
+      setSkillError(result.error ?? 'Failed to save workflow file.');
+      return;
+    }
+
+    setSkillSnapshot(result.data.skillMarkdown);
+    setSkillDraft(result.data.skillMarkdown);
+    setSkillSource(result.data.source);
+    setSkillStatus('saved');
+    window.setTimeout(() => {
+      setSkillStatus((current) => (current === 'saved' ? 'idle' : current));
+    }, 1200);
+  };
+
   const activeBuilderError = builderError ?? generateError;
 
   const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
@@ -483,6 +676,51 @@ function WorkflowsMode({
     if (!drawerWorkflowId) return;
     void ensureRunsLoaded(drawerWorkflowId, 5);
   }, [drawerWorkflowId, ensureRunsLoaded]);
+
+  useEffect(() => {
+    setDeleteError(null);
+  }, [drawerWorkflowId]);
+
+  useEffect(() => {
+    if (!drawerWorkflowId) {
+      setSkillDraft('');
+      setSkillSnapshot('');
+      setSkillStatus('idle');
+      setSkillError(null);
+      setSkillSource(null);
+      return;
+    }
+
+    let active = true;
+    setSkillStatus('loading');
+    setSkillError(null);
+    setSkillDraft('');
+    setSkillSnapshot('');
+    setSkillSource(null);
+    void (async () => {
+      const result = await getSkillMarkdown(drawerWorkflowId);
+      if (!active) return;
+      if (!result.ok || !result.data) {
+        setSkillStatus('error');
+        setSkillError(result.error ?? 'Failed to load workflow file.');
+        return;
+      }
+      setSkillDraft(result.data.skillMarkdown);
+      setSkillSnapshot(result.data.skillMarkdown);
+      setSkillSource(result.data.source);
+      setSkillStatus('idle');
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [drawerWorkflowId, getSkillMarkdown]);
+
+  useEffect(() => {
+    return () => clearDeleteTimer();
+  }, []);
+
+  const isSkillDirty = skillDraft !== skillSnapshot;
 
   return (
     <div className="h-full overflow-y-auto px-6 py-8">
@@ -574,9 +812,21 @@ function WorkflowsMode({
             <div className="rounded-xl border border-border bg-background/30 overflow-hidden">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <p className="text-sm text-foreground">Preview</p>
-                <p className="text-xs text-muted-foreground">
-                  {generatedDefinition ? `Saved as ${generatedDefinition.id}` : 'Generated SKILL.md'}
-                </p>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {generatedDefinition ? `Saved as ${generatedDefinition.id}` : 'Generated SKILL.md'}
+                  </p>
+                  {generatedDefinition ? (
+                    <button
+                      type="button"
+                      onClick={() => setDrawerWorkflowId(generatedDefinition.id)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card/60 px-2.5 py-1 text-[11px] text-foreground transition-all duration-200 hover:bg-card"
+                    >
+                      <PanelRight className="h-3 w-3" />
+                      Open menu
+                    </button>
+                  ) : null}
+                </div>
               </div>
               <div className="p-4">
                 {builderPreview ? (
@@ -666,8 +916,11 @@ function WorkflowsMode({
                   onTogglePin={(id) => void handleTogglePin(id)}
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  onDelete={(id) => void handleDeleteWorkflow(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                   isStarting={startingWorkflowId === workflow.id}
+                  isDeleting={deletingWorkflowId === workflow.id}
+                  deletePending={pendingDeleteId === workflow.id}
                 />
               ))}
             </div>
@@ -685,8 +938,11 @@ function WorkflowsMode({
                   onTogglePin={(id) => void handleTogglePin(id)}
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  onDelete={(id) => void handleDeleteWorkflow(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                   isStarting={startingWorkflowId === workflow.id}
+                  isDeleting={deletingWorkflowId === workflow.id}
+                  deletePending={pendingDeleteId === workflow.id}
                 />
               ))}
             </div>
@@ -701,9 +957,23 @@ function WorkflowsMode({
           pinsError={pinsError}
           runs={(runsByWorkflowId[drawerWorkflow.id] ?? []) as WorkflowRun[]}
           isRunning={isRunning}
+          deletePending={pendingDeleteId === drawerWorkflow.id}
+          isDeleting={deletingWorkflowId === drawerWorkflow.id}
+          deleteError={deleteError}
+          skillDraft={skillDraft}
+          skillStatus={skillStatus}
+          skillSource={skillSource}
+          skillError={skillError}
+          isSkillDirty={isSkillDirty}
           onClose={() => setDrawerWorkflowId(null)}
           onTogglePin={() => void handleTogglePin(drawerWorkflow.id)}
           onRun={() => void handleRun(drawerWorkflow.id)}
+          onDelete={() => void handleDeleteWorkflow(drawerWorkflow.id)}
+          onSkillChange={(next) => {
+            setSkillDraft(next);
+            if (skillStatus === 'error' || skillStatus === 'saved') setSkillStatus('idle');
+          }}
+          onSaveSkill={() => void handleSaveSkill()}
           onOpenTaskRun={(taskRunId) => onOpenTaskRun?.(taskRunId)}
         />
       ) : null}

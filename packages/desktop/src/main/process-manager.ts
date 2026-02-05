@@ -1344,7 +1344,11 @@ class ProcessManager {
   /**
    * Send a message to the active session and get a response
    */
-  async sendMessage(content: string, webContents?: Electron.WebContents): Promise<{
+  async sendMessage(
+    content: string,
+    webContents?: Electron.WebContents,
+    options?: { skipTaskTracking?: boolean; skipWorkflowSync?: boolean }
+  ): Promise<{
     content: string;
     parts: Array<{ type: string; text?: string }>;
   }> {
@@ -1359,7 +1363,10 @@ class ProcessManager {
 
     const systemPrompt = await this.getSystemPrompt();
 
-    this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+    const shouldTrackTasks = Boolean(webContents) && !options?.skipTaskTracking;
+    if (shouldTrackTasks) {
+      this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+    }
 
     // Notify renderer that we're processing
     if (webContents) {
@@ -1414,12 +1421,16 @@ class ProcessManager {
         parts: parts,
       };
 
-      this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+      if (!options?.skipWorkflowSync) {
+        this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+      }
 
       if (webContents) {
         webContents.send('opencode:message', assistantMessage);
         webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
-        this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
+        if (shouldTrackTasks) {
+          this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
+        }
       }
 
       return {

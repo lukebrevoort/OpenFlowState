@@ -17,6 +17,11 @@ const ensureString = (value: unknown): string | null => {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 };
 
+const isSafeWorkflowId = (id: string): boolean => {
+  if (!id) return false;
+  return !id.includes('/') && !id.includes('\\') && !id.includes('..');
+};
+
 const humanizeId = (id: string): string => {
   if (!id) return id;
   const cleaned = id.replace(/[._]+/g, '-');
@@ -98,6 +103,162 @@ const parseFrontmatter = (raw: string): { name?: string; description?: string; t
 };
 
 class WorkflowsRunner {
+  private async resolveWorkflowSkillPath(
+    workflowId: string
+  ): Promise<{ filePath: string; source: 'user' | 'project' } | null> {
+    const directory = processManager.getProjectDirectory?.() ?? undefined;
+    const userDataDir = configStore.getDataDir();
+    const candidates: Array<{ filePath: string; source: 'user' | 'project' }> = [];
+
+    if (userDataDir) {
+      candidates.push({
+        filePath: path.join(userDataDir, 'workflows', workflowId, 'SKILL.md'),
+        source: 'user',
+      });
+    }
+    if (directory) {
+      candidates.push({
+        filePath: path.join(directory, 'workflows', workflowId, 'SKILL.md'),
+        source: 'project',
+      });
+    }
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate.filePath);
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  async getSkillMarkdown(
+    workflowId: string
+  ): Promise<
+    | { ok: true; data: { workflowId: string; skillMarkdown: string; source: 'user' | 'project' } }
+    | { ok: false; code: IpcErrorCode; message: string }
+  > {
+    const id = ensureString(workflowId);
+    if (!id || !isSafeWorkflowId(id)) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a safe, non-empty string.' };
+    }
+
+    const resolved = await this.resolveWorkflowSkillPath(id);
+    if (!resolved) {
+      return { ok: false, code: 'UNAVAILABLE', message: 'Workflow file not found.' };
+    }
+
+    try {
+      const skillMarkdown = await fs.readFile(resolved.filePath, 'utf8');
+      return { ok: true, data: { workflowId: id, skillMarkdown, source: resolved.source } };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, code: 'UNKNOWN', message: `Failed to read workflow: ${message}` };
+    }
+  }
+
+  async saveSkillMarkdown(
+    workflowId: string,
+    skillMarkdown: string
+  ): Promise<
+    | { ok: true; data: { definition: WorkflowDefinition; skillMarkdown: string; source: 'user' | 'project' } }
+    | { ok: false; code: IpcErrorCode; message: string }
+  > {
+    const id = ensureString(workflowId);
+    if (!id || !isSafeWorkflowId(id)) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a safe, non-empty string.' };
+    }
+
+    const content = ensureString(skillMarkdown);
+    if (!content) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'skillMarkdown must be a non-empty string.' };
+    }
+
+    const parsed = parseFrontmatter(content);
+    if (!parsed?.name) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'SKILL.md must include frontmatter with name.' };
+    }
+    if (parsed.name !== id) {
+      return { ok: false, code: 'INVALID_REQUEST', message: `Frontmatter name must remain "${id}".` };
+    }
+
+    const resolved = await this.resolveWorkflowSkillPath(id);
+    const userDataDir = configStore.getDataDir();
+    const target = resolved ?? (userDataDir
+      ? {
+          filePath: path.join(userDataDir, 'workflows', id, 'SKILL.md'),
+          source: 'user' as const,
+        }
+      : null);
+
+    if (!target) {
+      return { ok: false, code: 'UNAVAILABLE', message: 'No writable workflow directory available.' };
+    }
+
+    try {
+      await fs.mkdir(path.dirname(target.filePath), { recursive: true });
+      await fs.writeFile(target.filePath, content, 'utf8');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, code: 'UNKNOWN', message: `Failed to save workflow: ${message}` };
+    }
+
+    const existing = workflowsStore.getDefinition(id);
+    const definition: WorkflowDefinition = {
+      id,
+      title: humanizeId(id),
+      description: parsed.description ?? existing?.description,
+    };
+    workflowsStore.upsertTemplate({ id, template: parsed.template ?? '' });
+    workflowsStore.upsertDefinition(definition);
+
+    return { ok: true, data: { definition, skillMarkdown: content, source: target.source } };
+  }
+
+  async deleteWorkflow(
+    workflowId: string
+  ): Promise<
+    | { ok: true; data: { removed: boolean } }
+    | { ok: false; code: IpcErrorCode; message: string }
+  > {
+    const id = ensureString(workflowId);
+    if (!id || !isSafeWorkflowId(id)) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a safe, non-empty string.' };
+    }
+
+    const directory = processManager.getProjectDirectory?.() ?? undefined;
+    const userDataDir = configStore.getDataDir();
+    const candidates: string[] = [];
+    if (userDataDir) {
+      candidates.push(path.join(userDataDir, 'workflows', id));
+    }
+    if (directory) {
+      candidates.push(path.join(directory, 'workflows', id));
+    }
+
+    let removed = false;
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        await fs.rm(candidate, { recursive: true, force: true });
+        removed = true;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!removed) {
+      return { ok: false, code: 'UNAVAILABLE', message: 'Workflow not found.' };
+    }
+
+    workflowsStore.removeDefinition(id);
+    workflowsStore.removeTemplate(id);
+    return { ok: true, data: { removed } };
+  }
+
   private async loadWorkflowSkillsFromDir(baseDir: string): Promise<WorkflowDefinition[]> {
     const skillsDir = path.join(baseDir, 'workflows');
     const definitions: WorkflowDefinition[] = [];
