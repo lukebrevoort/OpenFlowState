@@ -450,7 +450,7 @@ class WorkflowsRunner {
         const cleanContent = getCleanContent(response.content);
 
         // Determine run status based on parsed header
-        const runStatus = blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed';
+        const runStatus = blocked ? 'failed' : needsInput ? 'needs_response' : 'completed';
 
         // Generate appropriate description based on header status
         const getTaskDescription = (): string => {
@@ -483,7 +483,8 @@ class WorkflowsRunner {
         });
 
         taskStore.updateRun(taskRunId, {
-          status: blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed',
+          status: blocked ? 'failed' : needsInput ? 'running' : 'completed',
+          ...(blocked ? { blockingReason: undefined } : needsInput ? { blockingReason: { kind: 'response' } } : { blockingReason: undefined }),
           progress: blocked || needsInput ? 50 : 100,
           updatedAt: finishedAt,
           description: getTaskDescription(),
@@ -542,7 +543,7 @@ class WorkflowsRunner {
       const cleanContent = getCleanContent(text);
 
       // Determine run status based on parsed header
-      const runStatus = blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed';
+      const runStatus = blocked ? 'failed' : needsInput ? 'needs_response' : 'completed';
 
       // Generate appropriate description based on header status
       const getTaskDescription = (): string => {
@@ -576,7 +577,8 @@ class WorkflowsRunner {
       });
 
       taskStore.updateRun(taskRunId, {
-        status: blocked ? 'failed' : needsInput ? 'waiting_approval' : 'completed',
+        status: blocked ? 'failed' : needsInput ? 'running' : 'completed',
+        ...(blocked ? { blockingReason: undefined } : needsInput ? { blockingReason: { kind: 'response' } } : { blockingReason: undefined }),
         progress: blocked || needsInput ? 50 : 100,
         updatedAt: finishedAt,
         description: getTaskDescription(),

@@ -5,6 +5,8 @@ type OpenCodeEventPayload = Record<string, unknown>;
 const SECRET_PATTERN = /(token|secret|key|password|credential|bearer)/i;
 
 const MAX_DETAIL_LENGTH = 120;
+const MAX_APPROVAL_SUMMARY_LENGTH = 220;
+const MAX_APPROVAL_BODY_LENGTH = 5000;
 
 const friendlyToolNames: Record<string, string> = {
   gmail: 'Gmail',
@@ -17,6 +19,11 @@ const clampDetail = (value?: string) => {
   if (!value) return undefined;
   if (value.length <= MAX_DETAIL_LENGTH) return value;
   return `${value.slice(0, MAX_DETAIL_LENGTH)}…`;
+};
+
+const clampText = (value: string, max: number) => {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}…`;
 };
 
 const extractToolName = (data: OpenCodeEventPayload) => {
@@ -70,24 +77,75 @@ const formatRetryDetail = (data: OpenCodeEventPayload) => {
   return clampDetail(`Retry scheduled at ${new Date(next!).toISOString()}`);
 };
 
+const listFromUnknown = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+      .filter((entry) => entry.length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value.trim()];
+  }
+
+  return [];
+};
+
+const humanizePermission = (value?: string) => {
+  if (!value) return undefined;
+  const normalized = value
+    .replace(/[._]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return undefined;
+  return normalized;
+};
+
+const objectFromUnknown = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+};
+
 const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: string) => {
-  const requestIdCandidates = [data.requestId, data.requestID, data.request_id, data.id];
-  const titleCandidates = [data.title, data.action, data.intent, data.summary];
-  const summaryCandidates = [data.summary, data.intent, data.action, fallbackDetail];
-  const bodyCandidates = [data.body, data.preview, data.message];
+  const requestIdCandidates = [
+    data.requestId,
+    data.requestID,
+    data.request_id,
+    data.permissionId,
+    data.permissionID,
+    data.permission_id,
+    objectFromUnknown(data.permission)?.id,
+    objectFromUnknown(data.permission)?.requestID,
+    objectFromUnknown(data.permission)?.requestId,
+    data.id,
+  ];
+  const permissionName =
+    (typeof data.permission === 'string' && data.permission.trim()) ||
+    (typeof data.type === 'string' && data.type.trim()) ||
+    undefined;
+  const patterns = listFromUnknown(data.patterns).concat(listFromUnknown(data.pattern));
+  const alwaysPatterns = listFromUnknown(data.always);
+  const metadata = objectFromUnknown(data.metadata);
+  const tool = objectFromUnknown(data.tool);
+
+  const explicitTitleCandidates = [data.title, data.action, data.intent, data.summary];
+  const explicitSummaryCandidates = [data.summary, data.intent, data.action, fallbackDetail];
+  const explicitBodyCandidates = [data.body, data.preview, data.message];
 
   const pickText = (candidates: unknown[]) => {
     for (const candidate of candidates) {
       if (typeof candidate === 'string' && candidate.trim().length > 0) {
-        return clampDetail(candidate);
+        return candidate.trim();
       }
     }
     return undefined;
   };
 
-  const title = pickText(titleCandidates);
-  const summary = pickText(summaryCandidates);
-  const body = pickText(bodyCandidates);
+  const explicitTitle = pickText(explicitTitleCandidates);
+  const explicitSummary = pickText(explicitSummaryCandidates);
+  const explicitBody = pickText(explicitBodyCandidates);
 
   let requestId: string | undefined;
   for (const candidate of requestIdCandidates) {
@@ -96,6 +154,68 @@ const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: str
       break;
     }
   }
+
+  const permissionLabel = humanizePermission(permissionName);
+  const title =
+    explicitTitle ??
+    (permissionLabel ? `Approval requested: ${permissionLabel}` : 'Approval requested');
+
+  const summary =
+    explicitSummary ??
+    (() => {
+      if (permissionLabel && patterns.length > 0) {
+        const preview = patterns.slice(0, 2).join(', ');
+        const extra = patterns.length > 2 ? ` +${patterns.length - 2} more` : '';
+        return clampText(`${permissionLabel} requested for ${preview}${extra}`, MAX_APPROVAL_SUMMARY_LENGTH);
+      }
+      if (permissionLabel) {
+        return clampText(`${permissionLabel} permission requested`, MAX_APPROVAL_SUMMARY_LENGTH);
+      }
+      if (fallbackDetail) {
+        return clampText(fallbackDetail, MAX_APPROVAL_SUMMARY_LENGTH);
+      }
+      return undefined;
+    })();
+
+  const body =
+    explicitBody ??
+    (() => {
+      const sections: string[] = [];
+
+      if (permissionLabel) {
+        sections.push(`Permission: ${permissionLabel}`);
+      }
+
+      if (patterns.length > 0) {
+        sections.push(`Targets:\n${patterns.map((pattern) => `- ${pattern}`).join('\n')}`);
+      }
+
+      if (alwaysPatterns.length > 0) {
+        sections.push(
+          `Always-approve scope:\n${alwaysPatterns.map((pattern) => `- ${pattern}`).join('\n')}`
+        );
+      }
+
+      if (tool) {
+        const details = [
+          typeof tool.messageID === 'string' && tool.messageID ? `message: ${tool.messageID}` : '',
+          typeof tool.callID === 'string' && tool.callID ? `call: ${tool.callID}` : '',
+        ].filter(Boolean);
+        if (details.length > 0) {
+          sections.push(`Tool call: ${details.join(' | ')}`);
+        }
+      }
+
+      if (metadata && Object.keys(metadata).length > 0) {
+        sections.push(`Metadata:\n${JSON.stringify(metadata, null, 2)}`);
+      }
+
+      if (sections.length === 0) {
+        return undefined;
+      }
+
+      return clampText(sections.join('\n\n'), MAX_APPROVAL_BODY_LENGTH);
+    })();
 
   return {
     requestId,
@@ -298,6 +418,7 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
     const approvalPayload = extractApprovalPayload(sanitizedPayload ?? {}, detail);
 
     const isRequest =
+      type === 'permission.updated' ||
       type.endsWith('.asked') ||
       type.includes('asked') ||
       type.includes('request');

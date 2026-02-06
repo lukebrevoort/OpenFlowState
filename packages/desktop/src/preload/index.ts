@@ -18,6 +18,7 @@ import type {
   ApiTokenSuccessEvent,
   FlowstateConfig,
   ClientCredentials,
+  ApprovalNotificationClickEvent,
 } from '../renderer/types/electron';
 
 type Unsubscribe = () => void;
@@ -186,6 +187,14 @@ const flowstateAPI: FlowstateAPIDefinition = {
       ipcRenderer.invoke('approvals:reply', requestId, reply),
   },
 
+  notifications: {
+    onApprovalClick: (callback: (event: ApprovalNotificationClickEvent) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, data: ApprovalNotificationClickEvent) => callback(data);
+      ipcRenderer.on('notifications:approvalClick', handler);
+      return () => ipcRenderer.removeListener('notifications:approvalClick', handler);
+    },
+  },
+
   // MCP server management
   mcp: {
     // Reload MCP configuration (after connecting new integrations)
@@ -279,6 +288,11 @@ const flowstateAPI: FlowstateAPIDefinition = {
 
     getPins: () => ipcRenderer.invoke('workflows:pins:get'),
     setPinned: (workflowId: string, pinned: boolean) => ipcRenderer.invoke('workflows:pins:set', workflowId, pinned),
+
+    getApprovalOptIn: (workflowId: string) => ipcRenderer.invoke('workflows:approvalOptIn:get', workflowId),
+    setApprovalOptIn: (workflowId: string, optedIn: boolean) =>
+      ipcRenderer.invoke('workflows:approvalOptIn:set', workflowId, optedIn),
+    listApprovalOptIns: () => ipcRenderer.invoke('workflows:approvalOptIns:list'),
   },
 
   integrations: {

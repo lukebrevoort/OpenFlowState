@@ -9,7 +9,7 @@
  * 5. Configuring MCP servers with auth tokens
  */
 
-import { app } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
@@ -22,9 +22,11 @@ import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { approvalsAuditStore } from './approvals-audit-store.js';
+import { deriveApprovalBlockingPatch, isApprovalEventType } from './approval-blocking.js';
 import { taskStore } from './task-store.js';
 import { workflowRunStore } from './workflow-run-store.js';
-import { clampText, requiresUserInput } from './workflow-response-utils.js';
+import { clampText, parseResponseHeader, requiresUserInput } from './workflow-response-utils.js';
 import type { TaskRunRecord } from './task-types.js';
 import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
 
@@ -173,6 +175,9 @@ class ProcessManager {
   private reauthCooldown = new Map<string, number>();
   private readonly reauthCooldownMs = 5 * 60 * 1000;
 
+  private approvalNotificationSeenAt = new Map<string, number>();
+  private readonly approvalNotificationDedupeTtlMs = 60 * 60 * 1000;
+
   // Sessions whose timeline events should be persisted, even when not active.
   // This is used by workflow sessions so the Tasks UI can load their timelines.
   private persistedTimelineSessions = new Set<string>();
@@ -184,6 +189,136 @@ class ProcessManager {
   private registerTimelineSession(sessionId: string): void {
     if (!sessionId || typeof sessionId !== 'string') return;
     this.persistedTimelineSessions.add(sessionId);
+  }
+
+  private async resolveSessionIdForApprovalRequest(requestId: string): Promise<string | undefined> {
+    const fromPolicy = approvalPolicyStore.getSessionIdForRequest(requestId);
+    if (fromPolicy) return fromPolicy;
+
+    try {
+      const fromTimeline = await timelineStore.findSessionIdByApprovalRequestId(requestId);
+      if (fromTimeline) {
+        approvalPolicyStore.trackRequest(requestId, fromTimeline);
+        return fromTimeline;
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to resolve approval request session from timeline:', error);
+    }
+
+    if (this.activeSessionId) {
+      return this.activeSessionId;
+    }
+
+    return undefined;
+  }
+
+  async getSessionIdForApprovalRequest(requestId: string): Promise<string | undefined> {
+    if (!requestId || typeof requestId !== 'string') return undefined;
+    return this.resolveSessionIdForApprovalRequest(requestId.trim());
+  }
+
+  private getApprovalsNotificationEnabled(): boolean {
+    try {
+      return Boolean(configStore.get()?.preferences?.notifications?.approvals);
+    } catch {
+      return false;
+    }
+  }
+
+  private shouldNotifyApproval(requestId: string): boolean {
+    const id = requestId.trim();
+    if (!id) return false;
+
+    const now = Date.now();
+    const last = this.approvalNotificationSeenAt.get(id);
+    if (last && now - last < this.approvalNotificationDedupeTtlMs) {
+      return false;
+    }
+
+    this.approvalNotificationSeenAt.set(id, now);
+
+    // Opportunistic pruning to avoid unbounded growth.
+    for (const [key, ts] of this.approvalNotificationSeenAt.entries()) {
+      if (now - ts > this.approvalNotificationDedupeTtlMs) {
+        this.approvalNotificationSeenAt.delete(key);
+      }
+    }
+
+    return true;
+  }
+
+  private safeNotificationText(value: unknown, maxLen: number): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const cleaned = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return undefined;
+    const redacted = redactSecrets(cleaned);
+    return clampText(redacted, maxLen);
+  }
+
+  private notifyApprovalRequest(args: {
+    requestId: string;
+    sessionId: string;
+    webContents: Electron.WebContents;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+  }): void {
+    if (!Notification.isSupported()) return;
+    if (!this.getApprovalsNotificationEnabled()) return;
+    if (!this.shouldNotifyApproval(args.requestId)) return;
+
+    const title =
+      this.safeNotificationText(args.title, 72) ??
+      this.safeNotificationText(args.detail, 72) ??
+      'Approval requested';
+    const body =
+      this.safeNotificationText(args.summary, 200) ??
+      this.safeNotificationText(args.detail, 200) ??
+      'Open FlowState to review.';
+
+    const notification = new Notification({
+      title,
+      body,
+    });
+
+    notification.on('click', () => {
+      try {
+        const win = BrowserWindow.fromWebContents(args.webContents);
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        } else {
+          app.focus({ steal: true });
+        }
+      } catch {
+        // ignore
+      }
+
+      const taskRunId = (() => {
+        try {
+          return (
+            this.getWorkflowTaskRunId(args.sessionId) ??
+            taskStore.getActiveRun({ sessionId: args.sessionId })?.id ??
+            null
+          );
+        } catch {
+          return null;
+        }
+      })();
+
+      args.webContents.send('notifications:approvalClick', {
+        requestId: args.requestId,
+        sessionId: args.sessionId,
+        ...(taskRunId ? { taskRunId } : {}),
+      });
+    });
+
+    try {
+      notification.show();
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to show approval notification:', error);
+    }
   }
 
   // Batch timeline IPC events to reduce renderer churn during high-volume streams.
@@ -489,7 +624,12 @@ class ProcessManager {
 
       if (rawType === 'task.completed') {
         const id = resolvedId;
-        const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
+        const updated = taskStore.updateRun(id, {
+          status: 'completed',
+          blockingReason: undefined,
+          updatedAt: normalized.event.timestamp,
+          progress: 100,
+        });
         if (!updated) {
           const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
           taskStore.upsertRun({
@@ -543,8 +683,9 @@ class ProcessManager {
         return;
       }
 
-      if (rawType === 'permission.asked' || rawType.startsWith('approval.') || rawType.startsWith('permission.')) {
-        // Best-effort: if an approval request arrives while a task is active, surface it.
+      if (isApprovalEventType(rawType)) {
+        // Best-effort: toggle task status when approvals are requested/resolved.
+        // Requests should block the task; responses should unblock it.
         const record =
           normalized.payload && typeof normalized.payload === 'object'
             ? (normalized.payload as Record<string, unknown>)
@@ -555,13 +696,13 @@ class ProcessManager {
 
         const existing = taskStore.getRun(candidateId);
         if (!existing) return;
-        if (existing.status !== 'running' && existing.status !== 'starting') return;
 
-        // Only treat explicit "asked"/"request" events as blocking.
-        const isRequest = rawType.endsWith('.asked') || rawType.includes('asked') || rawType.includes('request');
-        if (!isRequest) return;
-
-        taskStore.updateRun(candidateId, { status: 'waiting_approval', updatedAt: normalized.event.timestamp });
+        const patch = deriveApprovalBlockingPatch(rawType, existing);
+        if (!patch) return;
+        taskStore.updateRun(candidateId, {
+          ...patch,
+          updatedAt: normalized.event.timestamp,
+        });
       }
     } catch (error) {
       console.warn('[ProcessManager] Failed to update TaskStore:', error);
@@ -1553,6 +1694,8 @@ class ProcessManager {
       return;
     }
 
+    approvalsAuditStore.configure({ dataDir: configStore.getDataDir() });
+
     // Abort any existing stream
     if (this.eventStreamAbortController) {
       this.eventStreamAbortController.abort();
@@ -1565,13 +1708,62 @@ class ProcessManager {
     const extractRequestId = (properties: unknown): string | undefined => {
       if (!properties || typeof properties !== 'object') return undefined;
       const record = properties as Record<string, unknown>;
-      const candidates = [record.requestID, record.requestId, record.request_id, record.id];
+      const nestedPermission =
+        record.permission && typeof record.permission === 'object' && !Array.isArray(record.permission)
+          ? (record.permission as Record<string, unknown>)
+          : null;
+      const candidates = [
+        record.requestID,
+        record.requestId,
+        record.request_id,
+        record.permissionID,
+        record.permissionId,
+        record.permission_id,
+        nestedPermission?.id,
+        nestedPermission?.requestID,
+        nestedPermission?.requestId,
+        record.id,
+      ];
       for (const candidate of candidates) {
         if (typeof candidate === 'string' && candidate.trim().length > 0) {
-          return candidate;
+          return candidate.trim();
         }
       }
       return undefined;
+    };
+
+    const extractApprovalReply = (properties: unknown): string | undefined => {
+      if (!properties || typeof properties !== 'object') return undefined;
+      const record = properties as Record<string, unknown>;
+      const candidates = [record.reply, record.decision, record.response, record.result, record.outcome];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return candidate.trim();
+        }
+      }
+
+      const boolCandidates = [record.approved, record.allow, record.allowed, record.granted];
+      for (const candidate of boolCandidates) {
+        if (typeof candidate === 'boolean') {
+          return candidate ? 'approve' : 'deny';
+        }
+      }
+
+      return undefined;
+    };
+
+    const buildApprovalAuditSummary = (eventType: string, payload: unknown): Record<string, unknown> => {
+      const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const title = typeof record.title === 'string' ? record.title : undefined;
+      const summary = typeof record.summary === 'string' ? record.summary : undefined;
+      const body = typeof record.body === 'string' ? record.body : undefined;
+      return {
+        eventType,
+        title,
+        summary,
+        bodyLength: body ? body.length : undefined,
+        bodyPreview: body ? body.slice(0, 1000) : undefined,
+      };
     };
 
     // Run event stream in background
@@ -1605,10 +1797,17 @@ class ProcessManager {
             const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
 
             const requestId = extractRequestId(typedEvent.properties);
-            if (requestId && sessionId !== 'unknown-session') {
+            const isApprovalType =
+              typedEvent.type === 'permission.asked' ||
+              typedEvent.type?.startsWith('permission.') ||
+              typedEvent.type?.startsWith('approval.');
+            if (requestId && sessionId !== 'unknown-session' && isApprovalType) {
               approvalPolicyStore.trackRequest(requestId, sessionId);
 
-              if (typedEvent.type === 'permission.asked' && approvalPolicyStore.isSessionAlwaysApprove(sessionId)) {
+              if (
+                (typedEvent.type === 'permission.asked' || typedEvent.type === 'permission.updated') &&
+                approvalPolicyStore.isSessionAlwaysApprove(sessionId)
+              ) {
                 this.replyApproval(requestId, 'always').catch((error) => {
                   console.warn('[ProcessManager] Failed to auto-approve permission request:', error);
                 });
@@ -1632,6 +1831,42 @@ class ProcessManager {
               this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId);
               const isApprovalEvent =
                 normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
+
+              if (normalized.event.kind === 'approval_request') {
+                const payload = normalized.payload;
+                const payloadRecord = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+                const payloadRequestId = payloadRecord && typeof payloadRecord.requestId === 'string' ? payloadRecord.requestId : requestId;
+                if (payloadRequestId) {
+                  this.notifyApprovalRequest({
+                    requestId: payloadRequestId,
+                    sessionId,
+                    webContents,
+                    title: payloadRecord?.title ?? normalized.event.title,
+                    summary: payloadRecord?.summary,
+                    detail: normalized.event.detail,
+                  });
+                }
+              }
+
+              if (isApprovalEvent) {
+                const payload = normalized.payload;
+                const payloadRecord = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+                const payloadRequestId = payloadRecord && typeof payloadRecord.requestId === 'string' ? payloadRecord.requestId : requestId;
+                const replyValue = normalized.event.kind === 'approval_response' ? extractApprovalReply(typedEvent.properties) : undefined;
+
+                if (payloadRequestId) {
+                  approvalsAuditStore.log({
+                    kind: normalized.event.kind === 'approval_request' ? 'request' : 'response',
+                    requestId: payloadRequestId,
+                    sessionId,
+                    reply: replyValue,
+                    timestamp: Date.now(),
+                    summary: buildApprovalAuditSummary(typedEvent.type ?? 'unknown', payloadRecord ?? {}),
+                    redacted: Boolean(normalized.redacted),
+                  });
+                }
+              }
+
               const shouldStore =
                 isApprovalEvent ||
                 (this.persistedTimelineSessions.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
@@ -1795,13 +2030,25 @@ class ProcessManager {
       const run = workflowRunStore.getRunBySessionId(sessionId);
       if (!run) return;
 
-      const needsInput = requiresUserInput(content);
+      const parsed = parseResponseHeader(content);
+      const needsInput = parsed.hasHeader ? parsed.status === 'needs_response' : requiresUserInput(content);
+      const isInProgress = parsed.hasHeader && parsed.status === 'in_progress';
+      const isBlocked = parsed.hasHeader && parsed.status === 'blocked';
+      const isComplete = parsed.hasHeader ? parsed.status === 'complete' : !needsInput;
       const now = Date.now();
-      const runStatus = needsInput ? 'waiting_approval' : 'completed';
+      const runStatus = isBlocked
+        ? 'failed'
+        : needsInput
+          ? 'needs_response'
+          : isInProgress
+            ? 'running'
+            : isComplete
+              ? 'completed'
+              : 'running';
 
       workflowRunStore.updateRun(run.id, {
         status: runStatus,
-        ...(needsInput ? {} : { finishedAt: now }),
+        ...(runStatus === 'completed' || runStatus === 'failed' ? { finishedAt: now } : {}),
         ...(assistantMessageId ? { assistantMessageId } : {}),
         outputPreview: clampText(content, 280),
       });
@@ -1817,11 +2064,17 @@ class ProcessManager {
       });
 
       if (run.taskRunId) {
+        const existingTask = taskStore.getRun(run.taskRunId);
         taskStore.updateRun(run.taskRunId, {
-          status: needsInput ? 'waiting_approval' : 'completed',
-          progress: needsInput ? 50 : 100,
+          status: runStatus === 'completed' ? 'completed' : runStatus === 'failed' ? 'failed' : 'running',
+          ...(needsInput ? { blockingReason: { kind: 'response' } } : { blockingReason: undefined }),
+          progress: runStatus === 'completed' ? 100 : needsInput ? 50 : Math.max(60, existingTask?.progress ?? 0),
           updatedAt: now,
-          ...(needsInput ? { description: 'Waiting for input...' } : {}),
+          ...(needsInput
+            ? { description: 'Waiting for input...' }
+            : existingTask?.description === 'Waiting for input...'
+              ? { description: 'Running...' }
+              : {}),
         });
       }
     } catch (error) {
@@ -2019,25 +2272,55 @@ class ProcessManager {
     }
 
     const mappedReply: 'once' | 'always' | 'reject' = reply === 'deny' ? 'reject' : reply;
+    const sessionId = await this.resolveSessionIdForApprovalRequest(requestId.trim());
 
-    const sessionId = approvalPolicyStore.getSessionIdForRequest(requestId) ?? this.activeSessionId ?? undefined;
-    if (reply === 'always' && sessionId) {
-      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
-    }
+    const v2Client = this.instance.client as unknown as {
+      permission?: {
+        reply: (input: {
+          requestID: string;
+          reply: 'once' | 'always' | 'reject';
+        }) => Promise<{ error?: unknown }>;
+      };
+    };
+    const legacyClient = this.instance.client as unknown as {
+      postSessionIdPermissionsPermissionId?: (input: {
+        path: { id: string; permissionID: string };
+        body: { response: 'once' | 'always' | 'reject' };
+      }) => Promise<{ error?: unknown }>;
+    };
 
-    const permissionClient = (this.instance.client as unknown as { permission?: { reply: (input: { requestID: string; reply: 'once' | 'always' | 'reject' }) => Promise<{ error?: unknown }> } }).permission;
-    if (!permissionClient) {
+    let result: { error?: unknown } | undefined;
+    if (v2Client.permission?.reply) {
+      result = await v2Client.permission.reply({
+        requestID: requestId.trim(),
+        reply: mappedReply,
+      });
+    } else if (legacyClient.postSessionIdPermissionsPermissionId) {
+      if (!sessionId) {
+        throw new Error('Unable to resolve session for approval request');
+      }
+
+      result = await legacyClient.postSessionIdPermissionsPermissionId({
+        path: {
+          id: sessionId,
+          permissionID: requestId.trim(),
+        },
+        body: {
+          response: mappedReply,
+        },
+      });
+    } else {
       throw new Error('OpenCode permission API unavailable');
     }
 
-    const result = await permissionClient.reply({
-      requestID: requestId,
-      reply: mappedReply,
-    });
-
-    if (result.error) {
+    if (result?.error) {
       throw new Error(`Failed to reply to approval request: ${JSON.stringify(result.error)}`);
     }
+
+    if (reply === 'always' && sessionId) {
+      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+    }
+    approvalPolicyStore.untrackRequest(requestId);
   }
 }
 

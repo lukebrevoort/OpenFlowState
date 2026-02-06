@@ -6,6 +6,12 @@ import { useTasksStore } from '../stores/tasksStore';
 import { useOpenCode } from '../hooks/useOpenCode';
 import { parseResponseHeader, getCleanContent } from '../lib/responseHeaders';
 
+const DEV = Boolean(
+  (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV ??
+    (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV ===
+      'development',
+);
+
 type ApprovalPayloadInline = {
   requestId?: string;
   title?: string;
@@ -47,6 +53,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const removeRun = useTasksStore((state) => state.removeRun);
   const markRunning = useTasksStore((state) => state.markRunning);
   const markComplete = useTasksStore((state) => state.markComplete);
+  const updateRunLocal = useTasksStore((state) => state.updateRunLocal);
   const { switchSession, sendMessage } = useOpenCode();
 
   const [showReplyModal, setShowReplyModal] = useState(false);
@@ -56,6 +63,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [toast, setToast] = useState<string | null>(null);
 
   const isRefreshing = isLoadingRuns || isLoadingTimeline || isLoadingArtifacts;
+  const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
 
   const handleRefreshAll = () => {
     void loadActiveRun();
@@ -124,21 +132,64 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
       cleanContent: parsed?.content ?? finalOutput?.payloadText ?? null,
       // Whether the response explicitly needs user input via header
       needsResponse: parsed?.hasHeader && parsed.status === 'needs_response',
-    };
+      };
   }, [selectedArtifacts, selectedWorkflow]);
+
+  const requestIdForEvent = (event: TimelineEvent) => {
+    const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+    return typeof payload?.requestId === 'string' ? payload.requestId.trim() : null;
+  };
+
+  const selectedBlockingKind = useMemo(() => {
+    if (!selectedRun) return null;
+    if (selectedRun.blockingReason?.kind) return selectedRun.blockingReason.kind;
+
+    // Best-effort inference for older runs.
+    const lastApprovalRequest = selectedTimeline
+      .filter((event) => event.kind === 'approval_request')
+      .reduce((latest, event) => Math.max(latest, event.timestamp ?? 0), 0);
+    const lastApprovalResponse = selectedTimeline
+      .filter((event) => event.kind === 'approval_response')
+      .reduce((latest, event) => Math.max(latest, event.timestamp ?? 0), 0);
+    if (lastApprovalRequest > lastApprovalResponse) return 'permission' as const;
+
+    // Only use header-based fallback when the run still looks blocked for input.
+    // This prevents stale [NEEDS_RESPONSE] artifacts from keeping the UI stuck
+    // after the user already replied.
+    if (workflowArtifacts?.needsResponse && selectedRun.description === 'Waiting for input...') {
+      return 'response' as const;
+    }
+    return null;
+  }, [selectedRun, selectedTimeline, workflowArtifacts]);
+
+  const pendingApprovalCount = useMemo(() => {
+    if (!selectedTimeline || selectedTimeline.length === 0) return 0;
+
+    const responded = new Set<string>();
+    for (const event of selectedTimeline) {
+      if (event.kind !== 'approval_response') continue;
+      const id = requestIdForEvent(event);
+      if (id) responded.add(id);
+    }
+
+    let pending = 0;
+    for (const event of selectedTimeline) {
+      if (event.kind !== 'approval_request') continue;
+      const id = requestIdForEvent(event);
+      if (!id || !responded.has(id)) {
+        pending += 1;
+      }
+    }
+
+    return pending;
+  }, [selectedTimeline]);
 
   // Determine if user can respond - use header-based detection when available
   const canRespond = useMemo(() => {
     if (!selectedWorkflow || !selectedRun) return false;
 
-    // If run status is waiting_approval, allow response
-    if (selectedRun.status === 'waiting_approval') return true;
-
-    // Also check if the latest output has NEEDS_RESPONSE header
-    if (workflowArtifacts?.needsResponse) return true;
-
-    return false;
-  }, [selectedWorkflow, selectedRun, workflowArtifacts]);
+    return selectedBlockingKind === 'response';
+  }, [selectedWorkflow, selectedRun, selectedBlockingKind]);
   const canCancel = Boolean(selectedRun && (selectedRun.status === 'running' || selectedRun.status === 'waiting_approval'));
   const canMarkComplete = Boolean(selectedRun && selectedRun.status !== 'completed' && selectedRun.status !== 'cancelled');
   const canRemove = Boolean(selectedRun && (selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'cancelled'));
@@ -156,16 +207,23 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
         return;
       }
 
+      await markRunning(selectedRun.id);
+
       // Close immediately on success; background polling will pick up new events.
       setShowReplyModal(false);
       setReplyText('');
       setIsSendingReply(false);
-      await markRunning(selectedRun.id);
       setToast('Response sent — continuing workflow');
+      updateRunLocal(selectedRun.id, {
+        status: 'running',
+        blockingReason: undefined,
+        description: selectedRun.description === 'Waiting for input...' ? 'Running...' : selectedRun.description,
+      });
       window.setTimeout(() => setToast(null), 2500);
 
       // Give the session a moment to start streaming, then refresh once.
       window.setTimeout(() => {
+        void loadActiveRun({ silent: true });
         void reloadRuns({ silent: true });
         void reloadSelectedTimeline({ silent: true });
         void reloadSelectedArtifacts({ silent: true });
@@ -192,7 +250,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     return new Date(timestamp).toLocaleDateString();
   };
 
-  const statusMeta = (status: string) => {
+  const statusMeta = (status: string, blockingKind?: 'permission' | 'response' | null) => {
+    if (blockingKind === 'response') {
+      return { label: 'Needs response', chip: 'bg-[#7BA7B4]/15 text-[#2C5E68] border-[#7BA7B4]/30' };
+    }
+
     switch (status) {
       case 'running':
         return { label: 'Running', chip: 'bg-[#A5B574]/15 text-[#4A7C59] border-[#A5B574]/30' };
@@ -207,11 +269,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
       default:
         return { label: status, chip: 'bg-muted/50 text-muted-foreground border-border' };
     }
-  };
-
-  const requestIdForEvent = (event: TimelineEvent) => {
-    const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
-    return typeof payload?.requestId === 'string' ? payload.requestId : null;
   };
 
   const handleOpenChat = async () => {
@@ -263,6 +320,16 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     }
   };
 
+  const handleDevForceRunning = async () => {
+    if (!DEV || !selectedRun) return;
+    const ok = await markRunning(selectedRun.id);
+    if (ok) {
+      setToast('Dev: forced task to running');
+      window.setTimeout(() => setToast(null), 2000);
+      void reloadRuns({ silent: true });
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto px-6 py-6">
       <div className="max-w-6xl mx-auto">
@@ -284,8 +351,14 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 <div className="space-y-2">
                   {sortedRuns.map((run) => {
                     const isSelected = run.id === selectedRunId;
-                    const meta = statusMeta(run.status);
-                    const icon = run.status === 'completed' ? CheckCircle2 : run.status === 'failed' ? AlertTriangle : Loader2;
+                    const meta = statusMeta(run.status, run.blockingReason?.kind ?? null);
+                    const icon = run.status === 'completed'
+                      ? CheckCircle2
+                      : run.status === 'failed'
+                        ? AlertTriangle
+                        : run.blockingReason?.kind === 'response'
+                          ? MessageSquare
+                          : Loader2;
                     const Icon = icon;
 
                     return (
@@ -310,13 +383,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                             </span>
                             <Icon
                               className={
-                                run.status === 'running'
-                                  ? 'h-4 w-4 text-[#A5B574] animate-spin'
-                                  : run.status === 'waiting_approval'
-                                    ? 'h-4 w-4 text-[#C87137]'
-                                    : run.status === 'failed'
-                                      ? 'h-4 w-4 text-destructive'
-                                      : 'h-4 w-4 text-[#4A7C59]'
+                                run.blockingReason?.kind === 'response'
+                                  ? 'h-4 w-4 text-[#2C5E68]'
+                                  : run.status === 'running'
+                                    ? 'h-4 w-4 text-[#A5B574] animate-spin'
+                                    : run.status === 'waiting_approval'
+                                      ? 'h-4 w-4 text-[#C87137]'
+                                      : run.status === 'failed'
+                                        ? 'h-4 w-4 text-destructive'
+                                        : 'h-4 w-4 text-[#4A7C59]'
                               }
                             />
                           </div>
@@ -367,9 +442,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       <p className="mt-1 text-sm text-muted-foreground">{selectedRun.description}</p>
                     </div>
                     <span
-                      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] ${statusMeta(selectedRun.status).chip}`}
+                      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] ${statusMeta(selectedRun.status, selectedBlockingKind).chip}`}
                     >
-                      {statusMeta(selectedRun.status).label}
+                      {statusMeta(selectedRun.status, selectedBlockingKind).label}
                     </span>
                   </div>
 
@@ -430,6 +505,17 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                           Remove task
                         </button>
                       ) : null}
+
+                      {DEV && selectedRun?.status === 'waiting_approval' && (
+                        <button
+                          type="button"
+                          onClick={handleDevForceRunning}
+                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/30"
+                          title="Development fallback if task state gets stuck"
+                        >
+                          Force running (dev)
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={handleOpenChat}
@@ -468,26 +554,41 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       </div>
                     )}
 
-                    {isLoadingArtifacts && !workflowArtifacts?.finalOutput?.payloadText && !artifactsError ? (
-                      <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
-                        Loading outputs...
-                      </div>
-                    ) : !workflowArtifacts?.finalOutput?.payloadText && !artifactsError ? (
-                      <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
-                        No outputs yet.
-                      </div>
-                    ) : (
-                      <div className="mt-4 space-y-4" aria-busy={isLoadingArtifacts ? 'true' : 'false'}>
-                        {workflowArtifacts?.summary?.payloadText && (
-                          <p className="text-sm text-muted-foreground">{getCleanContent(workflowArtifacts.summary.payloadText)}</p>
-                        )}
-                        {workflowArtifacts?.cleanContent && (
-                          <pre className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-foreground whitespace-pre-wrap break-words overflow-x-auto">
-                            {workflowArtifacts.cleanContent}
-                          </pre>
-                        )}
-                      </div>
-                    )}
+                    {(() => {
+                      const hasSummary = Boolean(workflowArtifacts?.summary?.payloadText);
+                      const hasFinal = Boolean(workflowArtifacts?.finalOutput?.payloadText);
+                      const hasCleanContent = Boolean(workflowArtifacts?.cleanContent);
+                      const hasVisibleOutput = hasSummary || hasFinal || hasCleanContent;
+
+                      if (isLoadingArtifacts && !hasVisibleOutput && !artifactsError) {
+                        return (
+                          <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                            Loading outputs...
+                          </div>
+                        );
+                      }
+
+                      if (!hasVisibleOutput && !artifactsError) {
+                        return (
+                          <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
+                            No outputs yet.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="mt-4 space-y-4" aria-busy={isLoadingArtifacts ? 'true' : 'false'}>
+                          {workflowArtifacts?.summary?.payloadText && (
+                            <p className="text-sm text-muted-foreground">{getCleanContent(workflowArtifacts.summary.payloadText)}</p>
+                          )}
+                          {workflowArtifacts?.cleanContent && (
+                            <pre className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-foreground whitespace-pre-wrap break-words overflow-x-auto">
+                              {workflowArtifacts.cleanContent}
+                            </pre>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -501,31 +602,79 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                   onApprove={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    window.flowstate.approvals.reply(requestId, 'once').then(() => {
-                      void reloadSelectedTimeline();
-                    }).catch((err) => {
-                      console.error('Failed to approve request', err);
-                    });
+                    if (!approvalsAvailable) {
+                      return Promise.reject(
+                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                      );
+                    }
+                    return window.flowstate.approvals
+                      .reply(requestId, 'once')
+                      .then((result) => {
+                        if (!result.success) {
+                          throw new Error(result.error ?? 'Failed to approve request');
+                        }
+                        return reloadSelectedTimeline();
+                      })
+                      .catch((err) => {
+                        console.error('Failed to approve request', err);
+                        throw err;
+                      });
                   }}
                   onAlwaysApprove={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    window.flowstate.approvals.reply(requestId, 'always').then(() => {
-                      void reloadSelectedTimeline();
-                    }).catch((err) => {
-                      console.error('Failed to always-approve request', err);
-                    });
+                    if (!approvalsAvailable) {
+                      return Promise.reject(
+                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                      );
+                    }
+                    return window.flowstate.approvals
+                      .reply(requestId, 'always')
+                      .then((result) => {
+                        if (!result.success) {
+                          throw new Error(result.error ?? 'Failed to always-approve request');
+                        }
+                        return reloadSelectedTimeline();
+                      })
+                      .catch((err) => {
+                        console.error('Failed to always-approve request', err);
+                        throw err;
+                      });
                   }}
                   onDeny={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    window.flowstate.approvals.reply(requestId, 'deny').then(() => {
-                      void reloadSelectedTimeline();
-                    }).catch((err) => {
-                      console.error('Failed to deny request', err);
-                    });
+                    if (!approvalsAvailable) {
+                      return Promise.reject(
+                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                      );
+                    }
+                    return window.flowstate.approvals
+                      .reply(requestId, 'deny')
+                      .then((result) => {
+                        if (!result.success) {
+                          throw new Error(result.error ?? 'Failed to deny request');
+                        }
+                        return reloadSelectedTimeline();
+                      })
+                      .catch((err) => {
+                        console.error('Failed to deny request', err);
+                        throw err;
+                      });
                   }}
                 />
+
+                {pendingApprovalCount > 0 && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    {pendingApprovalCount} pending {pendingApprovalCount === 1 ? 'approval' : 'approvals'}.
+                  </p>
+                )}
+
+                {!approvalsAvailable && (
+                  <p className="mt-2 text-[11px] text-destructive">
+                    Approvals bridge unavailable — restart FlowState to reload the preload API.
+                  </p>
+                )}
               </div>
             )}
           </div>

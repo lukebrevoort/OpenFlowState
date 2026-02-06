@@ -88,6 +88,52 @@ export const workflowsAdapter = {
     }
   },
 
+  async getApprovalOptIn(workflowId: string): Promise<IpcResult<boolean>> {
+    const getFn = window.flowstate?.workflows?.getApprovalOptIn;
+    if (!getFn) {
+      return unavailable('Workflow approval policies are not available in this build.');
+    }
+
+    try {
+      return await getFn(workflowId);
+    } catch (err) {
+      return unavailable(
+        err instanceof Error ? err.message : 'Failed to load workflow approval policy.',
+      );
+    }
+  },
+
+  async setApprovalOptIn(
+    workflowId: string,
+    optedIn: boolean,
+  ): Promise<IpcResult<{ workflowId: string; optedIn: boolean }>> {
+    const setFn = window.flowstate?.workflows?.setApprovalOptIn;
+    if (!setFn) {
+      return unavailable('Workflow approval policies are not available in this build.');
+    }
+
+    try {
+      return await setFn(workflowId, optedIn);
+    } catch (err) {
+      return unavailable(
+        err instanceof Error ? err.message : 'Failed to update workflow approval policy.',
+      );
+    }
+  },
+
+  async listApprovalOptIns(): Promise<IpcResult<Record<string, boolean>>> {
+    const listFn = window.flowstate?.workflows?.listApprovalOptIns;
+    if (!listFn) {
+      return unavailable('Workflow approval policies are not available in this build.');
+    }
+
+    try {
+      return await listFn();
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to load approval grants.');
+    }
+  },
+
   async generateFromIntent(intent: string): Promise<IpcResult<WorkflowGenerationResult>> {
     const genFn = window.flowstate?.workflows?.generateFromIntent;
     if (!genFn) {

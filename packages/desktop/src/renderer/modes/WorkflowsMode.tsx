@@ -18,9 +18,11 @@ import {
   Trash2,
   FileText,
   Save,
+  Shield,
 } from 'lucide-react';
 import { useWorkflowsStore } from '../stores/workflowsStore';
 import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
+import { workflowsAdapter } from '../lib/workflowsAdapter';
 
 interface Workflow {
   id: string;
@@ -227,6 +229,9 @@ function WorkflowDetailsDrawer({
   workflow,
   pinned,
   pinsError,
+  alwaysApprove,
+  alwaysApproveStatus,
+  alwaysApproveError,
   runs,
   isRunning,
   deletePending,
@@ -239,6 +244,7 @@ function WorkflowDetailsDrawer({
   isSkillDirty,
   onClose,
   onTogglePin,
+  onToggleAlwaysApprove,
   onRun,
   onDelete,
   onSkillChange,
@@ -248,6 +254,9 @@ function WorkflowDetailsDrawer({
   workflow: WorkflowDefinition;
   pinned: boolean;
   pinsError: string | null;
+  alwaysApprove: boolean;
+  alwaysApproveStatus: 'idle' | 'loading' | 'saving' | 'error';
+  alwaysApproveError: string | null;
   runs: WorkflowRun[];
   isRunning: boolean;
   deletePending: boolean;
@@ -260,12 +269,14 @@ function WorkflowDetailsDrawer({
   isSkillDirty: boolean;
   onClose: () => void;
   onTogglePin: () => void;
+  onToggleAlwaysApprove: () => void;
   onRun: () => void;
   onDelete: () => void;
   onSkillChange: (next: string) => void;
   onSaveSkill: () => void;
   onOpenTaskRun: (taskRunId: string) => void;
 }) {
+  const alwaysApproveBusy = alwaysApproveStatus === 'loading' || alwaysApproveStatus === 'saving';
   return (
     <div
       className="fixed inset-0 z-50"
@@ -307,6 +318,44 @@ function WorkflowDetailsDrawer({
               </button>
               {pinsError ? (
                 <p className="text-xs text-destructive">{pinsError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 rounded-xl border border-border bg-muted/10 p-4">
+              <div className="flex items-start justify-between gap-6">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-muted-foreground" />
+                    <h4 className="text-sm font-semibold text-foreground">Always Approve</h4>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Skip permission prompts for this workflow. You can revoke this grant in Settings.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={alwaysApprove}
+                  aria-label="Always approve tool requests for this workflow"
+                  onClick={onToggleAlwaysApprove}
+                  disabled={alwaysApproveBusy}
+                  className={`relative h-6 w-12 flex-shrink-0 rounded-full border border-border transition-colors ${
+                    alwaysApprove ? 'bg-primary' : 'bg-switch-background'
+                  } ${alwaysApproveBusy ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <span
+                    className={`absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition-transform ${
+                      alwaysApprove ? 'translate-x-6' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+              {alwaysApproveStatus === 'saving' ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">Saving...</p>
+              ) : null}
+              {alwaysApproveError ? (
+                <p className="mt-2 text-xs text-destructive">{alwaysApproveError}</p>
               ) : null}
             </div>
 
@@ -511,6 +560,10 @@ function WorkflowsMode({
   const [skillError, setSkillError] = useState<string | null>(null);
   const [skillSource, setSkillSource] = useState<'user' | 'project' | null>(null);
 
+  const [approvalOptIn, setApprovalOptIn] = useState(false);
+  const [approvalOptInStatus, setApprovalOptInStatus] = useState<'idle' | 'loading' | 'saving' | 'error'>('idle');
+  const [approvalOptInError, setApprovalOptInError] = useState<string | null>(null);
+
   const keyHint = useMemo(() => {
     if (typeof navigator === 'undefined') return 'Ctrl';
     return navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl';
@@ -688,6 +741,10 @@ function WorkflowsMode({
       setSkillStatus('idle');
       setSkillError(null);
       setSkillSource(null);
+
+      setApprovalOptIn(false);
+      setApprovalOptInStatus('idle');
+      setApprovalOptInError(null);
       return;
     }
 
@@ -715,6 +772,51 @@ function WorkflowsMode({
       active = false;
     };
   }, [drawerWorkflowId, getSkillMarkdown]);
+
+  useEffect(() => {
+    if (!drawerWorkflowId) return;
+
+    let active = true;
+    setApprovalOptInStatus('loading');
+    setApprovalOptInError(null);
+    void (async () => {
+      const result = await workflowsAdapter.getApprovalOptIn(drawerWorkflowId);
+      if (!active) return;
+      if (result.ok) {
+        setApprovalOptIn(Boolean(result.data));
+        setApprovalOptInStatus('idle');
+        return;
+      }
+      setApprovalOptIn(false);
+      setApprovalOptInStatus('error');
+      setApprovalOptInError(result.error.message);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [drawerWorkflowId]);
+
+  const handleToggleAlwaysApprove = async () => {
+    if (!drawerWorkflowId) return;
+    if (approvalOptInStatus === 'loading' || approvalOptInStatus === 'saving') return;
+
+    const next = !approvalOptIn;
+    setApprovalOptIn(next);
+    setApprovalOptInStatus('saving');
+    setApprovalOptInError(null);
+
+    const result = await workflowsAdapter.setApprovalOptIn(drawerWorkflowId, next);
+    if (result.ok) {
+      setApprovalOptIn(Boolean(result.data.optedIn));
+      setApprovalOptInStatus('idle');
+      return;
+    }
+
+    setApprovalOptIn(!next);
+    setApprovalOptInStatus('error');
+    setApprovalOptInError(result.error.message);
+  };
 
   useEffect(() => {
     return () => clearDeleteTimer();
@@ -955,6 +1057,9 @@ function WorkflowsMode({
           workflow={drawerWorkflow}
           pinned={pinnedSet.has(drawerWorkflow.id)}
           pinsError={pinsError}
+          alwaysApprove={approvalOptIn}
+          alwaysApproveStatus={approvalOptInStatus}
+          alwaysApproveError={approvalOptInError}
           runs={(runsByWorkflowId[drawerWorkflow.id] ?? []) as WorkflowRun[]}
           isRunning={isRunning}
           deletePending={pendingDeleteId === drawerWorkflow.id}
@@ -967,6 +1072,7 @@ function WorkflowsMode({
           isSkillDirty={isSkillDirty}
           onClose={() => setDrawerWorkflowId(null)}
           onTogglePin={() => void handleTogglePin(drawerWorkflow.id)}
+          onToggleAlwaysApprove={() => void handleToggleAlwaysApprove()}
           onRun={() => void handleRun(drawerWorkflow.id)}
           onDelete={() => void handleDeleteWorkflow(drawerWorkflow.id)}
           onSkillChange={(next) => {

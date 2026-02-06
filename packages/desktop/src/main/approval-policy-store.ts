@@ -30,6 +30,16 @@ class ApprovalPolicyStore {
     this.requestIdToSessionId.set(requestId, sessionId);
   }
 
+  isTrackedRequest(requestId: string): boolean {
+    if (!requestId) return false;
+    return this.requestIdToSessionId.has(requestId);
+  }
+
+  untrackRequest(requestId: string): void {
+    if (!requestId) return;
+    this.requestIdToSessionId.delete(requestId);
+  }
+
   getSessionIdForRequest(requestId: string): string | undefined {
     return this.requestIdToSessionId.get(requestId);
   }
@@ -99,8 +109,17 @@ class ApprovalPolicyStore {
 
   async setWorkflowOptIn(workflowId: string, optedIn: boolean): Promise<void> {
     await this.load();
-    this.state.workflowOptIns[workflowId] = optedIn;
+    if (optedIn) {
+      this.state.workflowOptIns[workflowId] = true;
+    } else {
+      delete this.state.workflowOptIns[workflowId];
+    }
     await this.save();
+  }
+
+  async listWorkflowOptIns(): Promise<Record<string, boolean>> {
+    await this.load();
+    return { ...this.state.workflowOptIns };
   }
 }
 

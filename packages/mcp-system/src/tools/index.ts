@@ -12,12 +12,17 @@ import {
 import * as macos from '../macos/index.js';
 import { userProfile } from '@flowstate/core';
 
-// Tool definitions with autonomy levels
+// Tool definitions with MCP annotations for better LLM understanding
 const SYSTEM_TOOLS = [
   {
     name: 'system_notify',
     description: 'Send a desktop notification',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,7 +45,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_app',
     description: 'Open an application',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -55,7 +65,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_url',
     description: 'Open a URL in the default browser',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -70,7 +85,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_file',
     description: 'Open a file in its default application',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -85,7 +105,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_clipboard_read',
     description: 'Read the current clipboard contents',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -94,7 +119,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_window_focus',
     description: 'Focus a specific application window',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -109,7 +139,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_window_arrange',
     description: 'Arrange windows (requires approval for complex arrangements)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -130,7 +165,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_user_profile_get',
     description: 'Read the FlowState user profile preferences',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -139,7 +179,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_user_profile_update',
     description: 'Update FlowState user profile preferences',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -154,7 +199,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_user_profile_path',
     description: 'Get the path to the FlowState user profile file',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -163,7 +213,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_shell',
     description: 'Execute a shell command',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -182,7 +237,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_dnd',
     description: 'Toggle Do Not Disturb mode',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -199,7 +259,7 @@ const SYSTEM_TOOLS = [
 export function registerTools(server: Server): void {
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: SYSTEM_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: SYSTEM_TOOLS,
   }));
 
   // Handle tool calls

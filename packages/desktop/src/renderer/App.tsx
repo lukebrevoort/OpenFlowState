@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatMode from './modes/ChatMode';
 import TasksMode from './modes/TasksMode';
@@ -325,13 +325,57 @@ function App() {
     </main>
   );
 
-  const handleSelectConversation = async (sessionId: string) => {
-    await window.flowstate.opencode.switchSession(sessionId);
-    setCurrentSessionId(sessionId);
-    const messages = await window.flowstate.opencode.getMessages();
-    loadMessages(messages);
-    setCurrentPage('chat');
-  };
+  const handleSelectConversation = useCallback(
+    async (sessionId: string) => {
+      await window.flowstate.opencode.switchSession(sessionId);
+      setCurrentSessionId(sessionId);
+      const messages = await window.flowstate.opencode.getMessages();
+      loadMessages(messages);
+      setCurrentPage('chat');
+    },
+    [loadMessages, setCurrentSessionId],
+  );
+
+  useEffect(() => {
+    if (isOnboarding) return;
+    if (!window.flowstate?.notifications?.onApprovalClick) return;
+
+    return window.flowstate.notifications.onApprovalClick((event) => {
+      const sessionId = typeof event?.sessionId === 'string' ? event.sessionId : '';
+      const taskRunId = typeof event?.taskRunId === 'string' ? event.taskRunId : '';
+
+      if (taskRunId) {
+        setCurrentPage('tasks');
+        const tasks = useTasksStore.getState();
+
+        const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+        const focus = async () => {
+          for (let attempt = 0; attempt < 8; attempt += 1) {
+            await tasks.loadActiveRun({ silent: true });
+            await tasks.reloadRuns({ silent: true });
+            await tasks.selectRun(taskRunId);
+
+            const latest = useTasksStore.getState().runs;
+            if (latest.some((run) => run.id === taskRunId)) {
+              return;
+            }
+
+            await sleep(250);
+          }
+        };
+
+        void focus();
+        return;
+      }
+
+      if (sessionId) {
+        void handleSelectConversation(sessionId);
+        return;
+      }
+
+      setCurrentPage('tasks');
+    });
+  }, [handleSelectConversation, isOnboarding]);
 
   return (
     <div className="size-full relative overflow-hidden">

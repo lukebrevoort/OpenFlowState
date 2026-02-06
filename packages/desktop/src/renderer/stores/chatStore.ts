@@ -25,6 +25,9 @@ export interface TaskRun {
   title: string;
   description: string;
   status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
+  blockingReason?:
+    | { kind: 'permission' }
+    | { kind: 'response' };
   startedAt: number;
   updatedAt: number;
   progress: number;

@@ -2,7 +2,7 @@
 name: flowstate-assistant
 description: FlowState - Your productivity orchestrator
 mode: primary
-model: github-copilot/gpt-4.1
+model: opencode/big-pickle
 temperature: 0.3
 ---
 

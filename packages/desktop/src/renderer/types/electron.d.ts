@@ -93,6 +93,10 @@ export interface TaskRun {
   title: string;
   description: string;
   status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
+  /** Why the task is currently blocked (if it is). */
+  blockingReason?:
+    | { kind: 'permission' }
+    | { kind: 'response' };
   startedAt: number;
   updatedAt: number;
   progress: number;
@@ -211,6 +215,12 @@ export interface ApiTokenSuccessEvent {
   service: string;
 }
 
+export interface ApprovalNotificationClickEvent {
+  requestId: string;
+  sessionId: string;
+  taskRunId?: string;
+}
+
 export interface McpServerStatus {
   status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
   error?: string;
@@ -321,6 +331,10 @@ export interface FlowstateAPI {
     reply: (requestId: string, reply: 'once' | 'always' | 'deny') => Promise<{ success: boolean; error?: string }>;
   };
 
+  notifications: {
+    onApprovalClick: (callback: (event: ApprovalNotificationClickEvent) => void) => () => void;
+  };
+
   mcp: {
     // Reload MCP configuration (after connecting new integrations)
     reload: () => Promise<{ success: boolean; error?: string }>;
@@ -381,6 +395,13 @@ export interface FlowstateAPI {
 
     getPins: () => Promise<IpcResult<string[]>>;
     setPinned: (workflowId: string, pinned: boolean) => Promise<IpcResult<{ pinnedIds: string[] }>>;
+
+    getApprovalOptIn: (workflowId: string) => Promise<IpcResult<boolean>>;
+    setApprovalOptIn: (
+      workflowId: string,
+      optedIn: boolean,
+    ) => Promise<IpcResult<{ workflowId: string; optedIn: boolean }>>;
+    listApprovalOptIns: () => Promise<IpcResult<Record<string, boolean>>>;
   };
 
   integrations: {

@@ -13,6 +13,7 @@ export interface TaskRunRecord {
   title: string;
   description: string;
   status: TaskRunStatus;
+  blockingReason?: RendererTaskRun['blockingReason'];
   startedAt: number;
   updatedAt: number;
   progress: number;
@@ -34,6 +35,7 @@ export const toRendererTaskRun = (record: TaskRunRecord): RendererTaskRun => {
     title: record.title,
     description: record.description,
     status,
+    ...(record.blockingReason === undefined ? {} : { blockingReason: record.blockingReason }),
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
     progress: record.progress,

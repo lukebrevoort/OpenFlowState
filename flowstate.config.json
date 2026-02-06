@@ -11,7 +11,7 @@
     }
   },
   "preferences": {
-    "defaultProvider": "github-copilot/gpt-4.1",
+    "defaultProvider": "opencode/big-pickle",
     "progressiveAutonomy": {
       "readOperations": "auto",
       "writeOperations": "approval"

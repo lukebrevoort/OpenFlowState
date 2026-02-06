@@ -1045,6 +1045,165 @@ Value: workflows feel immediate, have durable outputs, and are organized (no glo
 - [ ] Replace the current per-workflow menu with a Workflow Details drawer (Always Approve, inputs, export/duplicate/delete)
 - [ ] Persist pins and enforce pinned limit (3 max) consistently
 
+### Phase 5.5: Inline Approvals System Optimization
+
+Value: users can safely and consistently approve/deny agent actions across all modes, with proper security, full context, and reliable state management.
+
+**Context**: Oracle deep-dive revealed that approvals work in TasksMode but are missing from ChatMode, payload truncation prevents informed decisions, XSS vulnerabilities exist, and tool classification is inconsistent across MCP servers.
+
+#### Step 1: Security Hardening (P0 - Critical)
+
+**Goal**: Eliminate approval bypass vulnerabilities and ensure enforcement at the right layer.
+
+- [ ] **1.1** Remove/sanitize `dangerouslySetInnerHTML` in `packages/desktop/src/renderer/modes/ChatMode.tsx`
+  - Replace with a markdown renderer that escapes HTML (e.g., `react-markdown` with no `rehypeRaw`)
+  - Audit other renderer files for similar patterns
+- [ ] **1.2** Add main-process validation for `approvals:reply` IPC handler
+  - Verify `requestId` was actually tracked via `approvalPolicyStore.getSessionIdForRequest(requestId)`
+  - Reject replies for unknown/already-responded requestIds
+  - File: `packages/desktop/src/main/index.ts`
+- [ ] **1.3** Add approval audit logging
+  - Log all approval requests/responses with timestamps, requestIds, and outcomes
+  - Store in SQLite for debugging and security review
+
+**Acceptance Criteria**:
+- [ ] No unsanitized HTML injection possible in renderer
+- [ ] Approval replies fail for untracked requestIds
+- [ ] All approvals are logged with full context
+
+#### Step 2: Approval Payload Quality (P0)
+
+**Goal**: Users see full context to make informed approval decisions.
+
+- [ ] **2.1** Stop truncating approval payloads in `packages/desktop/src/main/timeline-normalizer.ts`
+  - Remove 120-char clamp on `title`, `summary`, and `body` in `extractApprovalPayload()`
+  - Rely on existing TimelineStore inline/blob storage limits (10KB inline, blob for larger)
+- [ ] **2.2** Update `ApprovalCard.tsx` to handle large payloads gracefully
+  - Add expandable/collapsible body section
+  - Syntax highlighting for code/shell commands
+  - Scroll for very long content
+
+**Acceptance Criteria**:
+- [ ] Full approval details visible (no truncation)
+- [ ] Large payloads render without breaking UI
+
+#### Step 3: State Machine Correctness (P0)
+
+**Goal**: Task state transitions are deterministic and reliable.
+
+- [ ] **3.1** Fix `waiting_approval` → `running` transition in `packages/desktop/src/main/process-manager.ts`
+  - In `handleTaskStoreFromNormalizedEvent()`, detect `approval_response` events
+  - Transition task from `waiting_approval` back to `running`
+- [ ] **3.2** Remove or deprecate manual `markRunning()` escape hatch in TasksMode
+  - Should no longer be needed after 3.1
+- [ ] **3.3** Add state machine tests for approval flow
+  - Test: `running` → `waiting_approval` (on request) → `running` (on response)
+
+**Acceptance Criteria**:
+- [ ] Task status transitions deterministically without manual intervention
+- [ ] State machine has test coverage
+
+#### Step 4: Chat Mode Inline Approvals (P1)
+
+**Goal**: Users can approve/deny actions from Chat mode without switching to Tasks.
+
+- [ ] **4.1** Update `packages/desktop/src/renderer/modes/ChatMode.tsx` to render actionable approvals
+  - When timeline has pending `approval_request`, render `ApprovalCard` inline (not compact chip)
+  - Wire `onApprove`, `onAlwaysApprove`, `onDeny` to `window.flowstate.approvals.reply()`
+- [ ] **4.2** Add global "Pending Approval" banner option
+  - Consider adding to `TitleBar.tsx` when any session has pending approval
+  - Click navigates to the relevant chat/task
+
+**Acceptance Criteria**:
+- [ ] User can approve/deny from ChatMode
+- [ ] Visual parity between Chat and Task approval UX
+
+#### Step 5: Unified Blocking Semantics (P1)
+
+**Goal**: Distinguish between "needs permission approval" and "needs user response" states.
+
+- [ ] **5.1** Define new blocking model in types
+  ```typescript
+  type BlockingReason =
+    | { kind: 'permission'; requestId: string; title: string }
+    | { kind: 'response'; prompt: string }
+    | null;
+  ```
+- [ ] **5.2** Update `packages/desktop/src/main/workflows-runner.ts`
+  - Set `blockingReason.kind = 'response'` instead of overloading `waiting_approval`
+- [ ] **5.3** Update UI to render correct affordance based on `blockingReason.kind`
+  - `permission` → Approve/Deny buttons
+  - `response` → Text input / reply modal
+
+**Acceptance Criteria**:
+- [ ] Two blocking types have distinct UI affordances
+- [ ] No confusion between permission approvals and workflow responses
+
+#### Step 6: Tool Classification Standardization (P2)
+
+**Goal**: All MCP tools expose consistent read/write metadata for policy enforcement.
+
+- [ ] **6.1** Update MCP servers to use standard MCP `annotations` format:
+  - `packages/mcp-gmail/src/tools/index.ts` - Stop stripping `autonomy`, convert to annotations
+  - `packages/mcp-gcal/src/tools/index.ts` - Same
+  - `packages/mcp-notion/src/tools/index.ts` - Same
+  - `packages/mcp-system/src/tools/index.ts` - Same
+  
+  Use this format (matching Canvas MCP):
+  ```typescript
+  annotations: {
+    readOnlyHint: true | false,
+    destructiveHint: true | false,
+    idempotentHint: true | false,
+    openWorldHint: true | false
+  }
+  ```
+- [ ] **6.2** Validate OpenCode reads annotations from tool listing
+- [ ] **6.3** Document tool classification policy in AGENTS.md or a dedicated doc
+
+**Acceptance Criteria**:
+- [ ] All FlowState MCP servers expose standard MCP annotations
+- [ ] OpenCode can enforce read/write policy from tool metadata
+
+#### Step 7: Policy Persistence & Configuration (P2)
+
+**Goal**: "Always Approve" policies are durable and configurable per-workflow.
+
+- [ ] **7.1** Wire per-workflow always-approve toggle to existing `approvalPolicyStore.setWorkflowOptIn()`
+  - Add UI toggle in Workflow Details drawer
+  - File: `packages/desktop/src/renderer/modes/WorkflowsMode.tsx` (or new WorkflowDetails component)
+- [ ] **7.2** Define policy scope options:
+  - Per-session (current behavior, in-memory)
+  - Per-workflow (persisted, opt-in)
+  - Per-tool (future consideration)
+- [ ] **7.3** Add policy management UI in Settings
+  - View/revoke always-approve grants
+
+**Acceptance Criteria**:
+- [ ] Per-workflow "Always Approve" persists across app restarts
+- [ ] User can view and revoke approval policies
+
+#### Step 8: Notifications & Quality of Life (P3)
+
+**Goal**: Users are notified of pending approvals even when not focused on FlowState.
+
+- [ ] **8.1** Implement desktop notifications for pending approvals
+  - Use existing `configStore.preferences.notifications.approvals` setting
+  - macOS native notifications via Electron
+- [ ] **8.2** Add approval batching/inbox (stretch)
+  - When multiple approvals pending, show list with "Approve All for this task/session"
+
+**Acceptance Criteria**:
+- [ ] Desktop notification appears for pending approvals (if enabled)
+- [ ] User can approve directly from notification (if supported)
+
+#### Verification & Testing
+
+- [ ] **V.1** E2E test: Trigger approval-gated action → verify full payload visible → approve → verify action completes
+- [ ] **V.2** Security test: Attempt HTML injection in assistant output → verify no script execution
+- [ ] **V.3** State test: Verify `waiting_approval` → `running` transition after approval
+- [ ] **V.4** Cross-mode test: Approve from ChatMode and TasksMode, verify identical behavior
+
 ### Phase 6: Onboarding + UX Polish
 
 Value: first-run success rate goes up and the product feels coherent (less "stub" UI).

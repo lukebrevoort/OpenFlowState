@@ -39,6 +39,7 @@ type TasksState = {
   removeRun: (id: string) => Promise<boolean>;
   markRunning: (id: string) => Promise<boolean>;
   markComplete: (id: string) => Promise<boolean>;
+  updateRunLocal: (id: string, patch: Partial<TaskRun>) => void;
 };
 
 const statusPriority: Record<TaskRun['status'], number> = {
@@ -166,7 +167,24 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
     try {
       const events = await window.flowstate.timeline.list(run.sessionId, 200, 0);
-      set({ selectedTimeline: events, isLoadingTimeline: false });
+
+      const resolved = await Promise.all(
+        events.map(async (event) => {
+          const isApproval = event.kind === 'approval_request' || event.kind === 'approval_response';
+          if (!isApproval || event.payloadInline || !event.payloadRef) {
+            return event;
+          }
+
+          try {
+            const payload = await window.flowstate.timeline.resolvePayload(event.payloadRef);
+            return payload ? { ...event, payloadInline: payload } : event;
+          } catch {
+            return event;
+          }
+        })
+      );
+
+      set({ selectedTimeline: resolved, isLoadingTimeline: false });
     } catch (err) {
       set({
         isLoadingTimeline: false,
@@ -272,5 +290,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       runs: state.runs.map((run) => (run.id === id ? result.data : run)),
     }));
     return true;
+  },
+
+  updateRunLocal: (id, patch) => {
+    if (!id) return;
+    set((state) => {
+      const runs = state.runs.map((run) => (run.id === id ? { ...run, ...patch } : run));
+      const activeRun = state.activeRun?.id === id ? { ...state.activeRun, ...patch } : state.activeRun;
+      return { runs, activeRun };
+    });
   },
 }));

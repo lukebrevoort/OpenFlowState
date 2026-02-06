@@ -1250,3 +1250,89 @@ Renderer (useOpenCode.ts):
 - Add strict pagination + filter inputs to `@flowstate/mcp-notion` query tools to cap payload size.
 - Evaluate a remote Notion MCP that fronts a vector index (embeddings + BM25) for large workspaces.
 - Define cache invalidation (Notion webhooks or time-based) and chunking strategy for page content.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - OpenCode Approval API Compatibility Fix)
+**Timestamp**: Feb 6, 2026 22:55
+
+**TASKS COMPLETED**
+- ✅ Fixed approval replies to support both OpenCode SDK API shapes:
+  - v2 style `client.permission.reply({ requestID, reply })`
+  - v1 style `client.postSessionIdPermissionsPermissionId({ path: { id, permissionID }, body: { response } })`
+- ✅ Removed false-negative "permission API unavailable" path for v1 clients.
+- ✅ Added legacy approval event compatibility for `permission.updated`:
+  - request-id extraction now recognizes `permissionID` and variants
+  - request classification/timeline normalization treats `permission.updated` as an approval request
+  - auto-approve for "always approve" now handles `permission.updated`
+- ✅ Added regression test coverage for legacy `permission.updated` request blocking behavior.
+- ✅ Verified with desktop package test + typecheck:
+  - `npm run test -- approval-blocking.test.ts`
+  - `npm run typecheck`
+
+**IN PROGRESS**
+- [ ] Validate end-to-end in desktop UI by approving/always-approving/denying an active permission request.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Restart the desktop app and trigger a permission-gated tool action.
+- Confirm each action button (`Approve`, `Always Approve`, `Deny`) returns success and unblocks the task timeline.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Workflow Approval UX + Request Tracking Reliability)
+**Timestamp**: Feb 6, 2026 23:07
+
+**TASKS COMPLETED**
+- ✅ Fixed `approvals:reply` IPC flow to stop hard-failing on in-memory-only tracking.
+  - Added session fallback resolution through persisted timeline events (`timelineStore.findSessionIdByApprovalRequestId`).
+  - Added `processManager.getSessionIdForApprovalRequest()` and reused it in both IPC + reply path.
+- ✅ Improved request-id extraction robustness across payload variants:
+  - Supports `requestId`, `requestID`, `permissionID`, and nested `permission.id`.
+- ✅ Improved approval request context shown to users:
+  - Approval payload now derives actionable `title`/`summary`/`body` from permission type, targets/patterns, tool call IDs, and metadata.
+- ✅ Fixed Tasks output panel behavior while waiting on approvals:
+  - Summary-only output is now rendered instead of incorrectly showing "No outputs yet."
+- ✅ Reduced approval card lingering noise:
+  - Resolved approval requests now show a compact "Request resolved" state in timeline instead of persistent action card UI.
+- ✅ Added tests for approval normalization and legacy event compatibility.
+  - `timeline-normalizer.test.ts`
+  - `approval-blocking.test.ts`
+
+**IN PROGRESS**
+- [ ] Manual end-to-end verification in desktop app with the "Clean Desktop" workflow.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Restart desktop app and run "Clean Desktop" workflow.
+- Validate:
+  - multiple pending approvals can all be approved/denied without "Unknown or untracked requestId"
+  - approval cards show clear target/action metadata
+  - workflow output panel shows summary text while waiting for approval
+  - resolved approvals collapse to "Request resolved" state in timeline.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Needs Response Status Reversion Fix)
+**Timestamp**: Feb 6, 2026 23:47
+
+**TASKS COMPLETED**
+- ✅ Fixed workflow reply flow so status persists as running after user response:
+  - `TasksMode` now calls `markRunning(taskRunId)` immediately after successful reply send.
+  - follow-up silent refresh now includes `loadActiveRun` to avoid stale run state.
+- ✅ Updated main-process workflow sync to respect response headers:
+  - `[TASK_IN_PROGRESS]` now keeps workflow/task in running state (not completed).
+  - `[NEEDS_RESPONSE]` keeps response block.
+  - `[TASK_COMPLETE]` marks completed.
+  - `[TASK_BLOCKED]` marks failed.
+- ✅ Cleared stale "Waiting for input..." description when new assistant output is not requesting input.
+
+**IN PROGRESS**
+- [ ] Manual validation in desktop app on a workflow that transitions from `[NEEDS_RESPONSE]` to `[TASK_IN_PROGRESS]`.
+
+**BLOCKERS**
+- None

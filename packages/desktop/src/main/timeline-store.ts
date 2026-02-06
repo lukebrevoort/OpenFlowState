@@ -302,6 +302,82 @@ export class TimelineStore {
     }));
   }
 
+  private extractApprovalRequestId(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const nestedPermission =
+      record.permission && typeof record.permission === 'object' && !Array.isArray(record.permission)
+        ? (record.permission as Record<string, unknown>)
+        : null;
+    const candidates = [
+      record.requestId,
+      record.requestID,
+      record.request_id,
+      record.permissionId,
+      record.permissionID,
+      record.permission_id,
+      nestedPermission?.id,
+      nestedPermission?.requestID,
+      nestedPermission?.requestId,
+      record.id,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+
+    return null;
+  }
+
+  async findSessionIdByApprovalRequestId(requestId: string): Promise<string | null> {
+    this.initialize();
+    if (!this.db) return null;
+
+    const target = requestId.trim();
+    if (!target) return null;
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT session_id, payload_inline, payload_ref
+        FROM timeline_events
+        WHERE kind IN ('approval_request', 'approval_response')
+        ORDER BY timestamp DESC
+        LIMIT 500
+        `
+      )
+      .all() as Array<{
+        session_id: string;
+        payload_inline: string | null;
+        payload_ref: string | null;
+      }>;
+
+    for (const row of rows) {
+      let payload: unknown = null;
+      if (row.payload_inline) {
+        try {
+          payload = JSON.parse(row.payload_inline);
+        } catch {
+          payload = null;
+        }
+      } else if (row.payload_ref) {
+        payload = await this.resolvePayload(row.payload_ref);
+      }
+
+      const found = this.extractApprovalRequestId(payload);
+      if (found === target) {
+        return row.session_id;
+      }
+    }
+
+    return null;
+  }
+
   async pruneOldEvents(): Promise<void> {
     this.initialize();
     if (!this.db) return;

@@ -19,7 +19,8 @@ import { taskStore } from './task-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import { listGoogleCalendars } from './google-calendar.js';
-import type { ApprovalReply } from './approval-policy-store.js';
+import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { approvalsAuditStore } from './approvals-audit-store.js';
 import type {
   IpcError,
   IpcResult,
@@ -741,6 +742,10 @@ const configureWorkflowsPinsStore = (): void => {
   workflowsPinsStore.configure({ dataDir: configStore.getDataDir() });
 };
 
+const configureApprovalsAuditStore = (): void => {
+  approvalsAuditStore.configure({ dataDir: configStore.getDataDir() });
+};
+
 ipcMain.handle('settings:get', async () => {
   try {
     return configStore.get();
@@ -998,6 +1003,7 @@ ipcMain.handle('tasks:cancel', async (_event, taskRunId: string) => {
 
     const updated = taskStore.updateRun(id, {
       status: 'cancelled',
+      blockingReason: undefined,
       updatedAt: Date.now(),
       description: 'Cancelled by user.',
     });
@@ -1039,6 +1045,7 @@ ipcMain.handle('tasks:markRunning', async (_event, taskRunId: string) => {
 
     const updated = taskStore.updateRun(id, {
       status: 'running',
+      blockingReason: undefined,
       updatedAt: Date.now(),
       ...(record.description === 'Waiting for input...' ? { description: 'Running...' } : {}),
     });
@@ -1079,6 +1086,7 @@ ipcMain.handle('tasks:markComplete', async (_event, taskRunId: string) => {
 
     const updated = taskStore.updateRun(id, {
       status: 'completed',
+      blockingReason: undefined,
       progress: 100,
       updatedAt: Date.now(),
     });
@@ -1214,6 +1222,53 @@ ipcMain.handle('workflows:pins:set', async (_event, workflowId: string, pinned: 
   }
 });
 
+ipcMain.handle('workflows:approvalOptIn:get', async (_event, workflowId: string) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<boolean>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    const optedIn = await approvalPolicyStore.getWorkflowOptIn(id);
+    return ipcOk<boolean>(optedIn);
+  } catch (error) {
+    console.warn('[IPC] Failed to get workflow approval opt-in:', error);
+    return ipcError<boolean>('UNKNOWN', 'Failed to load workflow approval policy.');
+  }
+});
+
+ipcMain.handle('workflows:approvalOptIn:set', async (_event, workflowId: string, optedIn: boolean) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<{ workflowId: string; optedIn: boolean }>(
+      'INVALID_REQUEST',
+      'workflowId must be a non-empty string.',
+    );
+  }
+
+  try {
+    const next = Boolean(optedIn);
+    await approvalPolicyStore.setWorkflowOptIn(id, next);
+    return ipcOk<{ workflowId: string; optedIn: boolean }>({ workflowId: id, optedIn: next });
+  } catch (error) {
+    console.warn('[IPC] Failed to set workflow approval opt-in:', error);
+    return ipcError<{ workflowId: string; optedIn: boolean }>(
+      'UNKNOWN',
+      'Failed to update workflow approval policy.',
+    );
+  }
+});
+
+ipcMain.handle('workflows:approvalOptIns:list', async () => {
+  try {
+    const optIns = await approvalPolicyStore.listWorkflowOptIns();
+    return ipcOk<Record<string, boolean>>(optIns);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow approval opt-ins:', error);
+    return ipcError<Record<string, boolean>>('UNKNOWN', 'Failed to load approval grants.');
+  }
+});
+
 ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) => {
   const result = await workflowsGenerator.generateFromIntent(intent);
   if (result.ok) {
@@ -1239,11 +1294,17 @@ ipcMain.handle('workflows:skill:save', async (_event, workflowId: string, skillM
 });
 
 ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
-  const result = await workflowsRunner.deleteWorkflow(workflowId);
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  const result = await workflowsRunner.deleteWorkflow(id);
   if (result.ok) {
     try {
       configureWorkflowsPinsStore();
-      workflowsPinsStore.setPinned(workflowId, false);
+      workflowsPinsStore.setPinned(id, false);
+      try {
+        await approvalPolicyStore.setWorkflowOptIn(id, false);
+      } catch (error) {
+        console.warn('[IPC] Failed to revoke workflow approval opt-in after delete:', error);
+      }
       return ipcOk(result.data);
     } catch (error) {
       console.warn('[IPC] Failed to update pins after workflow delete:', error);
@@ -1368,8 +1429,27 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
       return { success: false, error: 'Invalid reply' };
     }
 
+    const normalizedRequestId = requestId.trim();
+    const sessionId = await processManager.getSessionIdForApprovalRequest(normalizedRequestId);
+
+    if (sessionId) {
+      try {
+        configureApprovalsAuditStore();
+        approvalsAuditStore.log({
+          kind: 'user_reply',
+          requestId: normalizedRequestId,
+          sessionId,
+          reply,
+          timestamp: Date.now(),
+          summary: { source: 'ipc' },
+        });
+      } catch (error) {
+        console.warn('[IPC] Failed to audit approval reply:', error);
+      }
+    }
+
     try {
-      await processManager.replyApproval(requestId, reply);
+      await processManager.replyApproval(normalizedRequestId, reply);
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

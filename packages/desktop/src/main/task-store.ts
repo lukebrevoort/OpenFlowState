@@ -23,6 +23,7 @@ type TaskRunRow = {
   title: string;
   description: string;
   status: string;
+  blocking_reason?: string | null;
   started_at: number;
   updated_at: number;
   progress: number;
@@ -44,6 +45,14 @@ const parseMetadata = (raw: string | null): unknown | undefined => {
   }
 };
 
+const parseBlockingReason = (raw: string | null): TaskRunRecord['blockingReason'] | undefined => {
+  const parsed = parseMetadata(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const kind = (parsed as { kind?: unknown }).kind;
+  if (kind !== 'permission' && kind !== 'response') return undefined;
+  return { kind };
+};
+
 const stringifyMetadata = (value: unknown | undefined): string | null => {
   if (value === undefined) return null;
   try {
@@ -51,6 +60,10 @@ const stringifyMetadata = (value: unknown | undefined): string | null => {
   } catch {
     return null;
   }
+};
+
+const stringifyBlockingReason = (value: TaskRunRecord['blockingReason'] | undefined): string | null => {
+  return stringifyMetadata(value);
 };
 
 const rowToRecord = (row: TaskRunRow): TaskRunRecord => {
@@ -61,6 +74,7 @@ const rowToRecord = (row: TaskRunRow): TaskRunRecord => {
     title: row.title,
     description: row.description,
     status: row.status as TaskRunRecord['status'],
+    ...(row.blocking_reason ? { blockingReason: parseBlockingReason(row.blocking_reason) } : {}),
     startedAt: row.started_at,
     updatedAt: row.updated_at,
     progress: clampProgress(row.progress),
@@ -122,6 +136,7 @@ export class TaskStore {
         title TEXT NOT NULL,
         description TEXT NOT NULL,
         status TEXT NOT NULL,
+        blocking_reason TEXT,
         started_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         progress INTEGER NOT NULL,
@@ -129,6 +144,9 @@ export class TaskStore {
         metadata TEXT
       );
     `);
+
+    // Backwards-compatible migration for existing installs.
+    this.ensureColumn('task_runs', 'blocking_reason', 'TEXT');
 
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_task_runs_session_id
@@ -146,6 +164,18 @@ export class TaskStore {
     `);
   }
 
+  private ensureColumn(table: string, column: string, type: string): void {
+    if (!this.db) return;
+    try {
+      const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name?: string }>;
+      const has = rows.some((r) => r?.name === column);
+      if (has) return;
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (error) {
+      console.warn(`[TaskStore] Failed to ensure column ${table}.${column}:`, error);
+    }
+  }
+
   upsertRun(run: TaskRunRecord): void {
     this.initialize();
     if (!this.db) return;
@@ -153,14 +183,15 @@ export class TaskStore {
     const stmt = this.db.prepare(`
       INSERT INTO task_runs (
         id, session_id, kind, title, description, status,
-        started_at, updated_at, progress, summary, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        blocking_reason, started_at, updated_at, progress, summary, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         session_id = excluded.session_id,
         kind = excluded.kind,
         title = excluded.title,
         description = excluded.description,
         status = excluded.status,
+        blocking_reason = excluded.blocking_reason,
         started_at = excluded.started_at,
         updated_at = excluded.updated_at,
         progress = excluded.progress,
@@ -175,6 +206,7 @@ export class TaskStore {
       run.title,
       run.description,
       run.status,
+      stringifyBlockingReason(run.blockingReason),
       run.startedAt,
       run.updatedAt,
       clampProgress(run.progress),
