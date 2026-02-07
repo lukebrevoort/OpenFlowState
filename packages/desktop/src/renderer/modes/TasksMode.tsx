@@ -1,15 +1,27 @@
-import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X, Check, ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import type { TimelineEvent } from '../types/electron';
-import { ActivityTimeline } from '../components/ActivityTimeline';
-import { useTasksStore } from '../stores/tasksStore';
-import { useOpenCode } from '../hooks/useOpenCode';
-import { parseResponseHeader, getCleanContent } from '../lib/responseHeaders';
+import {
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  AlertTriangle,
+  MessageSquare,
+  X,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { TimelineEvent } from "../types/electron";
+import { ActivityTimeline } from "../components/ActivityTimeline";
+import { useTasksStore } from "../stores/tasksStore";
+import { useOpenCode } from "../hooks/useOpenCode";
+import { parseResponseHeader, getCleanContent } from "../lib/responseHeaders";
+
+import AssistantMarkdown from "../components/AssistantMarkdown";
 
 const DEV = Boolean(
   (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV ??
-    (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV ===
-      'development',
+    (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } })
+      .process?.env?.NODE_ENV === "development",
 );
 const TASKS_PER_PAGE = 5;
 const TASK_RETENTION_DAYS = 10;
@@ -25,14 +37,20 @@ type ApprovalPayloadInline = {
   denyLabel?: string;
 };
 
-const isApprovalPayloadInline = (payload: unknown): payload is ApprovalPayloadInline => {
-  return Boolean(payload) && typeof payload === 'object' && !Array.isArray(payload);
+const isApprovalPayloadInline = (
+  payload: unknown,
+): payload is ApprovalPayloadInline => {
+  return (
+    Boolean(payload) && typeof payload === "object" && !Array.isArray(payload)
+  );
 };
 
 const deriveProgress = (events: TimelineEvent[]) => {
   if (!events || events.length === 0) return 0;
   const total = events.length;
-  const completed = events.filter((event) => ['tool_result', 'approval_response'].includes(event.kind)).length;
+  const completed = events.filter((event) =>
+    ["tool_result", "approval_response"].includes(event.kind),
+  ).length;
   return Math.min(100, Math.round((completed / total) * 100));
 };
 
@@ -50,8 +68,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const reloadRuns = useTasksStore((state) => state.reloadRuns);
   const loadActiveRun = useTasksStore((state) => state.loadActiveRun);
   const selectRun = useTasksStore((state) => state.selectRun);
-  const reloadSelectedTimeline = useTasksStore((state) => state.reloadSelectedTimeline);
-  const reloadSelectedArtifacts = useTasksStore((state) => state.reloadSelectedArtifacts);
+  const reloadSelectedTimeline = useTasksStore(
+    (state) => state.reloadSelectedTimeline,
+  );
+  const reloadSelectedArtifacts = useTasksStore(
+    (state) => state.reloadSelectedArtifacts,
+  );
   const cancelRun = useTasksStore((state) => state.cancelRun);
   const removeRun = useTasksStore((state) => state.removeRun);
   const markRunning = useTasksStore((state) => state.markRunning);
@@ -60,7 +82,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const { switchSession, sendMessage } = useOpenCode();
 
   const [showReplyModal, setShowReplyModal] = useState(false);
-  const [replyText, setReplyText] = useState('');
+  const [replyText, setReplyText] = useState("");
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -92,7 +114,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     return () => {
       window.clearInterval(interval);
     };
-  }, [loadActiveRun, reloadRuns, reloadSelectedTimeline, reloadSelectedArtifacts]);
+  }, [
+    loadActiveRun,
+    reloadRuns,
+    reloadSelectedTimeline,
+    reloadSelectedArtifacts,
+  ]);
 
   const sortedRuns = useMemo(() => {
     const priority: Record<string, number> = {
@@ -119,7 +146,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const totalRunPages = useMemo(
     () => Math.max(1, Math.ceil(recentRuns.length / TASKS_PER_PAGE)),
-    [recentRuns.length]
+    [recentRuns.length],
   );
 
   const paginatedRuns = useMemo(() => {
@@ -129,7 +156,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const selectedRun = useMemo(
     () => recentRuns.find((run) => run.id === selectedRunId) ?? null,
-    [selectedRunId, recentRuns]
+    [selectedRunId, recentRuns],
   );
 
   useEffect(() => {
@@ -138,23 +165,29 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   useEffect(() => {
     if (recentRuns.length === 0) return;
-    if (selectedRunId && recentRuns.some((run) => run.id === selectedRunId)) return;
+    if (selectedRunId && recentRuns.some((run) => run.id === selectedRunId))
+      return;
     void selectRun(recentRuns[0]!.id);
   }, [recentRuns, selectedRunId, selectRun]);
 
   const workflowArtifacts = useMemo(() => {
     if (!selectedWorkflow || !selectedArtifacts) return null;
-    const byKind = (kind: string) => selectedArtifacts.filter((artifact) => artifact.kind === kind);
+    const byKind = (kind: string) =>
+      selectedArtifacts.filter((artifact) => artifact.kind === kind);
     const pickLatest = (items: typeof selectedArtifacts) => {
       if (items.length === 0) return null;
-      return items.reduce((latest, current) => (current.createdAt > latest.createdAt ? current : latest));
+      return items.reduce((latest, current) =>
+        current.createdAt > latest.createdAt ? current : latest,
+      );
     };
 
-    const finalOutput = pickLatest(byKind('final_output'));
-    const summary = pickLatest(byKind('summary'));
+    const finalOutput = pickLatest(byKind("final_output"));
+    const summary = pickLatest(byKind("summary"));
 
     // Parse the final output for status headers
-    const parsed = finalOutput?.payloadText ? parseResponseHeader(finalOutput.payloadText) : null;
+    const parsed = finalOutput?.payloadText
+      ? parseResponseHeader(finalOutput.payloadText)
+      : null;
 
     return {
       finalOutput,
@@ -163,33 +196,42 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
       // Clean content with header stripped
       cleanContent: parsed?.content ?? finalOutput?.payloadText ?? null,
       // Whether the response explicitly needs user input via header
-      needsResponse: parsed?.hasHeader && parsed.status === 'needs_response',
-      };
+      needsResponse: parsed?.hasHeader && parsed.status === "needs_response",
+    };
   }, [selectedArtifacts, selectedWorkflow]);
 
   const requestIdForEvent = (event: TimelineEvent) => {
-    const payload = isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
-    return typeof payload?.requestId === 'string' ? payload.requestId.trim() : null;
+    const payload = isApprovalPayloadInline(event.payloadInline)
+      ? event.payloadInline
+      : undefined;
+    return typeof payload?.requestId === "string"
+      ? payload.requestId.trim()
+      : null;
   };
 
   const selectedBlockingKind = useMemo(() => {
     if (!selectedRun) return null;
-    if (selectedRun.blockingReason?.kind) return selectedRun.blockingReason.kind;
+    if (selectedRun.blockingReason?.kind)
+      return selectedRun.blockingReason.kind;
 
     // Best-effort inference for older runs.
     const lastApprovalRequest = selectedTimeline
-      .filter((event) => event.kind === 'approval_request')
+      .filter((event) => event.kind === "approval_request")
       .reduce((latest, event) => Math.max(latest, event.timestamp ?? 0), 0);
     const lastApprovalResponse = selectedTimeline
-      .filter((event) => event.kind === 'approval_response')
+      .filter((event) => event.kind === "approval_response")
       .reduce((latest, event) => Math.max(latest, event.timestamp ?? 0), 0);
-    if (lastApprovalRequest > lastApprovalResponse) return 'permission' as const;
+    if (lastApprovalRequest > lastApprovalResponse)
+      return "permission" as const;
 
     // Only use header-based fallback when the run still looks blocked for input.
     // This prevents stale [NEEDS_RESPONSE] artifacts from keeping the UI stuck
     // after the user already replied.
-    if (workflowArtifacts?.needsResponse && selectedRun.description === 'Waiting for input...') {
-      return 'response' as const;
+    if (
+      workflowArtifacts?.needsResponse &&
+      selectedRun.description === "Waiting for input..."
+    ) {
+      return "response" as const;
     }
     return null;
   }, [selectedRun, selectedTimeline, workflowArtifacts]);
@@ -199,14 +241,14 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     const responded = new Set<string>();
     for (const event of selectedTimeline) {
-      if (event.kind !== 'approval_response') continue;
+      if (event.kind !== "approval_response") continue;
       const id = requestIdForEvent(event);
       if (id) responded.add(id);
     }
 
     let pending = 0;
     for (const event of selectedTimeline) {
-      if (event.kind !== 'approval_request') continue;
+      if (event.kind !== "approval_request") continue;
       const id = requestIdForEvent(event);
       if (!id || !responded.has(id)) {
         pending += 1;
@@ -220,11 +262,24 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const canRespond = useMemo(() => {
     if (!selectedWorkflow || !selectedRun) return false;
 
-    return selectedBlockingKind === 'response';
+    return selectedBlockingKind === "response";
   }, [selectedWorkflow, selectedRun, selectedBlockingKind]);
-  const canCancel = Boolean(selectedRun && (selectedRun.status === 'running' || selectedRun.status === 'waiting_approval'));
-  const canMarkComplete = Boolean(selectedRun && selectedRun.status !== 'completed' && selectedRun.status !== 'cancelled');
-  const canRemove = Boolean(selectedRun && (selectedRun.status === 'completed' || selectedRun.status === 'failed' || selectedRun.status === 'cancelled'));
+  const canCancel = Boolean(
+    selectedRun &&
+      (selectedRun.status === "running" ||
+        selectedRun.status === "waiting_approval"),
+  );
+  const canMarkComplete = Boolean(
+    selectedRun &&
+      selectedRun.status !== "completed" &&
+      selectedRun.status !== "cancelled",
+  );
+  const canRemove = Boolean(
+    selectedRun &&
+      (selectedRun.status === "completed" ||
+        selectedRun.status === "failed" ||
+        selectedRun.status === "cancelled"),
+  );
 
   const handleSendReply = async () => {
     if (!selectedRun || !replyText.trim()) return;
@@ -233,9 +288,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     try {
       await switchSession(selectedRun.sessionId);
-      const result = await sendMessage(replyText.trim(), { allowWhileRunning: true, fireAndForget: true });
+      const result = await sendMessage(replyText.trim(), {
+        allowWhileRunning: true,
+        fireAndForget: true,
+      });
       if (!result || !result.success) {
-        setReplyError(result?.error ?? 'Failed to send response.');
+        setReplyError(result?.error ?? "Failed to send response.");
         return;
       }
 
@@ -243,13 +301,16 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
       // Close immediately on success; background polling will pick up new events.
       setShowReplyModal(false);
-      setReplyText('');
+      setReplyText("");
       setIsSendingReply(false);
-      setToast('Response sent — continuing workflow');
+      setToast("Response sent — continuing workflow");
       updateRunLocal(selectedRun.id, {
-        status: 'running',
+        status: "running",
         blockingReason: undefined,
-        description: selectedRun.description === 'Waiting for input...' ? 'Running...' : selectedRun.description,
+        description:
+          selectedRun.description === "Waiting for input..."
+            ? "Running..."
+            : selectedRun.description,
       });
       window.setTimeout(() => setToast(null), 2500);
 
@@ -261,7 +322,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
         void reloadSelectedArtifacts({ silent: true });
       }, 600);
     } catch (err) {
-      setReplyError(err instanceof Error ? err.message : 'Failed to send response.');
+      setReplyError(
+        err instanceof Error ? err.message : "Failed to send response.",
+      );
     } finally {
       setIsSendingReply(false);
     }
@@ -269,37 +332,62 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const selectedProgress = useMemo(() => {
     if (!selectedRun) return 0;
-    if (selectedRun.progress > 0) return Math.min(100, Math.round(selectedRun.progress));
+    if (selectedRun.progress > 0)
+      return Math.min(100, Math.round(selectedRun.progress));
     return deriveProgress(selectedTimeline);
   }, [selectedRun, selectedTimeline]);
 
   const timeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
-    if (seconds < 15) return 'Just now';
+    if (seconds < 15) return "Just now";
     if (seconds < 60) return `${seconds}s ago`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
     return new Date(timestamp).toLocaleDateString();
   };
 
-  const statusMeta = (status: string, blockingKind?: 'permission' | 'response' | null) => {
-    if (blockingKind === 'response') {
-      return { label: 'Needs response', chip: 'bg-[#7BA7B4]/15 text-[#2C5E68] border-[#7BA7B4]/30' };
+  const statusMeta = (
+    status: string,
+    blockingKind?: "permission" | "response" | null,
+  ) => {
+    if (blockingKind === "response") {
+      return {
+        label: "Needs response",
+        chip: "bg-[#7BA7B4]/15 text-[#2C5E68] border-[#7BA7B4]/30",
+      };
     }
 
     switch (status) {
-      case 'running':
-        return { label: 'Running', chip: 'bg-[#A5B574]/15 text-[#4A7C59] border-[#A5B574]/30' };
-      case 'waiting_approval':
-        return { label: 'Needs approval', chip: 'bg-[#D4A574]/15 text-[#C87137] border-[#D4A574]/30' };
-      case 'completed':
-        return { label: 'Completed', chip: 'bg-[#4A7C59]/15 text-[#4A7C59] border-[#4A7C59]/30' };
-      case 'failed':
-        return { label: 'Failed', chip: 'bg-destructive/10 text-destructive border-destructive/30' };
-      case 'cancelled':
-        return { label: 'Cancelled', chip: 'bg-muted/50 text-muted-foreground border-border' };
+      case "running":
+        return {
+          label: "Running",
+          chip: "bg-[#A5B574]/15 text-[#4A7C59] border-[#A5B574]/30",
+        };
+      case "waiting_approval":
+        return {
+          label: "Needs approval",
+          chip: "bg-[#D4A574]/15 text-[#C87137] border-[#D4A574]/30",
+        };
+      case "completed":
+        return {
+          label: "Completed",
+          chip: "bg-[#4A7C59]/15 text-[#4A7C59] border-[#4A7C59]/30",
+        };
+      case "failed":
+        return {
+          label: "Failed",
+          chip: "bg-destructive/10 text-destructive border-destructive/30",
+        };
+      case "cancelled":
+        return {
+          label: "Cancelled",
+          chip: "bg-muted/50 text-muted-foreground border-border",
+        };
       default:
-        return { label: status, chip: 'bg-muted/50 text-muted-foreground border-border' };
+        return {
+          label: status,
+          chip: "bg-muted/50 text-muted-foreground border-border",
+        };
     }
   };
 
@@ -309,18 +397,20 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
       await switchSession(selectedRun.sessionId);
       onOpenChat?.();
     } catch (err) {
-      console.error('Failed to open chat for task session', err);
+      console.error("Failed to open chat for task session", err);
     }
   };
 
   const handleCancelRun = async () => {
     if (!selectedRun) return;
-    const confirmCancel = window.confirm('Cancel this task? It may still finish in the background.');
+    const confirmCancel = window.confirm(
+      "Cancel this task? It may still finish in the background.",
+    );
     if (!confirmCancel) return;
 
     const ok = await cancelRun(selectedRun.id);
     if (ok) {
-      setToast('Task cancelled');
+      setToast("Task cancelled");
       window.setTimeout(() => setToast(null), 2000);
       void reloadRuns({ silent: true });
     }
@@ -328,12 +418,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const handleRemoveRun = async () => {
     if (!selectedRun) return;
-    const confirmRemove = window.confirm('Remove this task from history?');
+    const confirmRemove = window.confirm("Remove this task from history?");
     if (!confirmRemove) return;
 
     const ok = await removeRun(selectedRun.id);
     if (ok) {
-      setToast('Task removed');
+      setToast("Task removed");
       window.setTimeout(() => setToast(null), 2000);
       void reloadRuns({ silent: true });
     }
@@ -341,12 +431,12 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
   const handleMarkComplete = async () => {
     if (!selectedRun) return;
-    const confirmComplete = window.confirm('Mark this task as complete?');
+    const confirmComplete = window.confirm("Mark this task as complete?");
     if (!confirmComplete) return;
 
     const ok = await markComplete(selectedRun.id);
     if (ok) {
-      setToast('Task marked complete');
+      setToast("Task marked complete");
       window.setTimeout(() => setToast(null), 2000);
       void reloadRuns({ silent: true });
     }
@@ -356,7 +446,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     if (!DEV || !selectedRun) return;
     const ok = await markRunning(selectedRun.id);
     if (ok) {
-      setToast('Dev: forced task to running');
+      setToast("Dev: forced task to running");
       window.setTimeout(() => setToast(null), 2000);
       void reloadRuns({ silent: true });
     }
@@ -385,14 +475,18 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 <div className="space-y-2">
                   {paginatedRuns.map((run) => {
                     const isSelected = run.id === selectedRunId;
-                    const meta = statusMeta(run.status, run.blockingReason?.kind ?? null);
-                    const icon = run.status === 'completed'
-                      ? CheckCircle2
-                      : run.status === 'failed'
-                        ? AlertTriangle
-                        : run.blockingReason?.kind === 'response'
-                          ? MessageSquare
-                          : Loader2;
+                    const meta = statusMeta(
+                      run.status,
+                      run.blockingReason?.kind ?? null,
+                    );
+                    const icon =
+                      run.status === "completed"
+                        ? CheckCircle2
+                        : run.status === "failed"
+                          ? AlertTriangle
+                          : run.blockingReason?.kind === "response"
+                            ? MessageSquare
+                            : Loader2;
                     const Icon = icon;
 
                     return (
@@ -402,30 +496,36 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                         onClick={() => void selectRun(run.id)}
                         className={
                           isSelected
-                            ? 'w-full rounded-xl border border-[#A5B574]/40 bg-card/80 p-4 text-left shadow-sm transition-all duration-200'
-                            : 'w-full rounded-xl border border-border bg-muted/10 p-4 text-left transition-all duration-200 hover:bg-muted/20'
+                            ? "w-full rounded-xl border border-[#A5B574]/40 bg-card/80 p-4 text-left shadow-sm transition-all duration-200"
+                            : "w-full rounded-xl border border-border bg-muted/10 p-4 text-left transition-all duration-200 hover:bg-muted/20"
                         }
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm text-foreground truncate">{run.title}</p>
-                            <p className="mt-1 text-xs text-muted-foreground truncate">{run.description}</p>
+                            <p className="text-sm text-foreground truncate">
+                              {run.title}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground truncate">
+                              {run.description}
+                            </p>
                           </div>
                           <div className="flex-shrink-0 flex flex-col items-end gap-2">
-                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${meta.chip}`}>
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] ${meta.chip}`}
+                            >
                               {meta.label}
                             </span>
                             <Icon
                               className={
-                                run.blockingReason?.kind === 'response'
-                                  ? 'h-4 w-4 text-[#2C5E68]'
-                                  : run.status === 'running'
-                                    ? 'h-4 w-4 text-[#A5B574] animate-spin'
-                                    : run.status === 'waiting_approval'
-                                      ? 'h-4 w-4 text-[#C87137]'
-                                      : run.status === 'failed'
-                                        ? 'h-4 w-4 text-destructive'
-                                        : 'h-4 w-4 text-[#4A7C59]'
+                                run.blockingReason?.kind === "response"
+                                  ? "h-4 w-4 text-[#2C5E68]"
+                                  : run.status === "running"
+                                    ? "h-4 w-4 text-[#A5B574] animate-spin"
+                                    : run.status === "waiting_approval"
+                                      ? "h-4 w-4 text-[#C87137]"
+                                      : run.status === "failed"
+                                        ? "h-4 w-4 text-destructive"
+                                        : "h-4 w-4 text-[#4A7C59]"
                               }
                             />
                           </div>
@@ -434,12 +534,16 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                         <div className="mt-3">
                           <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                             <span>{timeAgo(run.updatedAt)}</span>
-                            <span className="tabular-nums">{Math.min(100, Math.round(run.progress ?? 0))}%</span>
+                            <span className="tabular-nums">
+                              {Math.min(100, Math.round(run.progress ?? 0))}%
+                            </span>
                           </div>
                           <div className="mt-2 w-full h-2 bg-muted rounded-full overflow-hidden">
                             <div
                               className="h-full bg-gradient-to-r from-[#A5B574] to-[#C87137] rounded-full transition-all duration-300 ease-in-out"
-                              style={{ width: `${Math.min(100, Math.round(run.progress ?? 0))}%` }}
+                              style={{
+                                width: `${Math.min(100, Math.round(run.progress ?? 0))}%`,
+                              }}
                             />
                           </div>
                         </div>
@@ -451,7 +555,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       <div className="flex items-center justify-between rounded-xl border border-border bg-card/40 px-3 py-2">
                         <button
                           type="button"
-                          onClick={() => setRunsPage((page) => Math.max(1, page - 1))}
+                          onClick={() =>
+                            setRunsPage((page) => Math.max(1, page - 1))
+                          }
                           disabled={runsPage <= 1}
                           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -463,7 +569,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                         </span>
                         <button
                           type="button"
-                          onClick={() => setRunsPage((page) => Math.min(totalRunPages, page + 1))}
+                          onClick={() =>
+                            setRunsPage((page) =>
+                              Math.min(totalRunPages, page + 1),
+                            )
+                          }
                           disabled={runsPage >= totalRunPages}
                           className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
                         >
@@ -481,7 +591,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
           <div className="flex-1">
             <div className="mb-3">
               <h2 className="text-xl text-foreground mb-1">Task Details</h2>
-              <p className="text-sm text-muted-foreground">Timeline and approvals for the selected run</p>
+              <p className="text-sm text-muted-foreground">
+                Timeline and approvals for the selected run
+              </p>
             </div>
 
             {error && (
@@ -499,13 +611,20 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-base text-foreground truncate">{selectedRun.title}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{selectedRun.description}</p>
+                      <h3 className="text-base text-foreground truncate">
+                        {selectedRun.title}
+                      </h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {selectedRun.description}
+                      </p>
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] ${statusMeta(selectedRun.status, selectedBlockingKind).chip}`}
                     >
-                      {statusMeta(selectedRun.status, selectedBlockingKind).label}
+                      {
+                        statusMeta(selectedRun.status, selectedBlockingKind)
+                          .label
+                      }
                     </span>
                   </div>
 
@@ -523,63 +642,69 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                    <span className="rounded-full border border-border px-3 py-1">Updated {timeAgo(selectedRun.updatedAt)}</span>
-                    <span className="rounded-full border border-border px-3 py-1">Started {timeAgo(selectedRun.startedAt)}</span>
+                    <span className="rounded-full border border-border px-3 py-1">
+                      Updated {timeAgo(selectedRun.updatedAt)}
+                    </span>
+                    <span className="rounded-full border border-border px-3 py-1">
+                      Started {timeAgo(selectedRun.startedAt)}
+                    </span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-foreground">Controls</h3>
-                    <div className="flex items-center gap-2">
-                      {canRespond && (
-                        <button
-                          type="button"
-                          onClick={() => setShowReplyModal(true)}
-                          className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
-                        >
-                          Respond
-                        </button>
-                      )}
-                      {canMarkComplete && (
-                        <button
-                          type="button"
-                          onClick={handleMarkComplete}
-                          className="inline-flex items-center gap-2 rounded-lg border border-[#4A7C59]/30 bg-[#4A7C59]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#4A7C59]/20"
-                        >
-                          Mark complete
-                        </button>
-                      )}
-                      {canCancel ? (
-                        <button
-                          type="button"
-                          onClick={handleCancelRun}
-                          className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive transition-all duration-300 hover:bg-destructive/10"
-                        >
-                          Cancel task
-                        </button>
-                      ) : canRemove ? (
-                        <button
-                          type="button"
-                          onClick={handleRemoveRun}
-                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
-                        >
-                          Remove task
-                        </button>
-                      ) : null}
-
-                      {DEV && selectedRun?.status === 'waiting_approval' && (
-                        <button
-                          type="button"
-                          onClick={handleDevForceRunning}
-                          className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/30"
-                          title="Development fallback if task state gets stuck"
-                        >
-                          Force running (dev)
-                        </button>
-                      )}
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Controls
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    {canRespond && (
                       <button
                         type="button"
-                        onClick={handleOpenChat}
+                        onClick={() => setShowReplyModal(true)}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#A5B574]/20"
+                      >
+                        Respond
+                      </button>
+                    )}
+                    {canMarkComplete && (
+                      <button
+                        type="button"
+                        onClick={handleMarkComplete}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#4A7C59]/30 bg-[#4A7C59]/10 px-3 py-2 text-xs text-[#4A7C59] transition-all duration-300 hover:bg-[#4A7C59]/20"
+                      >
+                        Mark complete
+                      </button>
+                    )}
+                    {canCancel ? (
+                      <button
+                        type="button"
+                        onClick={handleCancelRun}
+                        className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive transition-all duration-300 hover:bg-destructive/10"
+                      >
+                        Cancel task
+                      </button>
+                    ) : canRemove ? (
+                      <button
+                        type="button"
+                        onClick={handleRemoveRun}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50"
+                      >
+                        Remove task
+                      </button>
+                    ) : null}
+
+                    {DEV && selectedRun?.status === "waiting_approval" && (
+                      <button
+                        type="button"
+                        onClick={handleDevForceRunning}
+                        className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/10 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/30"
+                        title="Development fallback if task state gets stuck"
+                      >
+                        Force running (dev)
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleOpenChat}
                       disabled={!selectedRun}
                       className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
@@ -592,7 +717,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       disabled={isRefreshing}
                       className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground transition-all duration-300 hover:bg-muted/50 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      <RefreshCw className={isRefreshing ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      <RefreshCw
+                        className={
+                          isRefreshing ? "h-4 w-4 animate-spin" : "h-4 w-4"
+                        }
+                      />
                       Refresh all
                     </button>
                   </div>
@@ -602,7 +731,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                   <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
-                        <h3 className="text-sm font-semibold text-foreground">Outputs</h3>
+                        <h3 className="text-sm font-semibold text-foreground">
+                          Outputs
+                        </h3>
                         <p className="mt-1 text-xs text-muted-foreground truncate">
                           Workflow run {selectedWorkflow.workflowRunId}
                         </p>
@@ -616,12 +747,23 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     )}
 
                     {(() => {
-                      const hasSummary = Boolean(workflowArtifacts?.summary?.payloadText);
-                      const hasFinal = Boolean(workflowArtifacts?.finalOutput?.payloadText);
-                      const hasCleanContent = Boolean(workflowArtifacts?.cleanContent);
-                      const hasVisibleOutput = hasSummary || hasFinal || hasCleanContent;
+                      const hasSummary = Boolean(
+                        workflowArtifacts?.summary?.payloadText,
+                      );
+                      const hasFinal = Boolean(
+                        workflowArtifacts?.finalOutput?.payloadText,
+                      );
+                      const hasCleanContent = Boolean(
+                        workflowArtifacts?.cleanContent,
+                      );
+                      const hasVisibleOutput =
+                        hasSummary || hasFinal || hasCleanContent;
 
-                      if (isLoadingArtifacts && !hasVisibleOutput && !artifactsError) {
+                      if (
+                        isLoadingArtifacts &&
+                        !hasVisibleOutput &&
+                        !artifactsError
+                      ) {
                         return (
                           <div className="mt-4 rounded-xl border border-border bg-muted/15 p-4 text-sm text-muted-foreground">
                             Loading outputs...
@@ -638,14 +780,21 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       }
 
                       return (
-                        <div className="mt-4 space-y-4" aria-busy={isLoadingArtifacts ? 'true' : 'false'}>
+                        <div
+                          className="mt-4 space-y-4"
+                          aria-busy={isLoadingArtifacts ? "true" : "false"}
+                        >
                           {workflowArtifacts?.summary?.payloadText && (
-                            <p className="text-sm text-muted-foreground">{getCleanContent(workflowArtifacts.summary.payloadText)}</p>
+                            <AssistantMarkdown
+                              content={getCleanContent(
+                                workflowArtifacts.summary.payloadText,
+                              )}
+                            />
                           )}
                           {workflowArtifacts?.cleanContent && (
-                            <pre className="rounded-xl border border-border bg-muted/20 p-4 text-sm text-foreground whitespace-pre-wrap break-words overflow-x-auto">
-                              {workflowArtifacts.cleanContent}
-                            </pre>
+                            <AssistantMarkdown
+                              content={workflowArtifacts.cleanContent}
+                            />
                           )}
                         </div>
                       );
@@ -659,25 +808,33 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                   collapsed={false}
                   maxItems={12}
                   maxItemsExpanded={200}
-                  emptyMessage={isLoadingTimeline ? 'Loading activity...' : 'No activity yet'}
+                  emptyMessage={
+                    isLoadingTimeline
+                      ? "Loading activity..."
+                      : "No activity yet"
+                  }
                   onApprove={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
                     if (!approvalsAvailable) {
                       return Promise.reject(
-                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                        new Error(
+                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
+                        ),
                       );
                     }
                     return window.flowstate.approvals
-                      .reply(requestId, 'once')
+                      .reply(requestId, "once")
                       .then((result) => {
                         if (!result.success) {
-                          throw new Error(result.error ?? 'Failed to approve request');
+                          throw new Error(
+                            result.error ?? "Failed to approve request",
+                          );
                         }
                         return reloadSelectedTimeline();
                       })
                       .catch((err) => {
-                        console.error('Failed to approve request', err);
+                        console.error("Failed to approve request", err);
                         throw err;
                       });
                   }}
@@ -686,19 +843,23 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     if (!requestId) return;
                     if (!approvalsAvailable) {
                       return Promise.reject(
-                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                        new Error(
+                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
+                        ),
                       );
                     }
                     return window.flowstate.approvals
-                      .reply(requestId, 'always')
+                      .reply(requestId, "always")
                       .then((result) => {
                         if (!result.success) {
-                          throw new Error(result.error ?? 'Failed to always-approve request');
+                          throw new Error(
+                            result.error ?? "Failed to always-approve request",
+                          );
                         }
                         return reloadSelectedTimeline();
                       })
                       .catch((err) => {
-                        console.error('Failed to always-approve request', err);
+                        console.error("Failed to always-approve request", err);
                         throw err;
                       });
                   }}
@@ -707,19 +868,23 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     if (!requestId) return;
                     if (!approvalsAvailable) {
                       return Promise.reject(
-                        new Error('Approvals bridge unavailable — restart FlowState to reload the preload API.')
+                        new Error(
+                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
+                        ),
                       );
                     }
                     return window.flowstate.approvals
-                      .reply(requestId, 'deny')
+                      .reply(requestId, "deny")
                       .then((result) => {
                         if (!result.success) {
-                          throw new Error(result.error ?? 'Failed to deny request');
+                          throw new Error(
+                            result.error ?? "Failed to deny request",
+                          );
                         }
                         return reloadSelectedTimeline();
                       })
                       .catch((err) => {
-                        console.error('Failed to deny request', err);
+                        console.error("Failed to deny request", err);
                         throw err;
                       });
                   }}
@@ -727,13 +892,15 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
                 {pendingApprovalCount > 0 && (
                   <p className="mt-2 text-[11px] text-muted-foreground">
-                    {pendingApprovalCount} pending {pendingApprovalCount === 1 ? 'approval' : 'approvals'}.
+                    {pendingApprovalCount} pending{" "}
+                    {pendingApprovalCount === 1 ? "approval" : "approvals"}.
                   </p>
                 )}
 
                 {!approvalsAvailable && (
                   <p className="mt-2 text-[11px] text-destructive">
-                    Approvals bridge unavailable — restart FlowState to reload the preload API.
+                    Approvals bridge unavailable — restart FlowState to reload
+                    the preload API.
                   </p>
                 )}
               </div>
@@ -747,7 +914,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
           <div className="w-full max-w-lg rounded-2xl border border-border bg-card/90 p-6 shadow-xl backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold text-foreground">Respond to workflow</h3>
+                <h3 className="text-lg font-semibold text-foreground">
+                  Respond to workflow
+                </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Your response will continue the workflow and update this task.
                 </p>
@@ -769,7 +938,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
             )}
 
             <div className="mt-4">
-              <label className="text-xs font-semibold text-muted-foreground">Your response</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Your response
+              </label>
               <textarea
                 value={replyText}
                 onChange={(event) => setReplyText(event.target.value)}
@@ -799,7 +970,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 disabled={isSendingReply || !replyText.trim()}
                 className="rounded-lg border border-[#A5B574]/40 bg-[#A5B574]/15 px-4 py-2 text-xs text-[#4A7C59] transition hover:bg-[#A5B574]/25 disabled:opacity-60"
               >
-                {isSendingReply ? 'Sending...' : 'Send response'}
+                {isSendingReply ? "Sending..." : "Send response"}
               </button>
             </div>
           </div>
