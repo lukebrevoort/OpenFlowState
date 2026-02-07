@@ -827,18 +827,6 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
         </div>
       </div>
 
-      {handoffTask && (
-        <div className="px-6 pb-4">
-          <div className="w-full max-w-4xl mx-auto">
-            <TaskHandoffCard
-              title={handoffTask.title}
-              description={handoffTask.description}
-              onViewTask={onViewTask}
-            />
-          </div>
-        </div>
-      )}
-
       <div className="flex-shrink-0 px-6 pb-6">
         <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
@@ -866,6 +854,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           <p className="text-xs text-muted-foreground mt-2 text-center">
             Press Enter to send, Shift+Enter for new line
           </p>
+          {handoffTask && (
+            <div className="mt-2">
+              <TaskHandoffCard
+                title={handoffTask.title}
+                description={handoffTask.description}
+                onViewTask={onViewTask}
+                compact
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

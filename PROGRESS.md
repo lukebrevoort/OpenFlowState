@@ -1336,3 +1336,62 @@ Renderer (useOpenCode.ts):
 
 **BLOCKERS**
 - None
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Task Promoted UI Space Reduction)
+**Timestamp**: Feb 6, 2026 23:59
+
+**TASKS COMPLETED**
+- ✅ Removed the large Task promoted handoff card from the chat body area to preserve message reading space.
+- ✅ Repositioned Task promoted visibility to a compact notice below the message composer helper text.
+- ✅ Tightened compact notice styling into a single-line status with a clear `View task` action.
+- ✅ Kept the handoff state visible and actionable without interrupting the assistant response flow.
+- ✅ Verified desktop renderer types via `pnpm --filter @flowstate/desktop typecheck`.
+
+**IN PROGRESS**
+- [ ] Manual desktop validation to confirm the compact notice placement and readability on real conversation history.
+
+**BLOCKERS**
+- None
+
+---
+
+## Tasks Completed (Feb 7, 2026 - Tasks Sidebar Pagination + Retention Window)
+**Timestamp**: Feb 7, 2026 00:12
+
+**TASKS COMPLETED**
+- ✅ Added sidebar pagination in `TasksMode` with a fixed page size of 5 task runs.
+- ✅ Added `Prev` / `Next` controls and page indicator (`Page X of Y`) beneath task cards.
+- ✅ Added retention filtering so only runs updated within the last 10 days are shown in sidebar pagination.
+- ✅ Ensured selection stays valid when filtered data changes by auto-selecting the newest visible run.
+- ✅ Verified types with `pnpm --filter @flowstate/desktop typecheck`.
+
+**IN PROGRESS**
+- [ ] Manual UI validation for pagination controls and 10-day filtering behavior in desktop app.
+
+**BLOCKERS**
+- None
+
+---
+
+## Tasks Completed (Feb 7, 2026 - Workflow Title Editing)
+**Timestamp**: Feb 7, 2026 20:24
+
+**TASKS COMPLETED**
+- ✅ Added support for editable workflow titles via `title` in workflow frontmatter (`SKILL.md`).
+- ✅ Kept workflow identity stable by treating the folder name (`workflows/<id>/`) as canonical workflow ID.
+- ✅ Updated workflow save validation message to clarify that `name` is immutable and `title` should be used for rename.
+- ✅ Updated workflow generation to include frontmatter `title` by default.
+- ✅ Added regression tests in `packages/desktop/src/main/workflows-runner.test.ts`:
+  - save supports title changes while keeping `name` fixed
+  - listing uses folder ID even if frontmatter `name` drifts
+- ✅ Verified with:
+  - `pnpm --filter @flowstate/desktop test -- workflows-runner.test.ts`
+  - `pnpm --filter @flowstate/desktop typecheck`
+
+**IN PROGRESS**
+- [ ] Manual desktop app validation of editing workflow title in the Workflows drawer.
+
+**BLOCKERS**
+- None

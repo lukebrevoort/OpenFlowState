@@ -136,7 +136,7 @@ const redactSecrets = (input: string): string => {
   return redacted;
 };
 
-const parseSkillMarkdown = (raw: string): { description?: string; body: string } => {
+const parseSkillMarkdown = (raw: string): { title?: string; description?: string; body: string } => {
   const trimmed = raw.replace(/\r\n/g, '\n').trim();
   if (!trimmed.startsWith('---')) {
     return { body: trimmed };
@@ -160,6 +160,7 @@ const parseSkillMarkdown = (raw: string): { description?: string; body: string }
   }
 
   return {
+    title: ensureString(record.title) ?? undefined,
     description: ensureString(record.description) ?? undefined,
     body,
   };
@@ -200,8 +201,9 @@ const buildGeneratorPrompt = (intent: string, workflowId: string): string => {
     '',
     'Strict format requirements:',
     '- The first line MUST be "---".',
-    '- YAML frontmatter MUST contain ONLY these keys: name, description.',
+    '- YAML frontmatter MUST contain ONLY these keys: name, title, description.',
     `- name MUST be exactly: ${workflowId}`,
+    '- title MUST be a short, human-friendly workflow title.',
     '- description MUST be a single sentence (<= 140 chars) describing what the workflow does.',
     '- After YAML, include a markdown body with these sections:',
     '  - A title heading ("# ...")',
@@ -248,6 +250,7 @@ class WorkflowsGenerator {
     }
 
     const parsed = parseSkillMarkdown(generated);
+    const title = parsed.title ?? humanizeId(workflowId);
     const description =
       parsed.description ??
       ensureString(intentRedacted.replace(/\s+/g, ' ').trim().slice(0, 140)) ??
@@ -256,6 +259,7 @@ class WorkflowsGenerator {
     const normalized = [
       '---',
       `name: ${workflowId}`,
+      `title: ${escapeYamlString(title)}`,
       `description: ${escapeYamlString(description)}`,
       '---',
       '',
@@ -277,7 +281,7 @@ class WorkflowsGenerator {
 
     const definition: WorkflowDefinition = {
       id: workflowId,
-      title: humanizeId(workflowId),
+      title,
       description,
     };
 

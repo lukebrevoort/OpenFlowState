@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X, Check } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, AlertTriangle, MessageSquare, X, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { TimelineEvent } from '../types/electron';
 import { ActivityTimeline } from '../components/ActivityTimeline';
@@ -11,6 +11,9 @@ const DEV = Boolean(
     (globalThis as unknown as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV ===
       'development',
 );
+const TASKS_PER_PAGE = 5;
+const TASK_RETENTION_DAYS = 10;
+const TASK_RETENTION_MS = TASK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 type ApprovalPayloadInline = {
   requestId?: string;
@@ -61,6 +64,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [runsPage, setRunsPage] = useState(1);
 
   const isRefreshing = isLoadingRuns || isLoadingTimeline || isLoadingArtifacts;
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -105,10 +109,38 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     });
   }, [runs]);
 
-  const selectedRun = useMemo(
-    () => sortedRuns.find((run) => run.id === selectedRunId) ?? null,
-    [selectedRunId, sortedRuns]
+  const recentRuns = useMemo(() => {
+    const cutoff = Date.now() - TASK_RETENTION_MS;
+    return sortedRuns.filter((run) => {
+      const runTimestamp = run.updatedAt ?? run.startedAt ?? 0;
+      return runTimestamp >= cutoff;
+    });
+  }, [sortedRuns]);
+
+  const totalRunPages = useMemo(
+    () => Math.max(1, Math.ceil(recentRuns.length / TASKS_PER_PAGE)),
+    [recentRuns.length]
   );
+
+  const paginatedRuns = useMemo(() => {
+    const start = (runsPage - 1) * TASKS_PER_PAGE;
+    return recentRuns.slice(start, start + TASKS_PER_PAGE);
+  }, [recentRuns, runsPage]);
+
+  const selectedRun = useMemo(
+    () => recentRuns.find((run) => run.id === selectedRunId) ?? null,
+    [selectedRunId, recentRuns]
+  );
+
+  useEffect(() => {
+    setRunsPage((currentPage) => Math.min(currentPage, totalRunPages));
+  }, [totalRunPages]);
+
+  useEffect(() => {
+    if (recentRuns.length === 0) return;
+    if (selectedRunId && recentRuns.some((run) => run.id === selectedRunId)) return;
+    void selectRun(recentRuns[0]!.id);
+  }, [recentRuns, selectedRunId, selectRun]);
 
   const workflowArtifacts = useMemo(() => {
     if (!selectedWorkflow || !selectedArtifacts) return null;
@@ -338,18 +370,20 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h2 className="text-xl text-foreground mb-1">Tasks</h2>
-                <p className="text-sm text-muted-foreground">Runs saved from previous sessions</p>
+                <p className="text-sm text-muted-foreground">
+                  Runs from the last {TASK_RETENTION_DAYS} days
+                </p>
               </div>
             </div>
 
             <div className="bg-card/60 backdrop-blur-xl border border-border rounded-2xl p-3 shadow-sm">
-              {sortedRuns.length === 0 && !isLoadingRuns ? (
+              {recentRuns.length === 0 && !isLoadingRuns ? (
                 <div className="rounded-xl border border-border bg-card/40 p-5 text-sm text-muted-foreground">
-                  No tasks yet.
+                  No recent tasks.
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {sortedRuns.map((run) => {
+                  {paginatedRuns.map((run) => {
                     const isSelected = run.id === selectedRunId;
                     const meta = statusMeta(run.status, run.blockingReason?.kind ?? null);
                     const icon = run.status === 'completed'
@@ -412,6 +446,33 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       </button>
                     );
                   })}
+                  {recentRuns.length > 0 && (
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between rounded-xl border border-border bg-card/40 px-3 py-2">
+                        <button
+                          type="button"
+                          onClick={() => setRunsPage((page) => Math.max(1, page - 1))}
+                          disabled={runsPage <= 1}
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <ChevronLeft className="h-3 w-3" />
+                          Prev
+                        </button>
+                        <span className="text-[11px] text-muted-foreground tabular-nums">
+                          Page {runsPage} of {totalRunPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setRunsPage((page) => Math.min(totalRunPages, page + 1))}
+                          disabled={runsPage >= totalRunPages}
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Next
+                          <ChevronRight className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

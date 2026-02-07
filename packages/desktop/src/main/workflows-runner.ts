@@ -68,7 +68,9 @@ const safeJsonStringify = (input: unknown): string | undefined => {
   }
 };
 
-const parseFrontmatter = (raw: string): { name?: string; description?: string; template?: string } | null => {
+const parseFrontmatter = (
+  raw: string
+): { name?: string; title?: string; description?: string; template?: string } | null => {
   const trimmed = raw.trimStart();
   if (!trimmed.startsWith('---')) {
     return null;
@@ -87,16 +89,18 @@ const parseFrontmatter = (raw: string): { name?: string; description?: string; t
     const idx = line.indexOf(':');
     if (idx === -1) continue;
     const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
+    const value = line.slice(idx + 1).trim().replace(/^"|"$/g, '');
     if (key.length === 0) continue;
     record[key] = value;
   }
 
   const name = ensureString(record.name);
+  const title = ensureString(record.title);
   const description = ensureString(record.description);
 
   return {
     name: name ?? undefined,
+    title: title ?? undefined,
     description: description ?? undefined,
     template,
   };
@@ -182,7 +186,11 @@ class WorkflowsRunner {
       return { ok: false, code: 'INVALID_REQUEST', message: 'SKILL.md must include frontmatter with name.' };
     }
     if (parsed.name !== id) {
-      return { ok: false, code: 'INVALID_REQUEST', message: `Frontmatter name must remain "${id}".` };
+      return {
+        ok: false,
+        code: 'INVALID_REQUEST',
+        message: `Frontmatter name must remain "${id}". Use frontmatter title to rename the workflow.`,
+      };
     }
 
     const resolved = await this.resolveWorkflowSkillPath(id);
@@ -209,7 +217,7 @@ class WorkflowsRunner {
     const existing = workflowsStore.getDefinition(id);
     const definition: WorkflowDefinition = {
       id,
-      title: humanizeId(id),
+      title: parsed.title ?? existing?.title ?? humanizeId(id),
       description: parsed.description ?? existing?.description,
     };
     workflowsStore.upsertTemplate({ id, template: parsed.template ?? '' });
@@ -275,18 +283,14 @@ class WorkflowsRunner {
       try {
         const raw = await fs.readFile(skillPath, 'utf8');
         const parsed = parseFrontmatter(raw);
-        if (!parsed?.name) {
-          continue;
-        }
-
         const def: WorkflowDefinition = {
-          id: parsed.name,
-          title: humanizeId(parsed.name),
-          description: parsed.description,
+          id: entry.name,
+          title: parsed?.title ?? humanizeId(entry.name),
+          description: parsed?.description,
         };
         definitions.push(def);
-        if (parsed.template && parsed.template.length) {
-          workflowsStore.upsertTemplate({ id: parsed.name, template: parsed.template });
+        if (parsed?.template && parsed.template.length) {
+          workflowsStore.upsertTemplate({ id: entry.name, template: parsed.template });
         }
       } catch {
         continue;
