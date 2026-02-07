@@ -55,12 +55,13 @@ interface ActivityTimelineProps {
   variant?: 'default' | 'compact';
   showTimestamp?: boolean;
   animateIcons?: boolean;
-  onApprove?: (event: TimelineEvent) => void;
-  onAlwaysApprove?: (event: TimelineEvent) => void;
-  onDeny?: (event: TimelineEvent) => void;
+  onApprove?: (event: TimelineEvent) => void | Promise<void>;
+  onAlwaysApprove?: (event: TimelineEvent) => void | Promise<void>;
+  onDeny?: (event: TimelineEvent) => void | Promise<void>;
 }
 
 type ApprovalInlinePayload = {
+  requestId?: string;
   title?: string;
   summary?: string;
   body?: string;
@@ -149,6 +150,21 @@ export function ActivityTimeline({
 
   const latest = isSingleItemCompact ? latestForCompact : visible?.[0];
 
+  const approvalResponseAtByRequestId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const event of events) {
+      if (event.kind !== 'approval_response') continue;
+      const payload = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
+      const requestId = typeof payload?.requestId === 'string' ? payload.requestId.trim() : '';
+      if (!requestId) continue;
+      const current = map.get(requestId);
+      if (!current || event.timestamp > current) {
+        map.set(requestId, event.timestamp);
+      }
+    }
+    return map;
+  }, [events]);
+
   const logFallback = (action: string, event: TimelineEvent) => {
     // eslint-disable-next-line no-console
     console.log(`[timeline] ${action}`, event);
@@ -206,6 +222,11 @@ export function ActivityTimeline({
           const shouldSpin = animateIcons && event.kind === 'phase';
           const inline = isApprovalInlinePayload(event.payloadInline) ? event.payloadInline : undefined;
           const isApprovalRequest = event.kind === 'approval_request';
+          const requestId = isApprovalRequest
+            ? (typeof inline?.requestId === 'string' ? inline.requestId.trim() : '')
+            : '';
+          const resolvedAt = requestId ? approvalResponseAtByRequestId.get(requestId) : undefined;
+          const isResolvedApproval = Boolean(isApprovalRequest && resolvedAt && resolvedAt >= event.timestamp);
 
           return (
             <div key={event.id} className="flex items-start gap-3">
@@ -241,7 +262,7 @@ export function ActivityTimeline({
                   </span>
                 )}
 
-                {isApprovalRequest && (
+                {isApprovalRequest && !isResolvedApproval && (
                   <div className="mt-3">
                     <ApprovalCard
                       title={inline?.title ?? event.title}
@@ -250,11 +271,17 @@ export function ActivityTimeline({
                       primaryActionLabel={inline?.approveLabel}
                       alwaysApproveLabel={inline?.alwaysApproveLabel}
                       denyLabel={inline?.denyLabel}
-                      onApprove={() => handleApprove(event)}
-                      onAlwaysApprove={() => handleAlwaysApprove(event)}
-                      onDeny={() => handleDeny(event)}
+                      onApprove={isResolvedApproval ? undefined : () => handleApprove(event)}
+                      onAlwaysApprove={isResolvedApproval ? undefined : () => handleAlwaysApprove(event)}
+                      onDeny={isResolvedApproval ? undefined : () => handleDeny(event)}
                     />
                   </div>
+                )}
+
+                {isApprovalRequest && isResolvedApproval && (
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    Request resolved
+                  </p>
                 )}
               </div>
             </div>

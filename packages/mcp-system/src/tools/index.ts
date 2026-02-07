@@ -10,13 +10,19 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import * as macos from '../macos/index.js';
+import { userProfile } from '@flowstate/core';
 
-// Tool definitions with autonomy levels
+// Tool definitions with MCP annotations for better LLM understanding
 const SYSTEM_TOOLS = [
   {
     name: 'system_notify',
     description: 'Send a desktop notification',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -39,7 +45,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_app',
     description: 'Open an application',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -54,7 +65,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_url',
     description: 'Open a URL in the default browser',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -69,7 +85,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_open_file',
     description: 'Open a file in its default application',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -84,7 +105,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_clipboard_read',
     description: 'Read the current clipboard contents',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -93,7 +119,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_window_focus',
     description: 'Focus a specific application window',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -108,7 +139,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_window_arrange',
     description: 'Arrange windows (requires approval for complex arrangements)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -127,9 +163,62 @@ const SYSTEM_TOOLS = [
     },
   },
   {
+    name: 'system_user_profile_get',
+    description: 'Read the FlowState user profile preferences',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'system_user_profile_update',
+    description: 'Update FlowState user profile preferences',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        profile: {
+          type: 'object',
+          description: 'Partial user profile fields to update',
+        },
+      },
+      required: ['profile'],
+    },
+  },
+  {
+    name: 'system_user_profile_path',
+    description: 'Get the path to the FlowState user profile file',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
     name: 'system_shell',
     description: 'Execute a shell command',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -148,7 +237,12 @@ const SYSTEM_TOOLS = [
   {
     name: 'system_dnd',
     description: 'Toggle Do Not Disturb mode',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -165,7 +259,7 @@ const SYSTEM_TOOLS = [
 export function registerTools(server: Server): void {
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: SYSTEM_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: SYSTEM_TOOLS,
   }));
 
   // Handle tool calls
@@ -256,6 +350,46 @@ export function registerTools(server: Server): void {
             },
           ],
         };
+
+      case 'system_user_profile_get': {
+        const profile = await userProfile.getProfile();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(profile, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'system_user_profile_update': {
+        const updates = args?.profile as Record<string, unknown> | undefined;
+        if (!updates || typeof updates !== 'object') {
+          throw new Error('system_user_profile_update requires a profile object');
+        }
+        const updated = await userProfile.updateProfile(updates);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(updated, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'system_user_profile_path': {
+        const profilePath = userProfile.getProfilePath();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: profilePath,
+            },
+          ],
+        };
+      }
 
       case 'system_shell':
         const output = await macos.executeShell(

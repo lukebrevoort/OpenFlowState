@@ -12,12 +12,17 @@ import {
 import { notifications } from '@flowstate/core';
 import * as notionApi from '../api/index.js';
 
-// Tool definitions with autonomy levels
+// Tool definitions with MCP annotations for better LLM understanding
 const NOTION_TOOLS = [
   {
     name: 'notion_search',
     description: 'Search Notion pages and databases by query',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -37,7 +42,12 @@ const NOTION_TOOLS = [
   {
     name: 'notion_read_page',
     description: 'Read the content of a Notion page',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -52,7 +62,12 @@ const NOTION_TOOLS = [
   {
     name: 'notion_read_database',
     description: 'Query entries from a Notion database',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -79,7 +94,12 @@ const NOTION_TOOLS = [
   {
     name: 'notion_create_page',
     description: 'Create a new Notion page',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,7 +126,12 @@ const NOTION_TOOLS = [
   {
     name: 'notion_update_page',
     description: 'Update an existing Notion page',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -129,7 +154,12 @@ const NOTION_TOOLS = [
   {
     name: 'notion_create_database_entry',
     description: 'Add a new entry to a Notion database',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -150,7 +180,7 @@ const NOTION_TOOLS = [
 export function registerTools(server: Server): void {
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: NOTION_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: NOTION_TOOLS,
   }));
 
   // Handle tool calls

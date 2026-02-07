@@ -9,8 +9,21 @@
  */
 
 import { Client } from '@notionhq/client';
+import { LruCache } from '@flowstate/core/cache';
 
 let notionClient: Client | null = null;
+const pageCache = new LruCache<any>({ maxEntries: 200, ttlMs: 2 * 60 * 1000 });
+const pageContentCache = new LruCache<any>({ maxEntries: 200, ttlMs: 2 * 60 * 1000 });
+const searchCache = new LruCache<any>({ maxEntries: 100, ttlMs: 60 * 1000 });
+const databaseQueryCache = new LruCache<any>({ maxEntries: 100, ttlMs: 60 * 1000 });
+
+const buildCacheKey = (prefix: string, parts: unknown[]): string => {
+  try {
+    return `${prefix}:${JSON.stringify(parts)}`;
+  } catch {
+    return `${prefix}:${String(parts)}`;
+  }
+};
 
 /**
  * Get access token from environment variables or @flowstate/core
@@ -54,34 +67,57 @@ export async function getNotionClient(): Promise<Client> {
 
 export async function searchPages(query?: string, filter?: 'page' | 'database') {
   const client = await getNotionClient();
-  
+
+  const cacheKey = buildCacheKey('search', [query ?? '', filter ?? '']);
+  const cached = searchCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const response = await client.search({
     query: query && query.trim() !== '' ? query : undefined,
     filter: filter ? { property: 'object', value: filter } : undefined,
   });
 
+  searchCache.set(cacheKey, response.results);
   return response.results;
 }
 
 export async function getPage(pageId: string) {
   const client = await getNotionClient();
-  return client.pages.retrieve({ page_id: pageId });
+  const cached = pageCache.get(pageId);
+  if (cached) return cached;
+
+  const page = await client.pages.retrieve({ page_id: pageId });
+  pageCache.set(pageId, page);
+  return page;
 }
 
 export async function getPageContent(pageId: string) {
   const client = await getNotionClient();
+  const cached = pageContentCache.get(pageId);
+  if (cached) return cached;
+
   const blocks = await client.blocks.children.list({ block_id: pageId });
+  pageContentCache.set(pageId, blocks.results);
   return blocks.results;
 }
 
 export async function queryDatabase(databaseId: string, filter?: object, sorts?: object[]) {
   const client = await getNotionClient();
-  
-  return client.databases.query({
+
+  const cacheKey = buildCacheKey('db', [databaseId, filter ?? null, sorts ?? null]);
+  const cached = databaseQueryCache.get(cacheKey);
+  if (cached) return cached;
+
+  const response = await client.databases.query({
     database_id: databaseId,
     filter: filter as any,
     sorts: sorts as any,
   });
+
+  databaseQueryCache.set(cacheKey, response);
+  return response;
 }
 
 export async function createPage(parentId: string, title: string, properties?: object) {
@@ -93,7 +129,7 @@ export async function createPage(parentId: string, title: string, properties?: o
     ? { database_id: parentId }
     : { page_id: parentId };
 
-  return client.pages.create({
+  const created = await client.pages.create({
     parent,
     properties: {
       title: {
@@ -102,13 +138,25 @@ export async function createPage(parentId: string, title: string, properties?: o
       ...properties,
     },
   });
+
+  searchCache.clear();
+  databaseQueryCache.clear();
+
+  return created;
 }
 
 export async function updatePage(pageId: string, properties: object) {
   const client = await getNotionClient();
-  
-  return client.pages.update({
+
+  const updated = await client.pages.update({
     page_id: pageId,
     properties: properties as any,
   });
+
+  pageCache.delete(pageId);
+  pageContentCache.delete(pageId);
+  searchCache.clear();
+  databaseQueryCache.clear();
+
+  return updated;
 }

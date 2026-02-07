@@ -10,3 +10,5 @@ export * from './daemon/index.js';
 export * from './memory/index.js';
 export * from './auth/index.js';
 export * from './notifications/index.js';
+export * from './cache/index.js';
+export * from './user-profile/index.js';

@@ -9,18 +9,24 @@
  * 5. Configuring MCP servers with auth tokens
  */
 
-import { app } from 'electron';
+import { app, BrowserWindow, Notification } from 'electron';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
+import { userProfile, type UserProfile } from '@flowstate/core';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
 import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { approvalsAuditStore } from './approvals-audit-store.js';
+import { deriveApprovalBlockingPatch, isApprovalEventType } from './approval-blocking.js';
 import { taskStore } from './task-store.js';
+import { workflowRunStore } from './workflow-run-store.js';
+import { clampText, parseResponseHeader, requiresUserInput } from './workflow-response-utils.js';
 import type { TaskRunRecord } from './task-types.js';
 import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
 
@@ -168,10 +174,152 @@ class ProcessManager {
   private timelineInitialized = false;
   private reauthCooldown = new Map<string, number>();
   private readonly reauthCooldownMs = 5 * 60 * 1000;
+
+  private approvalNotificationSeenAt = new Map<string, number>();
+  private readonly approvalNotificationDedupeTtlMs = 60 * 60 * 1000;
+
+  // Sessions whose timeline events should be persisted, even when not active.
+  // This is used by workflow sessions so the Tasks UI can load their timelines.
+  private persistedTimelineSessions = new Set<string>();
   private taskPromotionState = new Map<
     string,
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
+
+  private registerTimelineSession(sessionId: string): void {
+    if (!sessionId || typeof sessionId !== 'string') return;
+    this.persistedTimelineSessions.add(sessionId);
+  }
+
+  private async resolveSessionIdForApprovalRequest(requestId: string): Promise<string | undefined> {
+    const fromPolicy = approvalPolicyStore.getSessionIdForRequest(requestId);
+    if (fromPolicy) return fromPolicy;
+
+    try {
+      const fromTimeline = await timelineStore.findSessionIdByApprovalRequestId(requestId);
+      if (fromTimeline) {
+        approvalPolicyStore.trackRequest(requestId, fromTimeline);
+        return fromTimeline;
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to resolve approval request session from timeline:', error);
+    }
+
+    if (this.activeSessionId) {
+      return this.activeSessionId;
+    }
+
+    return undefined;
+  }
+
+  async getSessionIdForApprovalRequest(requestId: string): Promise<string | undefined> {
+    if (!requestId || typeof requestId !== 'string') return undefined;
+    return this.resolveSessionIdForApprovalRequest(requestId.trim());
+  }
+
+  private getApprovalsNotificationEnabled(): boolean {
+    try {
+      return Boolean(configStore.get()?.preferences?.notifications?.approvals);
+    } catch {
+      return false;
+    }
+  }
+
+  private shouldNotifyApproval(requestId: string): boolean {
+    const id = requestId.trim();
+    if (!id) return false;
+
+    const now = Date.now();
+    const last = this.approvalNotificationSeenAt.get(id);
+    if (last && now - last < this.approvalNotificationDedupeTtlMs) {
+      return false;
+    }
+
+    this.approvalNotificationSeenAt.set(id, now);
+
+    // Opportunistic pruning to avoid unbounded growth.
+    for (const [key, ts] of this.approvalNotificationSeenAt.entries()) {
+      if (now - ts > this.approvalNotificationDedupeTtlMs) {
+        this.approvalNotificationSeenAt.delete(key);
+      }
+    }
+
+    return true;
+  }
+
+  private safeNotificationText(value: unknown, maxLen: number): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const cleaned = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return undefined;
+    const redacted = redactSecrets(cleaned);
+    return clampText(redacted, maxLen);
+  }
+
+  private notifyApprovalRequest(args: {
+    requestId: string;
+    sessionId: string;
+    webContents: Electron.WebContents;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+  }): void {
+    if (!Notification.isSupported()) return;
+    if (!this.getApprovalsNotificationEnabled()) return;
+    if (!this.shouldNotifyApproval(args.requestId)) return;
+
+    const title =
+      this.safeNotificationText(args.title, 72) ??
+      this.safeNotificationText(args.detail, 72) ??
+      'Approval requested';
+    const body =
+      this.safeNotificationText(args.summary, 200) ??
+      this.safeNotificationText(args.detail, 200) ??
+      'Open FlowState to review.';
+
+    const notification = new Notification({
+      title,
+      body,
+    });
+
+    notification.on('click', () => {
+      try {
+        const win = BrowserWindow.fromWebContents(args.webContents);
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        } else {
+          app.focus({ steal: true });
+        }
+      } catch {
+        // ignore
+      }
+
+      const taskRunId = (() => {
+        try {
+          return (
+            this.getWorkflowTaskRunId(args.sessionId) ??
+            taskStore.getActiveRun({ sessionId: args.sessionId })?.id ??
+            null
+          );
+        } catch {
+          return null;
+        }
+      })();
+
+      args.webContents.send('notifications:approvalClick', {
+        requestId: args.requestId,
+        sessionId: args.sessionId,
+        ...(taskRunId ? { taskRunId } : {}),
+      });
+    });
+
+    try {
+      notification.show();
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to show approval notification:', error);
+    }
+  }
 
   // Batch timeline IPC events to reduce renderer churn during high-volume streams.
   private timelineEventBuffer: unknown[] = [];
@@ -267,6 +415,18 @@ class ProcessManager {
     const taskIdFromPayload = record && typeof record.taskId === 'string' && record.taskId.trim().length > 0 ? record.taskId : undefined;
     const candidate = taskIdFromPayload ?? fallbackTaskId;
     return candidate && candidate.trim().length > 0 ? candidate : sessionId;
+  }
+
+  private getWorkflowTaskRunId(sessionId: string): string | null {
+    if (!sessionId) return null;
+    try {
+      workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+      const run = workflowRunStore.getRunBySessionId(sessionId);
+      return run?.taskRunId ?? null;
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to resolve workflow task run ID:', error);
+      return null;
+    }
   }
 
   private inferTaskRunKind(payload: unknown): TaskRunRecord['kind'] {
@@ -387,9 +547,43 @@ class ProcessManager {
     sessionId: string
   ): void {
     try {
+      const workflowTaskRunId = this.getWorkflowTaskRunId(sessionId);
+      const inferredId = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+      const resolvedId = workflowTaskRunId ?? inferredId;
+      const existingRun = taskStore.getRun(resolvedId);
+      if (existingRun?.status === 'cancelled') {
+        return;
+      }
+
       if (rawType === 'task.promoted') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const id = resolvedId;
         const text = this.pickTaskText(normalized.payload, normalized.event.title, normalized.event.detail);
+
+        if (workflowTaskRunId) {
+          const updated = taskStore.updateRun(id, {
+            status: 'running',
+            updatedAt: normalized.event.timestamp,
+            description: text.description,
+            ...(text.summary ? { summary: text.summary } : {}),
+          });
+
+          if (!updated) {
+            const run: TaskRunRecord = {
+              id,
+              sessionId,
+              kind: 'workflow',
+              title: text.title,
+              description: text.description,
+              status: 'running',
+              startedAt: normalized.event.timestamp,
+              updatedAt: normalized.event.timestamp,
+              progress: 0,
+              ...(text.summary ? { summary: text.summary } : {}),
+            };
+            taskStore.upsertRun(run);
+          }
+          return;
+        }
 
         const run: TaskRunRecord = {
           id,
@@ -429,14 +623,19 @@ class ProcessManager {
       }
 
       if (rawType === 'task.completed') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
-        const updated = taskStore.updateRun(id, { status: 'completed', updatedAt: normalized.event.timestamp, progress: 100 });
+        const id = resolvedId;
+        const updated = taskStore.updateRun(id, {
+          status: 'completed',
+          blockingReason: undefined,
+          updatedAt: normalized.event.timestamp,
+          progress: 100,
+        });
         if (!updated) {
           const text = this.pickTaskText(normalized.payload, 'Task', normalized.event.detail);
           taskStore.upsertRun({
             id,
             sessionId,
-            kind: this.inferTaskRunKind(normalized.payload),
+            kind: workflowTaskRunId ? 'workflow' : this.inferTaskRunKind(normalized.payload),
             title: text.title,
             description: text.description,
             status: 'completed',
@@ -449,7 +648,7 @@ class ProcessManager {
       }
 
       if (rawType === 'task.summary') {
-        const id = this.inferTaskRunId(sessionId, normalized.payload, normalized.event.taskId);
+        const id = resolvedId;
         const summary = (() => {
           const record =
             normalized.payload && typeof normalized.payload === 'object'
@@ -470,7 +669,7 @@ class ProcessManager {
             taskStore.upsertRun({
               id,
               sessionId,
-              kind: this.inferTaskRunKind(normalized.payload),
+              kind: workflowTaskRunId ? 'workflow' : this.inferTaskRunKind(normalized.payload),
               title: text.title,
               description: text.description,
               status: 'running',
@@ -484,25 +683,26 @@ class ProcessManager {
         return;
       }
 
-      if (rawType === 'permission.asked' || rawType.startsWith('approval.') || rawType.startsWith('permission.')) {
-        // Best-effort: if an approval request arrives while a task is active, surface it.
+      if (isApprovalEventType(rawType)) {
+        // Best-effort: toggle task status when approvals are requested/resolved.
+        // Requests should block the task; responses should unblock it.
         const record =
           normalized.payload && typeof normalized.payload === 'object'
             ? (normalized.payload as Record<string, unknown>)
             : null;
         const explicitTaskId = record && typeof record.taskId === 'string' ? record.taskId : undefined;
-        const candidateId = explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
+        const candidateId = workflowTaskRunId ?? explicitTaskId ?? taskStore.getActiveRun({ sessionId })?.id;
         if (!candidateId) return;
 
         const existing = taskStore.getRun(candidateId);
         if (!existing) return;
-        if (existing.status !== 'running' && existing.status !== 'starting') return;
 
-        // Only treat explicit "asked"/"request" events as blocking.
-        const isRequest = rawType.endsWith('.asked') || rawType.includes('asked') || rawType.includes('request');
-        if (!isRequest) return;
-
-        taskStore.updateRun(candidateId, { status: 'waiting_approval', updatedAt: normalized.event.timestamp });
+        const patch = deriveApprovalBlockingPatch(rawType, existing);
+        if (!patch) return;
+        taskStore.updateRun(candidateId, {
+          ...patch,
+          updatedAt: normalized.event.timestamp,
+        });
       }
     } catch (error) {
       console.warn('[ProcessManager] Failed to update TaskStore:', error);
@@ -758,9 +958,71 @@ class ProcessManager {
     }
   }
 
+  private formatUserProfileForPrompt(profile: UserProfile): string | null {
+    const lines: string[] = [];
+
+    if (profile.preferredName) {
+      lines.push(`- Preferred name: ${profile.preferredName}`);
+    }
+
+    if (profile.timezone) {
+      lines.push(`- Timezone: ${profile.timezone}`);
+    }
+
+    if (profile.location) {
+      lines.push(`- Location: ${profile.location}`);
+    }
+
+    const formatWindow = (label: string, window?: { start?: string; end?: string; days?: string[] }) => {
+      if (!window) return;
+      const parts: string[] = [];
+      if (window.days && window.days.length > 0) {
+        parts.push(window.days.join(', '));
+      }
+      if (window.start || window.end) {
+        const start = window.start ?? 'unspecified';
+        const end = window.end ?? 'unspecified';
+        parts.push(`${start}-${end}`);
+      }
+      if (parts.length > 0) {
+        lines.push(`- ${label}: ${parts.join(' | ')}`);
+      }
+    };
+
+    formatWindow('Study hours', profile.studyHours);
+    formatWindow('Working hours', profile.workingHours);
+
+    if (profile.notes) {
+      lines.push(`- Notes: ${profile.notes}`);
+    }
+
+    return lines.length > 0 ? lines.join('\n') : null;
+  }
+
+  private async getSystemPrompt(): Promise<string | undefined> {
+    if (!this.flowstatePrompt) {
+      const packagesDir = this.getMcpPackagesDir();
+      this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
+    }
+
+    const basePrompt = this.flowstatePrompt ?? undefined;
+    if (!basePrompt) return undefined;
+
+    try {
+      const profile = await userProfile.getProfile();
+      const formatted = this.formatUserProfileForPrompt(profile);
+      if (!formatted) return basePrompt;
+      return `${basePrompt}\n\n## User Profile\n${formatted}`;
+    } catch (error) {
+      console.error('[ProcessManager] Failed to load user profile:', error);
+      return basePrompt;
+    }
+  }
+
   private async buildMcpConfig(): Promise<Record<string, McpLocalConfig>> {
     const mcpConfig: Record<string, McpLocalConfig> = {};
     const packagesDir = this.getMcpPackagesDir();
+    const flowstateDataDir = configStore.getDataDir();
 
     if (!this.flowstatePrompt) {
       this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
@@ -775,6 +1037,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', gmailPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           GMAIL_ACCESS_TOKEN: gmailToken.accessToken,
           GMAIL_REFRESH_TOKEN: gmailToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gmailCreds?.clientId || '',
@@ -821,6 +1084,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', gcalPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           GCAL_ACCESS_TOKEN: gcalToken.accessToken,
           GCAL_REFRESH_TOKEN: gcalToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gcalCreds?.clientId || '',
@@ -847,6 +1111,7 @@ class ProcessManager {
         type: 'local',
         command: ['npx', '-y', '@notionhq/notion-mcp-server'],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           NOTION_TOKEN: notionToken.accessToken,
         },
         enabled: true,
@@ -861,6 +1126,9 @@ class ProcessManager {
       mcpConfig['flowstate-system'] = {
         type: 'local',
         command: ['node', systemPath],
+        environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
+        },
         enabled: true,
         timeout: 10000,
       };
@@ -878,6 +1146,7 @@ class ProcessManager {
         type: 'local',
         command: ['node', canvasPath],
         environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
           CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
           CANVAS_AUTH_MODE: useBrowserAuth ? 'browser' : 'token',
           ...(useBrowserAuth
@@ -1113,9 +1382,114 @@ class ProcessManager {
   }
 
   /**
+   * Create a new OpenCode session without changing the active chat session.
+   * Used by workflows so they do not pollute the current conversation.
+   */
+  async createDetachedSession(title?: string): Promise<string> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    const result = await this.instance.client.session.create(
+      title && title.trim().length
+        ? {
+            body: {
+              title: title.trim(),
+            },
+          }
+        : {}
+    );
+
+    if (result.error || !result.data?.id) {
+      throw new Error(`Failed to create session: ${JSON.stringify(result.error ?? 'unknown error')}`);
+    }
+
+    return result.data.id;
+  }
+
+  /**
+   * Register a session so timeline events are persisted.
+   * This opt-in gates storage for non-active sessions.
+   */
+  registerTaskSession(sessionId: string, message?: string): void {
+    if (!sessionId || typeof sessionId !== 'string') return;
+    void message;
+    this.registerTimelineSession(sessionId);
+  }
+
+  /**
+   * Prompt an explicit session (used for workflow sessions).
+   * Does not stream to renderer and does not change the active session.
+   */
+  async promptSession(
+    sessionId: string,
+    content: string
+  ): Promise<{ content: string; parts: unknown[]; assistantMessageId?: string }> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Invalid sessionId');
+    }
+
+    const systemPrompt = await this.getSystemPrompt();
+    this.registerTaskSession(sessionId, content);
+
+    try {
+      const result = await this.instance.client.session.prompt({
+        path: { id: sessionId },
+        body: {
+          agent: this.defaultAgent,
+          system: systemPrompt,
+          parts: [{ type: 'text', text: content }],
+        },
+      });
+
+      if (result.error) {
+        const errorPayload = buildOpenCodeError(result.error, {
+          model: configStore.get()?.provider.default,
+        });
+        const thrown = new Error(errorPayload.error);
+        (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+        throw thrown;
+      }
+
+      if (!result.data) {
+        throw new Error('No data in prompt result');
+      }
+
+      const parts = (result.data as { parts?: unknown[] }).parts ?? [];
+      const textContent = (parts as Array<{ type?: string; text?: string }>)
+        .filter((p) => p?.type === 'text')
+        .map((p) => p.text || '')
+        .join('');
+
+      const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
+
+      return {
+        content: textContent,
+        parts,
+        ...(assistantMessageId ? { assistantMessageId } : {}),
+      };
+    } catch (error) {
+      const errorPayload =
+        (error as Error & { opencode?: OpenCodeErrorPayload }).opencode ??
+        buildOpenCodeError(error, { model: configStore.get()?.provider.default });
+      const thrown = new Error(errorPayload.error);
+      (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+      throw thrown;
+    }
+  }
+
+  /**
    * Send a message to the active session and get a response
    */
-  async sendMessage(content: string, webContents?: Electron.WebContents): Promise<{
+  async sendMessage(
+    content: string,
+    webContents?: Electron.WebContents,
+    options?: { skipTaskTracking?: boolean; skipWorkflowSync?: boolean }
+  ): Promise<{
     content: string;
     parts: Array<{ type: string; text?: string }>;
   }> {
@@ -1128,9 +1502,12 @@ class ProcessManager {
       await this.createSession();
     }
 
-    const systemPrompt = this.flowstatePrompt ?? undefined;
+    const systemPrompt = await this.getSystemPrompt();
 
-    this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+    const shouldTrackTasks = Boolean(webContents) && !options?.skipTaskTracking;
+    if (shouldTrackTasks) {
+      this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+    }
 
     // Notify renderer that we're processing
     if (webContents) {
@@ -1185,10 +1562,16 @@ class ProcessManager {
         parts: parts,
       };
 
+      if (!options?.skipWorkflowSync) {
+        this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+      }
+
       if (webContents) {
         webContents.send('opencode:message', assistantMessage);
         webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
-        this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
+        if (shouldTrackTasks) {
+          this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
+        }
       }
 
       return {
@@ -1224,7 +1607,7 @@ class ProcessManager {
       await this.createSession();
     }
 
-    const systemPrompt = this.flowstatePrompt ?? undefined;
+    const systemPrompt = await this.getSystemPrompt();
 
     this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
 
@@ -1283,6 +1666,8 @@ class ProcessManager {
         parts: parts,
       };
 
+      this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+
       console.log('[ProcessManager] Sending message to renderer:', assistantMessage.id, 'content length:', assistantMessage.content.length);
       webContents.send('opencode:message', assistantMessage);
       console.log('[ProcessManager] Message sent to renderer successfully');
@@ -1309,6 +1694,8 @@ class ProcessManager {
       return;
     }
 
+    approvalsAuditStore.configure({ dataDir: configStore.getDataDir() });
+
     // Abort any existing stream
     if (this.eventStreamAbortController) {
       this.eventStreamAbortController.abort();
@@ -1321,13 +1708,62 @@ class ProcessManager {
     const extractRequestId = (properties: unknown): string | undefined => {
       if (!properties || typeof properties !== 'object') return undefined;
       const record = properties as Record<string, unknown>;
-      const candidates = [record.requestID, record.requestId, record.request_id, record.id];
+      const nestedPermission =
+        record.permission && typeof record.permission === 'object' && !Array.isArray(record.permission)
+          ? (record.permission as Record<string, unknown>)
+          : null;
+      const candidates = [
+        record.requestID,
+        record.requestId,
+        record.request_id,
+        record.permissionID,
+        record.permissionId,
+        record.permission_id,
+        nestedPermission?.id,
+        nestedPermission?.requestID,
+        nestedPermission?.requestId,
+        record.id,
+      ];
       for (const candidate of candidates) {
         if (typeof candidate === 'string' && candidate.trim().length > 0) {
-          return candidate;
+          return candidate.trim();
         }
       }
       return undefined;
+    };
+
+    const extractApprovalReply = (properties: unknown): string | undefined => {
+      if (!properties || typeof properties !== 'object') return undefined;
+      const record = properties as Record<string, unknown>;
+      const candidates = [record.reply, record.decision, record.response, record.result, record.outcome];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim().length > 0) {
+          return candidate.trim();
+        }
+      }
+
+      const boolCandidates = [record.approved, record.allow, record.allowed, record.granted];
+      for (const candidate of boolCandidates) {
+        if (typeof candidate === 'boolean') {
+          return candidate ? 'approve' : 'deny';
+        }
+      }
+
+      return undefined;
+    };
+
+    const buildApprovalAuditSummary = (eventType: string, payload: unknown): Record<string, unknown> => {
+      const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const title = typeof record.title === 'string' ? record.title : undefined;
+      const summary = typeof record.summary === 'string' ? record.summary : undefined;
+      const body = typeof record.body === 'string' ? record.body : undefined;
+      return {
+        eventType,
+        title,
+        summary,
+        bodyLength: body ? body.length : undefined,
+        bodyPreview: body ? body.slice(0, 1000) : undefined,
+      };
     };
 
     // Run event stream in background
@@ -1361,10 +1797,17 @@ class ProcessManager {
             const sessionId = payloadSessionId ?? this.activeSessionId ?? 'unknown-session';
 
             const requestId = extractRequestId(typedEvent.properties);
-            if (requestId && sessionId !== 'unknown-session') {
+            const isApprovalType =
+              typedEvent.type === 'permission.asked' ||
+              typedEvent.type?.startsWith('permission.') ||
+              typedEvent.type?.startsWith('approval.');
+            if (requestId && sessionId !== 'unknown-session' && isApprovalType) {
               approvalPolicyStore.trackRequest(requestId, sessionId);
 
-              if (typedEvent.type === 'permission.asked' && approvalPolicyStore.isSessionAlwaysApprove(sessionId)) {
+              if (
+                (typedEvent.type === 'permission.asked' || typedEvent.type === 'permission.updated') &&
+                approvalPolicyStore.isSessionAlwaysApprove(sessionId)
+              ) {
                 this.replyApproval(requestId, 'always').catch((error) => {
                   console.warn('[ProcessManager] Failed to auto-approve permission request:', error);
                 });
@@ -1388,9 +1831,45 @@ class ProcessManager {
               this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId);
               const isApprovalEvent =
                 normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
+
+              if (normalized.event.kind === 'approval_request') {
+                const payload = normalized.payload;
+                const payloadRecord = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+                const payloadRequestId = payloadRecord && typeof payloadRecord.requestId === 'string' ? payloadRecord.requestId : requestId;
+                if (payloadRequestId) {
+                  this.notifyApprovalRequest({
+                    requestId: payloadRequestId,
+                    sessionId,
+                    webContents,
+                    title: payloadRecord?.title ?? normalized.event.title,
+                    summary: payloadRecord?.summary,
+                    detail: normalized.event.detail,
+                  });
+                }
+              }
+
+              if (isApprovalEvent) {
+                const payload = normalized.payload;
+                const payloadRecord = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+                const payloadRequestId = payloadRecord && typeof payloadRecord.requestId === 'string' ? payloadRecord.requestId : requestId;
+                const replyValue = normalized.event.kind === 'approval_response' ? extractApprovalReply(typedEvent.properties) : undefined;
+
+                if (payloadRequestId) {
+                  approvalsAuditStore.log({
+                    kind: normalized.event.kind === 'approval_request' ? 'request' : 'response',
+                    requestId: payloadRequestId,
+                    sessionId,
+                    reply: replyValue,
+                    timestamp: Date.now(),
+                    summary: buildApprovalAuditSummary(typedEvent.type ?? 'unknown', payloadRecord ?? {}),
+                    redacted: Boolean(normalized.redacted),
+                  });
+                }
+              }
+
               const shouldStore =
                 isApprovalEvent ||
-                (this.taskPromotionState.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
+                (this.persistedTimelineSessions.has(sessionId) && (payloadSessionId || sessionId === this.activeSessionId));
               if (!shouldStore) {
                 continue;
               }
@@ -1488,6 +1967,9 @@ class ProcessManager {
     event: { kind: string; title: string; detail?: string; timestamp: number },
     webContents: Electron.WebContents
   ) {
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      return;
+    }
     const state = this.taskPromotionState.get(sessionId);
     if (!state) {
       return;
@@ -1538,11 +2020,77 @@ class ProcessManager {
     this.taskPromotionState.set(sessionId, state);
   }
 
+  private syncWorkflowRunFromAssistant(sessionId: string, content: string, assistantMessageId?: string): void {
+    if (!sessionId || !content.trim()) return;
+
+    try {
+      workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+      taskStore.configure({ dataDir: configStore.getDataDir() });
+
+      const run = workflowRunStore.getRunBySessionId(sessionId);
+      if (!run) return;
+
+      const parsed = parseResponseHeader(content);
+      const needsInput = parsed.hasHeader ? parsed.status === 'needs_response' : requiresUserInput(content);
+      const isInProgress = parsed.hasHeader && parsed.status === 'in_progress';
+      const isBlocked = parsed.hasHeader && parsed.status === 'blocked';
+      const isComplete = parsed.hasHeader ? parsed.status === 'complete' : !needsInput;
+      const now = Date.now();
+      const runStatus = isBlocked
+        ? 'failed'
+        : needsInput
+          ? 'needs_response'
+          : isInProgress
+            ? 'running'
+            : isComplete
+              ? 'completed'
+              : 'running';
+
+      workflowRunStore.updateRun(run.id, {
+        status: runStatus,
+        ...(runStatus === 'completed' || runStatus === 'failed' ? { finishedAt: now } : {}),
+        ...(assistantMessageId ? { assistantMessageId } : {}),
+        outputPreview: clampText(content, 280),
+      });
+
+      workflowRunStore.createArtifact({
+        artifactId: randomUUID(),
+        workflowRunId: run.id,
+        kind: 'final_output',
+        title: 'Final output',
+        mime: 'text/plain',
+        createdAt: now,
+        payloadText: content,
+      });
+
+      if (run.taskRunId) {
+        const existingTask = taskStore.getRun(run.taskRunId);
+        taskStore.updateRun(run.taskRunId, {
+          status: runStatus === 'completed' ? 'completed' : runStatus === 'failed' ? 'failed' : 'running',
+          ...(needsInput ? { blockingReason: { kind: 'response' } } : { blockingReason: undefined }),
+          progress: runStatus === 'completed' ? 100 : needsInput ? 50 : Math.max(60, existingTask?.progress ?? 0),
+          updatedAt: now,
+          ...(needsInput
+            ? { description: 'Waiting for input...' }
+            : existingTask?.description === 'Waiting for input...'
+              ? { description: 'Running...' }
+              : {}),
+        });
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to sync workflow run from assistant response:', error);
+    }
+  }
+
   private clearTaskTracking(sessionId: string) {
     this.taskPromotionState.delete(sessionId);
   }
 
   private finishTaskTracking(sessionId: string, webContents: Electron.WebContents, detail?: string) {
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      this.clearTaskTracking(sessionId);
+      return;
+    }
     const state = this.taskPromotionState.get(sessionId);
     if (!state || state.completed) {
       return;
@@ -1624,6 +2172,10 @@ class ProcessManager {
   }
 
   private startTaskPromotionTracking(sessionId: string, payload?: { message?: string }) {
+    this.registerTimelineSession(sessionId);
+    if (this.getWorkflowTaskRunId(sessionId)) {
+      return;
+    }
     const existing = this.taskPromotionState.get(sessionId);
     if (existing) {
       existing.startAt = Date.now();
@@ -1720,25 +2272,55 @@ class ProcessManager {
     }
 
     const mappedReply: 'once' | 'always' | 'reject' = reply === 'deny' ? 'reject' : reply;
+    const sessionId = await this.resolveSessionIdForApprovalRequest(requestId.trim());
 
-    const sessionId = approvalPolicyStore.getSessionIdForRequest(requestId) ?? this.activeSessionId ?? undefined;
-    if (reply === 'always' && sessionId) {
-      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
-    }
+    const v2Client = this.instance.client as unknown as {
+      permission?: {
+        reply: (input: {
+          requestID: string;
+          reply: 'once' | 'always' | 'reject';
+        }) => Promise<{ error?: unknown }>;
+      };
+    };
+    const legacyClient = this.instance.client as unknown as {
+      postSessionIdPermissionsPermissionId?: (input: {
+        path: { id: string; permissionID: string };
+        body: { response: 'once' | 'always' | 'reject' };
+      }) => Promise<{ error?: unknown }>;
+    };
 
-    const permissionClient = (this.instance.client as unknown as { permission?: { reply: (input: { requestID: string; reply: 'once' | 'always' | 'reject' }) => Promise<{ error?: unknown }> } }).permission;
-    if (!permissionClient) {
+    let result: { error?: unknown } | undefined;
+    if (v2Client.permission?.reply) {
+      result = await v2Client.permission.reply({
+        requestID: requestId.trim(),
+        reply: mappedReply,
+      });
+    } else if (legacyClient.postSessionIdPermissionsPermissionId) {
+      if (!sessionId) {
+        throw new Error('Unable to resolve session for approval request');
+      }
+
+      result = await legacyClient.postSessionIdPermissionsPermissionId({
+        path: {
+          id: sessionId,
+          permissionID: requestId.trim(),
+        },
+        body: {
+          response: mappedReply,
+        },
+      });
+    } else {
       throw new Error('OpenCode permission API unavailable');
     }
 
-    const result = await permissionClient.reply({
-      requestID: requestId,
-      reply: mappedReply,
-    });
-
-    if (result.error) {
+    if (result?.error) {
       throw new Error(`Failed to reply to approval request: ${JSON.stringify(result.error)}`);
     }
+
+    if (reply === 'always' && sessionId) {
+      approvalPolicyStore.setSessionAlwaysApprove(sessionId, true);
+    }
+    approvalPolicyStore.untrackRequest(requestId);
   }
 }
 

@@ -163,11 +163,11 @@ export function useOpenCode() {
       }
 
       if (event.kind === 'approval_request') {
-        updateActiveTask({ status: 'waiting_approval' });
+        updateActiveTask({ status: 'waiting_approval', blockingReason: { kind: 'permission' } });
       }
 
       if (event.kind === 'approval_response') {
-        updateActiveTask({ status: 'running' });
+        updateActiveTask({ status: 'running', blockingReason: undefined });
       }
 
       if (event.kind === 'error') {
@@ -184,51 +184,71 @@ export function useOpenCode() {
       }
     };
 
+    const resolveApprovalPayloadIfNeeded = async (event: TimelineEvent): Promise<TimelineEvent> => {
+      const isApproval = event.kind === 'approval_request' || event.kind === 'approval_response';
+      if (!isApproval || event.payloadInline || !event.payloadRef) {
+        return event;
+      }
+
+      try {
+        const payload = await window.flowstate.timeline.resolvePayload(event.payloadRef);
+        return payload ? { ...event, payloadInline: payload } : event;
+      } catch {
+        return event;
+      }
+    };
+
     const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload) => {
       const events = unwrapBatch<TimelineEvent>(payload);
       if (events.length === 0) return;
 
       // Preserve existing behavior for single events.
       if (events.length === 1) {
-        applyTimelineEvent(events[0]!);
+        void resolveApprovalPayloadIfNeeded(events[0]!).then(applyTimelineEvent);
         return;
       }
 
-      // Batch path: update timeline store once per flush.
-      const store = useChatStore.getState();
-      const mergedTimeline = [...store.timeline, ...events].slice(-200);
-      store.loadTimelineEvents(mergedTimeline);
+      void (async () => {
+        const resolvedEvents = await Promise.all(events.map(resolveApprovalPayloadIfNeeded));
 
-      let nextStatus: TaskRun['status'] | null = null;
-      let nextSummary: string | null = null;
+        // Batch path: update timeline store once per flush.
+        const store = useChatStore.getState();
+        const mergedTimeline = [...store.timeline, ...resolvedEvents].slice(-200);
+        store.loadTimelineEvents(mergedTimeline);
 
-      // Compute final task state based on in-batch ordering.
-      for (const event of events) {
-        if (event.kind === 'approval_request') nextStatus = 'waiting_approval';
-        if (event.kind === 'approval_response') nextStatus = 'running';
-        if (event.kind === 'error') nextStatus = 'failed';
+        let nextStatus: TaskRun['status'] | null = null;
+        let nextSummary: string | null = null;
 
-        if (event.kind === 'status' && event.title === 'Task completed') nextStatus = 'completed';
-        if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
-          nextSummary = event.detail;
+        // Compute final task state based on in-batch ordering.
+        for (const event of resolvedEvents) {
+          if (event.kind === 'approval_request') nextStatus = 'waiting_approval';
+          if (event.kind === 'approval_response') nextStatus = 'running';
+          if (event.kind === 'error') nextStatus = 'failed';
+
+          if (event.kind === 'status' && event.title === 'Task completed') nextStatus = 'completed';
+          if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
+            nextSummary = event.detail;
+          }
         }
-      }
 
-      const updates: Partial<TaskRun> = {};
-      if (nextStatus) updates.status = nextStatus;
-      if (nextSummary) {
-        updates.summary = nextSummary;
-        updates.summarySent = false;
-      }
+        const updates: Partial<TaskRun> = {};
+        if (nextStatus) updates.status = nextStatus;
+        if (nextStatus === 'waiting_approval') updates.blockingReason = { kind: 'permission' };
+        if (nextStatus && nextStatus !== 'waiting_approval') updates.blockingReason = undefined;
+        if (nextSummary) {
+          updates.summary = nextSummary;
+          updates.summarySent = false;
+        }
 
-      if (Object.keys(updates).length > 0) store.updateActiveTask(updates);
+        if (Object.keys(updates).length > 0) store.updateActiveTask(updates);
 
-      if (events.some((event) => event.kind === 'status' && event.title === 'Task completed')) {
-        const completedSessionId = events.find(
-          (event) => event.kind === 'status' && event.title === 'Task completed'
-        )?.sessionId;
-        void refreshChatMessagesForSession(completedSessionId);
-      }
+        if (resolvedEvents.some((event) => event.kind === 'status' && event.title === 'Task completed')) {
+          const completedSessionId = resolvedEvents.find(
+            (event) => event.kind === 'status' && event.title === 'Task completed'
+          )?.sessionId;
+          void refreshChatMessagesForSession(completedSessionId);
+        }
+      })();
     });
 
     // Initial status check
@@ -253,11 +273,14 @@ export function useOpenCode() {
   /**
    * Send a message to OpenCode
    */
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (
+    content: string,
+    opts?: { allowWhileRunning?: boolean; fireAndForget?: boolean },
+  ) => {
     if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
 
-    if (activeTask && activeTask.status === 'running') {
+    if (activeTask && activeTask.status === 'running' && !opts?.allowWhileRunning) {
       if (DEV) console.log('[Renderer] Task already running, blocking message');
       setError('Another task is already running for this conversation.');
       return { success: false, error: 'Task already running' };
@@ -270,7 +293,9 @@ export function useOpenCode() {
     try {
       // Send to OpenCode (response comes via events)
       if (DEV) console.log('[Renderer] Calling window.flowstate.opencode.send()...');
-      const result = await window.flowstate.opencode.send(content);
+      const result = opts?.fireAndForget
+        ? await window.flowstate.opencode.sendAsync(content)
+        : await window.flowstate.opencode.send(content);
       if (DEV) console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
@@ -329,7 +354,22 @@ export function useOpenCode() {
       loadMessages(messages);
 
       const timeline = await window.flowstate.timeline.list(sessionId, 100, 0);
-      useChatStore.getState().loadTimelineEvents(timeline);
+      const resolvedTimeline = await Promise.all(
+        timeline.map(async (event) => {
+          const isApproval = event.kind === 'approval_request' || event.kind === 'approval_response';
+          if (!isApproval || event.payloadInline || !event.payloadRef) {
+            return event;
+          }
+          try {
+            const payload = await window.flowstate.timeline.resolvePayload(event.payloadRef);
+            return payload ? { ...event, payloadInline: payload } : event;
+          } catch {
+            return event;
+          }
+        })
+      );
+
+      useChatStore.getState().loadTimelineEvents(resolvedTimeline);
     } catch (err) {
       console.error('Failed to switch session:', err);
       throw err;
@@ -352,7 +392,21 @@ export function useOpenCode() {
     if (!currentSessionId) return;
     try {
       const timeline = await window.flowstate.timeline.list(currentSessionId, 100, 0);
-      useChatStore.getState().loadTimelineEvents(timeline);
+      const resolvedTimeline = await Promise.all(
+        timeline.map(async (event) => {
+          const isApproval = event.kind === 'approval_request' || event.kind === 'approval_response';
+          if (!isApproval || event.payloadInline || !event.payloadRef) {
+            return event;
+          }
+          try {
+            const payload = await window.flowstate.timeline.resolvePayload(event.payloadRef);
+            return payload ? { ...event, payloadInline: payload } : event;
+          } catch {
+            return event;
+          }
+        })
+      );
+      useChatStore.getState().loadTimelineEvents(resolvedTimeline);
     } catch (err) {
       console.error('Failed to refresh timeline:', err);
     }

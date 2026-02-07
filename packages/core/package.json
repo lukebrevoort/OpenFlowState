@@ -21,6 +21,14 @@
     "./auth": {
       "types": "./dist/auth/index.d.ts",
       "import": "./dist/auth/index.js"
+    },
+    "./cache": {
+      "types": "./dist/cache/index.d.ts",
+      "import": "./dist/cache/index.js"
+    },
+    "./user-profile": {
+      "types": "./dist/user-profile/index.d.ts",
+      "import": "./dist/user-profile/index.js"
     }
   },
   "scripts": {

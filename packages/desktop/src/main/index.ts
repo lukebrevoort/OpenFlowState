@@ -19,11 +19,22 @@ import { taskStore } from './task-store.js';
 import { authManager, ClientCredentials } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import { listGoogleCalendars } from './google-calendar.js';
-import type { ApprovalReply } from './approval-policy-store.js';
-import type { IpcError, IpcResult, TaskRun, WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
+import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
+import { approvalsAuditStore } from './approvals-audit-store.js';
+import type {
+  IpcError,
+  IpcResult,
+  TaskRun,
+  WorkflowArtifact,
+  WorkflowDefinition,
+  WorkflowRun,
+} from '../renderer/types/electron';
 import { workflowsRunner } from './workflows-runner.js';
 import { workflowsGenerator } from './workflows-generator.js';
 import { toRendererTaskRun } from './task-types.js';
+import { workflowRunStore } from './workflow-run-store.js';
+import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
+import { userProfile } from '@flowstate/core';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,6 +104,9 @@ async function initialize(): Promise<void> {
 
   // Load configuration
   await configStore.load();
+  const dataDir = configStore.getDataDir();
+  process.env.FLOWSTATE_DATA_DIR = dataDir;
+  userProfile.configure({ dataDir });
   console.log('Configuration loaded');
 
   // Initialize auth manager
@@ -568,6 +582,39 @@ ipcMain.handle('opencode:send', async (event, message: string) => {
 });
 
 /**
+ * Fire-and-forget send. Returns success once the request is enqueued.
+ * The response (and any errors) still stream via IPC events.
+ */
+ipcMain.handle('opencode:sendAsync', async (event, message: string) => {
+  console.log('[IPC] opencode:sendAsync called with message length:', message.length);
+
+  if (!processManager.running) {
+    console.error('[IPC] OpenCode not running!');
+    return {
+      error: 'OpenCode not running',
+      content: 'The AI assistant is not available. Please restart the application.',
+    };
+  }
+
+  try {
+    const webContents = event.sender;
+    void processManager.streamMessage(message, webContents).catch((error) => {
+      console.error('[IPC] Error in opencode:sendAsync background stream:', error);
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('[IPC] Error in opencode:sendAsync:', error);
+    const opencodeError = (error as Error & { opencode?: { error: string } }).opencode;
+    const msg = opencodeError?.error ?? (error instanceof Error ? error.message : String(error));
+    return {
+      error: msg,
+      content: msg,
+      errorDetails: opencodeError,
+    };
+  }
+});
+
+/**
  * Get OpenCode status
  */
 ipcMain.handle('opencode:status', async () => {
@@ -684,6 +731,19 @@ const configureTimelineStore = (): void => {
 const configureTaskStore = (): void => {
   // Keep Tasks persisted alongside TimelineStore in the same memory.db.
   taskStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureWorkflowRunStore = (): void => {
+  // Keep workflow run history persisted in memory.db.
+  workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureWorkflowsPinsStore = (): void => {
+  workflowsPinsStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureApprovalsAuditStore = (): void => {
+  approvalsAuditStore.configure({ dataDir: configStore.getDataDir() });
 };
 
 ipcMain.handle('settings:get', async () => {
@@ -928,6 +988,161 @@ ipcMain.handle('tasks:getActiveRun', async () => {
   }
 });
 
+ipcMain.handle('tasks:cancel', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'cancelled',
+      blockingReason: undefined,
+      updatedAt: Date.now(),
+      description: 'Cancelled by user.',
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to cancel task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'cancelled',
+          finishedAt: Date.now(),
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to cancel task run:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to cancel task run.');
+  }
+});
+
+ipcMain.handle('tasks:markRunning', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'running',
+      blockingReason: undefined,
+      updatedAt: Date.now(),
+      ...(record.description === 'Waiting for input...' ? { description: 'Running...' } : {}),
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to update task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'running',
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to mark task run running:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to update task run.');
+  }
+});
+
+ipcMain.handle('tasks:markComplete', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<TaskRun>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<TaskRun>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const updated = taskStore.updateRun(id, {
+      status: 'completed',
+      blockingReason: undefined,
+      progress: 100,
+      updatedAt: Date.now(),
+    });
+
+    if (!updated) {
+      return ipcError<TaskRun>('UNKNOWN', 'Failed to complete task run.');
+    }
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.updateRun(workflowRunId, {
+          status: 'completed',
+          finishedAt: Date.now(),
+        });
+      }
+    }
+
+    return ipcOk<TaskRun>(toRendererTaskRun(updated));
+  } catch (error) {
+    console.warn('[IPC] Failed to mark task run complete:', error);
+    return ipcError<TaskRun>('UNKNOWN', 'Failed to complete task run.');
+  }
+});
+
+ipcMain.handle('tasks:remove', async (_event, taskRunId: string) => {
+  const id = typeof taskRunId === 'string' ? taskRunId.trim() : '';
+  if (!id) {
+    return ipcError<{ removed: boolean }>('INVALID_REQUEST', 'taskRunId must be a non-empty string.');
+  }
+
+  try {
+    configureTaskStore();
+    const record = taskStore.getRun(id);
+    if (!record) {
+      return ipcError<{ removed: boolean }>('INVALID_REQUEST', 'Task run not found.');
+    }
+
+    const removed = taskStore.deleteRun(id);
+
+    if (record.metadata && typeof record.metadata === 'object') {
+      const workflowRunId = (record.metadata as { workflowRunId?: unknown }).workflowRunId;
+      if (typeof workflowRunId === 'string' && workflowRunId.trim().length > 0) {
+        workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+        workflowRunStore.deleteRun(workflowRunId);
+      }
+    }
+
+    return ipcOk<{ removed: boolean }>({ removed });
+  } catch (error) {
+    console.warn('[IPC] Failed to remove task run:', error);
+    return ipcError<{ removed: boolean }>('UNKNOWN', 'Failed to remove task run.');
+  }
+});
+
 ipcMain.handle('workflows:list', async () => {
   const result = await workflowsRunner.listDefinitions();
   if (result.ok) {
@@ -944,12 +1159,159 @@ ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unkno
   return ipcError<WorkflowRun>(result.code, result.message, result.details);
 });
 
+ipcMain.handle('workflows:runs:list', async (_event, workflowId: string, limit?: number, offset?: number) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<WorkflowRun[]>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowRunStore();
+    const runs = workflowRunStore.listRunsByWorkflow(id, { limit, offset }) as unknown as WorkflowRun[];
+    return ipcOk<WorkflowRun[]>(runs);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow runs:', error);
+    return ipcError<WorkflowRun[]>('UNKNOWN', 'Failed to list workflow runs.');
+  }
+});
+
+ipcMain.handle('workflows:artifacts:list', async (_event, workflowRunId: string) => {
+  const id = typeof workflowRunId === 'string' ? workflowRunId.trim() : '';
+  if (!id) {
+    return ipcError<WorkflowArtifact[]>('INVALID_REQUEST', 'workflowRunId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowRunStore();
+    const artifacts = workflowRunStore.listArtifactsByRun(id) as unknown as WorkflowArtifact[];
+    return ipcOk<WorkflowArtifact[]>(artifacts);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow artifacts:', error);
+    return ipcError<WorkflowArtifact[]>('UNKNOWN', 'Failed to list workflow artifacts.');
+  }
+});
+
+ipcMain.handle('workflows:pins:get', async () => {
+  try {
+    configureWorkflowsPinsStore();
+    const pinnedIds = workflowsPinsStore.listPins();
+    return ipcOk<string[]>(pinnedIds);
+  } catch (error) {
+    console.warn('[IPC] Failed to list pinned workflows:', error);
+    return ipcError<string[]>('UNKNOWN', 'Failed to list pinned workflows.');
+  }
+});
+
+ipcMain.handle('workflows:pins:set', async (_event, workflowId: string, pinned: boolean) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<{ pinnedIds: string[] }>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    configureWorkflowsPinsStore();
+    workflowsPinsStore.setPinned(id, Boolean(pinned));
+    return ipcOk<{ pinnedIds: string[] }>({ pinnedIds: workflowsPinsStore.listPins() });
+  } catch (error) {
+    if (error instanceof PinnedWorkflowsLimitError) {
+      return ipcError<{ pinnedIds: string[] }>('INVALID_REQUEST', error.message, { limit: error.limit });
+    }
+
+    console.warn('[IPC] Failed to set workflow pin state:', error);
+    return ipcError<{ pinnedIds: string[] }>('UNKNOWN', 'Failed to update pinned workflows.');
+  }
+});
+
+ipcMain.handle('workflows:approvalOptIn:get', async (_event, workflowId: string) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<boolean>('INVALID_REQUEST', 'workflowId must be a non-empty string.');
+  }
+
+  try {
+    const optedIn = await approvalPolicyStore.getWorkflowOptIn(id);
+    return ipcOk<boolean>(optedIn);
+  } catch (error) {
+    console.warn('[IPC] Failed to get workflow approval opt-in:', error);
+    return ipcError<boolean>('UNKNOWN', 'Failed to load workflow approval policy.');
+  }
+});
+
+ipcMain.handle('workflows:approvalOptIn:set', async (_event, workflowId: string, optedIn: boolean) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  if (!id) {
+    return ipcError<{ workflowId: string; optedIn: boolean }>(
+      'INVALID_REQUEST',
+      'workflowId must be a non-empty string.',
+    );
+  }
+
+  try {
+    const next = Boolean(optedIn);
+    await approvalPolicyStore.setWorkflowOptIn(id, next);
+    return ipcOk<{ workflowId: string; optedIn: boolean }>({ workflowId: id, optedIn: next });
+  } catch (error) {
+    console.warn('[IPC] Failed to set workflow approval opt-in:', error);
+    return ipcError<{ workflowId: string; optedIn: boolean }>(
+      'UNKNOWN',
+      'Failed to update workflow approval policy.',
+    );
+  }
+});
+
+ipcMain.handle('workflows:approvalOptIns:list', async () => {
+  try {
+    const optIns = await approvalPolicyStore.listWorkflowOptIns();
+    return ipcOk<Record<string, boolean>>(optIns);
+  } catch (error) {
+    console.warn('[IPC] Failed to list workflow approval opt-ins:', error);
+    return ipcError<Record<string, boolean>>('UNKNOWN', 'Failed to load approval grants.');
+  }
+});
+
 ipcMain.handle('workflows:generateFromIntent', async (_event, intent: string) => {
   const result = await workflowsGenerator.generateFromIntent(intent);
   if (result.ok) {
     return ipcOk(result.data);
   }
   return ipcError(result.code, result.message, result.details);
+});
+
+ipcMain.handle('workflows:skill:get', async (_event, workflowId: string) => {
+  const result = await workflowsRunner.getSkillMarkdown(workflowId);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
+ipcMain.handle('workflows:skill:save', async (_event, workflowId: string, skillMarkdown: string) => {
+  const result = await workflowsRunner.saveSkillMarkdown(workflowId, skillMarkdown);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
+ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
+  const id = typeof workflowId === 'string' ? workflowId.trim() : '';
+  const result = await workflowsRunner.deleteWorkflow(id);
+  if (result.ok) {
+    try {
+      configureWorkflowsPinsStore();
+      workflowsPinsStore.setPinned(id, false);
+      try {
+        await approvalPolicyStore.setWorkflowOptIn(id, false);
+      } catch (error) {
+        console.warn('[IPC] Failed to revoke workflow approval opt-in after delete:', error);
+      }
+      return ipcOk(result.data);
+    } catch (error) {
+      console.warn('[IPC] Failed to update pins after workflow delete:', error);
+      return ipcOk(result.data);
+    }
+  }
+  return ipcError(result.code, result.message);
 });
 
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
@@ -1067,8 +1429,27 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
       return { success: false, error: 'Invalid reply' };
     }
 
+    const normalizedRequestId = requestId.trim();
+    const sessionId = await processManager.getSessionIdForApprovalRequest(normalizedRequestId);
+
+    if (sessionId) {
+      try {
+        configureApprovalsAuditStore();
+        approvalsAuditStore.log({
+          kind: 'user_reply',
+          requestId: normalizedRequestId,
+          sessionId,
+          reply,
+          timestamp: Date.now(),
+          summary: { source: 'ipc' },
+        });
+      } catch (error) {
+        console.warn('[IPC] Failed to audit approval reply:', error);
+      }
+    }
+
     try {
-      await processManager.replyApproval(requestId, reply);
+      await processManager.replyApproval(normalizedRequestId, reply);
       return { success: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

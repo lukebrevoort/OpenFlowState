@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: January 14, 2026 (Phase 3 Session 3 - MCP Debugging)
+> **Last Updated**: February 4, 2026 (Phase 3 Session 5 - Workflows QoL)
 
 ---
 
@@ -26,6 +26,9 @@
 - **API token auth for Notion Internal Integration**
 - **Encrypted token storage (AES-256-GCM)**
 - **MCP server configuration with environment variables**
+- **User profile store (local JSON) with system tools**
+- **Shared LRU cache with TTL for MCP servers**
+- **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 
 ---
 
@@ -119,6 +122,8 @@ packages/desktop/src/
 - [x] Create IPC handlers for auth and OAuth
 - [x] Create useIntegrations hook with event listeners
 - [x] Create credentials modal for OAuth client setup
+- [x] Add user profile store + system tools
+- [x] Add shared cache module + MCP caching pass (Gmail, GCal, Notion, Canvas)
 - [ ] Test OAuth flow for Google services (needs real credentials)
 - [ ] Connect to existing MCP servers as child processes
 
@@ -1245,3 +1250,148 @@ Renderer (useOpenCode.ts):
 - Add strict pagination + filter inputs to `@flowstate/mcp-notion` query tools to cap payload size.
 - Evaluate a remote Notion MCP that fronts a vector index (embeddings + BM25) for large workspaces.
 - Define cache invalidation (Notion webhooks or time-based) and chunking strategy for page content.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - OpenCode Approval API Compatibility Fix)
+**Timestamp**: Feb 6, 2026 22:55
+
+**TASKS COMPLETED**
+- ✅ Fixed approval replies to support both OpenCode SDK API shapes:
+  - v2 style `client.permission.reply({ requestID, reply })`
+  - v1 style `client.postSessionIdPermissionsPermissionId({ path: { id, permissionID }, body: { response } })`
+- ✅ Removed false-negative "permission API unavailable" path for v1 clients.
+- ✅ Added legacy approval event compatibility for `permission.updated`:
+  - request-id extraction now recognizes `permissionID` and variants
+  - request classification/timeline normalization treats `permission.updated` as an approval request
+  - auto-approve for "always approve" now handles `permission.updated`
+- ✅ Added regression test coverage for legacy `permission.updated` request blocking behavior.
+- ✅ Verified with desktop package test + typecheck:
+  - `npm run test -- approval-blocking.test.ts`
+  - `npm run typecheck`
+
+**IN PROGRESS**
+- [ ] Validate end-to-end in desktop UI by approving/always-approving/denying an active permission request.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Restart the desktop app and trigger a permission-gated tool action.
+- Confirm each action button (`Approve`, `Always Approve`, `Deny`) returns success and unblocks the task timeline.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Workflow Approval UX + Request Tracking Reliability)
+**Timestamp**: Feb 6, 2026 23:07
+
+**TASKS COMPLETED**
+- ✅ Fixed `approvals:reply` IPC flow to stop hard-failing on in-memory-only tracking.
+  - Added session fallback resolution through persisted timeline events (`timelineStore.findSessionIdByApprovalRequestId`).
+  - Added `processManager.getSessionIdForApprovalRequest()` and reused it in both IPC + reply path.
+- ✅ Improved request-id extraction robustness across payload variants:
+  - Supports `requestId`, `requestID`, `permissionID`, and nested `permission.id`.
+- ✅ Improved approval request context shown to users:
+  - Approval payload now derives actionable `title`/`summary`/`body` from permission type, targets/patterns, tool call IDs, and metadata.
+- ✅ Fixed Tasks output panel behavior while waiting on approvals:
+  - Summary-only output is now rendered instead of incorrectly showing "No outputs yet."
+- ✅ Reduced approval card lingering noise:
+  - Resolved approval requests now show a compact "Request resolved" state in timeline instead of persistent action card UI.
+- ✅ Added tests for approval normalization and legacy event compatibility.
+  - `timeline-normalizer.test.ts`
+  - `approval-blocking.test.ts`
+
+**IN PROGRESS**
+- [ ] Manual end-to-end verification in desktop app with the "Clean Desktop" workflow.
+
+**BLOCKERS**
+- None
+
+**NEXT STEPS**
+- Restart desktop app and run "Clean Desktop" workflow.
+- Validate:
+  - multiple pending approvals can all be approved/denied without "Unknown or untracked requestId"
+  - approval cards show clear target/action metadata
+  - workflow output panel shows summary text while waiting for approval
+  - resolved approvals collapse to "Request resolved" state in timeline.
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Needs Response Status Reversion Fix)
+**Timestamp**: Feb 6, 2026 23:47
+
+**TASKS COMPLETED**
+- ✅ Fixed workflow reply flow so status persists as running after user response:
+  - `TasksMode` now calls `markRunning(taskRunId)` immediately after successful reply send.
+  - follow-up silent refresh now includes `loadActiveRun` to avoid stale run state.
+- ✅ Updated main-process workflow sync to respect response headers:
+  - `[TASK_IN_PROGRESS]` now keeps workflow/task in running state (not completed).
+  - `[NEEDS_RESPONSE]` keeps response block.
+  - `[TASK_COMPLETE]` marks completed.
+  - `[TASK_BLOCKED]` marks failed.
+- ✅ Cleared stale "Waiting for input..." description when new assistant output is not requesting input.
+
+**IN PROGRESS**
+- [ ] Manual validation in desktop app on a workflow that transitions from `[NEEDS_RESPONSE]` to `[TASK_IN_PROGRESS]`.
+
+**BLOCKERS**
+- None
+
+---
+
+## Tasks Completed (Feb 6, 2026 - Task Promoted UI Space Reduction)
+**Timestamp**: Feb 6, 2026 23:59
+
+**TASKS COMPLETED**
+- ✅ Removed the large Task promoted handoff card from the chat body area to preserve message reading space.
+- ✅ Repositioned Task promoted visibility to a compact notice below the message composer helper text.
+- ✅ Tightened compact notice styling into a single-line status with a clear `View task` action.
+- ✅ Kept the handoff state visible and actionable without interrupting the assistant response flow.
+- ✅ Verified desktop renderer types via `pnpm --filter @flowstate/desktop typecheck`.
+
+**IN PROGRESS**
+- [ ] Manual desktop validation to confirm the compact notice placement and readability on real conversation history.
+
+**BLOCKERS**
+- None
+
+---
+
+## Tasks Completed (Feb 7, 2026 - Tasks Sidebar Pagination + Retention Window)
+**Timestamp**: Feb 7, 2026 00:12
+
+**TASKS COMPLETED**
+- ✅ Added sidebar pagination in `TasksMode` with a fixed page size of 5 task runs.
+- ✅ Added `Prev` / `Next` controls and page indicator (`Page X of Y`) beneath task cards.
+- ✅ Added retention filtering so only runs updated within the last 10 days are shown in sidebar pagination.
+- ✅ Ensured selection stays valid when filtered data changes by auto-selecting the newest visible run.
+- ✅ Verified types with `pnpm --filter @flowstate/desktop typecheck`.
+
+**IN PROGRESS**
+- [ ] Manual UI validation for pagination controls and 10-day filtering behavior in desktop app.
+
+**BLOCKERS**
+- None
+
+---
+
+## Tasks Completed (Feb 7, 2026 - Workflow Title Editing)
+**Timestamp**: Feb 7, 2026 20:24
+
+**TASKS COMPLETED**
+- ✅ Added support for editable workflow titles via `title` in workflow frontmatter (`SKILL.md`).
+- ✅ Kept workflow identity stable by treating the folder name (`workflows/<id>/`) as canonical workflow ID.
+- ✅ Updated workflow save validation message to clarify that `name` is immutable and `title` should be used for rename.
+- ✅ Updated workflow generation to include frontmatter `title` by default.
+- ✅ Added regression tests in `packages/desktop/src/main/workflows-runner.test.ts`:
+  - save supports title changes while keeping `name` fixed
+  - listing uses folder ID even if frontmatter `name` drifts
+- ✅ Verified with:
+  - `pnpm --filter @flowstate/desktop test -- workflows-runner.test.ts`
+  - `pnpm --filter @flowstate/desktop typecheck`
+
+**IN PROGRESS**
+- [ ] Manual desktop app validation of editing workflow title in the Workflows drawer.
+
+**BLOCKERS**
+- None

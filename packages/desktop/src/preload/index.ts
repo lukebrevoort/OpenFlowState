@@ -18,6 +18,7 @@ import type {
   ApiTokenSuccessEvent,
   FlowstateConfig,
   ClientCredentials,
+  ApprovalNotificationClickEvent,
 } from '../renderer/types/electron';
 
 type Unsubscribe = () => void;
@@ -117,6 +118,9 @@ const flowstateAPI: FlowstateAPIDefinition = {
     // Send a message and trigger streaming response
     send: (message: string) => ipcRenderer.invoke('opencode:send', message),
 
+    // Fire-and-forget send (response streams via events)
+    sendAsync: (message: string) => ipcRenderer.invoke('opencode:sendAsync', message),
+
     // Get OpenCode status
     status: () => ipcRenderer.invoke('opencode:status'),
 
@@ -181,6 +185,14 @@ const flowstateAPI: FlowstateAPIDefinition = {
   approvals: {
     reply: (requestId: string, reply: 'once' | 'always' | 'deny') =>
       ipcRenderer.invoke('approvals:reply', requestId, reply),
+  },
+
+  notifications: {
+    onApprovalClick: (callback: (event: ApprovalNotificationClickEvent) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, data: ApprovalNotificationClickEvent) => callback(data);
+      ipcRenderer.on('notifications:approvalClick', handler);
+      return () => ipcRenderer.removeListener('notifications:approvalClick', handler);
+    },
   },
 
   // MCP server management
@@ -255,12 +267,32 @@ const flowstateAPI: FlowstateAPIDefinition = {
   tasks: {
     listRuns: () => ipcRenderer.invoke('tasks:listRuns'),
     getActiveRun: () => ipcRenderer.invoke('tasks:getActiveRun'),
+    cancelRun: (taskRunId: string) => ipcRenderer.invoke('tasks:cancel', taskRunId),
+    removeRun: (taskRunId: string) => ipcRenderer.invoke('tasks:remove', taskRunId),
+    markRunning: (taskRunId: string) => ipcRenderer.invoke('tasks:markRunning', taskRunId),
+    markComplete: (taskRunId: string) => ipcRenderer.invoke('tasks:markComplete', taskRunId),
   },
 
   workflows: {
     list: () => ipcRenderer.invoke('workflows:list'),
     run: (workflowId: string, input?: unknown) => ipcRenderer.invoke('workflows:run', workflowId, input),
     generateFromIntent: (intent: string) => ipcRenderer.invoke('workflows:generateFromIntent', intent),
+    getSkillMarkdown: (workflowId: string) => ipcRenderer.invoke('workflows:skill:get', workflowId),
+    saveSkillMarkdown: (workflowId: string, skillMarkdown: string) =>
+      ipcRenderer.invoke('workflows:skill:save', workflowId, skillMarkdown),
+    deleteWorkflow: (workflowId: string) => ipcRenderer.invoke('workflows:delete', workflowId),
+
+    listRuns: (workflowId: string, limit?: number, offset?: number) =>
+      ipcRenderer.invoke('workflows:runs:list', workflowId, limit, offset),
+    listArtifacts: (workflowRunId: string) => ipcRenderer.invoke('workflows:artifacts:list', workflowRunId),
+
+    getPins: () => ipcRenderer.invoke('workflows:pins:get'),
+    setPinned: (workflowId: string, pinned: boolean) => ipcRenderer.invoke('workflows:pins:set', workflowId, pinned),
+
+    getApprovalOptIn: (workflowId: string) => ipcRenderer.invoke('workflows:approvalOptIn:get', workflowId),
+    setApprovalOptIn: (workflowId: string, optedIn: boolean) =>
+      ipcRenderer.invoke('workflows:approvalOptIn:set', workflowId, optedIn),
+    listApprovalOptIns: () => ipcRenderer.invoke('workflows:approvalOptIns:list'),
   },
 
   integrations: {

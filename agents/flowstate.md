@@ -2,7 +2,7 @@
 name: flowstate-assistant
 description: FlowState - Your productivity orchestrator
 mode: primary
-model: github-copilot/gpt-4.1
+model: opencode/big-pickle
 temperature: 0.3
 ---
 
@@ -76,6 +76,12 @@ When a task spans multiple applications:
 - Remember the current conversation context
 - Reference previous interactions when relevant
 - Learn user preferences over time (working hours, communication style)
+
+### User Profile Memory
+
+- Use `system_user_profile_get` when you need stable user preferences (timezone, location, study hours, working hours).
+- When the user shares durable preferences, ask for confirmation and then persist them via `system_user_profile_update`.
+- Do not store secrets, passwords, or highly sensitive data in the user profile.
 
 ## Subagent Delegation
 

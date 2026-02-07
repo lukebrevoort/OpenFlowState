@@ -1,19 +1,50 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { Send, Sparkles, AlertCircle, RefreshCw, Plus } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
 import { useConfigStore } from "../stores/configStore";
-import type { McpServerStatus } from "../types/electron";
+import type { McpServerStatus, TimelineEvent } from "../types/electron";
 import { TaskHandoffCard } from "../components/TaskHandoffCard";
 import { ActivityTimeline } from "../components/ActivityTimeline";
+import { ApprovalCard } from "../components/ApprovalCard";
 import {
   errorActivityStep,
   initialActivitySteps,
   mergeActivityStep,
   stepFromOpenCodeEvent,
 } from "../lib/opencodeActivity";
+
+type ApprovalPayloadInline = {
+  requestId?: string;
+  title?: string;
+  summary?: string;
+  body?: string;
+  approveLabel?: string;
+  alwaysApproveLabel?: string;
+  denyLabel?: string;
+};
+
+const isApprovalPayloadInline = (
+  payload: unknown,
+): payload is ApprovalPayloadInline => {
+  return Boolean(payload) && typeof payload === "object" && !Array.isArray(payload);
+};
+
+const approvalPayloadForEvent = (event: TimelineEvent) =>
+  isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+
+const requestIdForEvent = (event: TimelineEvent) => {
+  const payload = approvalPayloadForEvent(event);
+  return typeof payload?.requestId === "string" && payload.requestId.trim().length > 0
+    ? payload.requestId
+    : null;
+};
 
 const statusLabels: Record<"idle" | "thinking" | "error", string> = {
   idle: "Ready",
@@ -36,6 +67,39 @@ const getTypingStepSize = (contentLength: number) => {
 };
 
 const MAX_INPUT_HEIGHT = 128;
+
+const assistantMarkdownComponents: Components = {
+  p: ({ children }) => (
+    <p className="text-foreground whitespace-pre-wrap break-words mb-2 last:mb-0">
+      {children}
+    </p>
+  ),
+  ul: ({ children }) => (
+    <ul className="my-2 ml-5 list-disc space-y-1 marker:text-primary">
+      {children}
+    </ul>
+  ),
+  ol: ({ children }) => (
+    <ol className="my-2 ml-5 list-decimal space-y-1 marker:text-primary">
+      {children}
+    </ol>
+  ),
+  li: ({ children }) => <li className="text-foreground">{children}</li>,
+  a: ({ href, children, ...props }) => (
+    <a
+      href={href}
+      className="text-primary underline underline-offset-2 hover:opacity-90"
+      onClick={(event) => {
+        if (!href) return;
+        event.preventDefault();
+        window.flowstate?.app?.openExternal?.(href).catch(() => {});
+      }}
+      {...props}
+    >
+      {children}
+    </a>
+  ),
+};
 
 const renderMessageParts = (parts?: Message["parts"]) => {
   if (!parts || parts.length === 0) return null;
@@ -61,58 +125,37 @@ const renderMessageParts = (parts?: Message["parts"]) => {
   );
 };
 
-const formatContent = (content: string) => {
+const assistantMarkdownClassName =
+  "break-words " +
+  "[&_pre]:bg-accent/30 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:text-sm [&_pre]:font-mono " +
+  "[&_code]:font-mono [&_code]:text-[0.85em] [&_code]:rounded [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 " +
+  "[&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_pre_code]:rounded-none [&_pre_code]:text-sm";
+
+const normalizeAssistantMarkdown = (content: string) => {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
-  return parts.map((part, index) => {
-    if (part.startsWith("```")) {
-      const code = part.replace(/```\w*\n?/g, "").replace(/```$/g, "");
-      return (
-        <pre
-          key={index}
-          className="bg-accent/30 rounded-lg p-3 my-2 overflow-x-auto text-sm font-mono"
-        >
-          <code>{code}</code>
-        </pre>
-      );
-    }
+  return parts
+    .map((part) => {
+      if (part.startsWith("```")) return part;
 
-    const lines = part.split("\n");
+      // Preserve existing chat look when the model uses bullet glyphs.
+      return part.replace(/^\s*•\s+/gm, "- ");
+    })
+    .join("");
+};
 
-    return (
-      <span key={index}>
-        {lines.map((line, lineIndex) => {
-          if (line.trim().startsWith("•") || line.trim().startsWith("-")) {
-            return (
-              <div key={lineIndex} className="flex gap-2 my-1">
-                <span className="text-primary">•</span>
-                <span
-                  className="text-foreground"
-                  dangerouslySetInnerHTML={{
-                    __html: line
-                      .replace(/^[•-]\s*/, "")
-                      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-                  }}
-                />
-              </div>
-            );
-          }
-
-          return (
-            <span key={lineIndex}>
-              <span
-                className="text-foreground"
-                dangerouslySetInnerHTML={{
-                  __html: line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-                }}
-              />
-              {lineIndex < lines.length - 1 && <br />}
-            </span>
-          );
-        })}
-      </span>
-    );
-  });
+const AssistantMarkdown = ({ content }: { content: string }) => {
+  return (
+    <ReactMarkdown
+      className={assistantMarkdownClassName}
+      remarkPlugins={[remarkGfm, remarkBreaks]}
+      skipHtml
+      disallowedElements={["img"]}
+      components={assistantMarkdownComponents}
+    >
+      {normalizeAssistantMarkdown(content)}
+    </ReactMarkdown>
+  );
 };
 
 const AssistantMessageContent = ({
@@ -171,7 +214,7 @@ const AssistantMessageContent = ({
 
   return (
     <>
-      {formatContent(message.content)}
+      <AssistantMarkdown content={message.content} />
       {renderMessageParts(message.parts)}
     </>
   );
@@ -184,6 +227,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
+  const [activityExpanded, setActivityExpanded] = useState(false);
+  const [approvalReplying, setApprovalReplying] = useState<
+    null | "once" | "always" | "deny"
+  >(null);
   const [mcpStatus, setMcpStatus] = useState<Record<
     string,
     McpServerStatus
@@ -206,6 +253,62 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const timeline = useChatStore((state) => state.timeline);
   const { sendMessage, checkStatus, refreshTimeline, createSession } = useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
+  const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
+
+  const pendingApprovals = useMemo(() => {
+    if (!timeline || timeline.length === 0) {
+      return { latest: null as null | TimelineEvent, count: 0 };
+    }
+
+    const responded = new Set<string>();
+    for (const event of timeline) {
+      if (event.kind !== "approval_response") continue;
+      const requestId = requestIdForEvent(event);
+      if (requestId) responded.add(requestId);
+    }
+
+    const pending: TimelineEvent[] = [];
+    for (const event of timeline) {
+      if (event.kind !== "approval_request") continue;
+      const requestId = requestIdForEvent(event);
+      if (requestId && responded.has(requestId)) continue;
+      pending.push(event);
+    }
+
+    if (pending.length === 0) {
+      return { latest: null as null | TimelineEvent, count: 0 };
+    }
+
+    let latest = pending[0]!;
+    for (let i = 1; i < pending.length; i += 1) {
+      if (pending[i]!.timestamp > latest.timestamp) {
+        latest = pending[i]!;
+      }
+    }
+
+    return { latest, count: pending.length };
+  }, [timeline]);
+
+  const replyToApproval = async (
+    requestId: string,
+    mode: "once" | "always" | "deny",
+  ): Promise<void> => {
+    if (!window.flowstate?.approvals?.reply) {
+      throw new Error("Approvals bridge unavailable — restart FlowState to reload the preload API.");
+    }
+    if (approvalReplying) return;
+
+    setApprovalReplying(mode);
+    try {
+      const result = await window.flowstate.approvals.reply(requestId, mode);
+      if (!result.success) {
+        throw new Error(result.error ?? "Approval failed");
+      }
+      await refreshTimeline();
+    } finally {
+      setApprovalReplying(null);
+    }
+  };
 
   const scrollToBottom = (behavior: ScrollBehavior) => {
     const el = messagesScrollRef.current;
@@ -464,13 +567,63 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
             )}
             {timeline.length > 0 && (
               <div className="mt-2">
-                <ActivityTimeline
-                  events={timeline}
-                  title="Activity"
-                  collapsed
-                  maxItems={1}
-                  variant="compact"
-                />
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    {activityExpanded ? (
+                      <ActivityTimeline
+                        events={timeline}
+                        title="Activity"
+                        collapsed={false}
+                        maxItems={8}
+                        maxItemsExpanded={200}
+                        variant="default"
+                        onApprove={(event) => {
+                          const requestId = requestIdForEvent(event);
+                          if (!requestId) {
+                            console.warn("Approval request missing requestId", event);
+                            return;
+                          }
+                          return approvalsAvailable ? replyToApproval(requestId, "once") : undefined;
+                        }}
+                        onAlwaysApprove={(event) => {
+                          const requestId = requestIdForEvent(event);
+                          if (!requestId) {
+                            console.warn("Approval request missing requestId", event);
+                            return;
+                          }
+                          return approvalsAvailable ? replyToApproval(requestId, "always") : undefined;
+                        }}
+                        onDeny={(event) => {
+                          const requestId = requestIdForEvent(event);
+                          if (!requestId) {
+                            console.warn("Approval request missing requestId", event);
+                            return;
+                          }
+                          return approvalsAvailable ? replyToApproval(requestId, "deny") : undefined;
+                        }}
+                      />
+                    ) : (
+                      <ActivityTimeline
+                        events={timeline}
+                        title="Activity"
+                        collapsed
+                        maxItems={1}
+                        variant="compact"
+                      />
+                    )}
+                  </div>
+
+                  {timeline.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setActivityExpanded((prev) => !prev)}
+                      className="shrink-0 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                      aria-expanded={activityExpanded}
+                    >
+                      {activityExpanded ? "Collapse" : "Expand"}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
@@ -581,23 +734,98 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
             </div>
           ))}
 
+          {pendingApprovals.latest && (
+            <div className="w-full flex justify-start">
+              <div className="w-full max-w-[70%]">
+                <ApprovalCard
+                  title={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.title ??
+                    pendingApprovals.latest.title
+                  }
+                  summary={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.summary ??
+                    pendingApprovals.latest.detail ??
+                    "This action requires your approval."
+                  }
+                  body={approvalPayloadForEvent(pendingApprovals.latest)?.body ?? ""}
+                  primaryActionLabel={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.approveLabel
+                  }
+                  alwaysApproveLabel={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.alwaysApproveLabel
+                  }
+                  denyLabel={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.denyLabel
+                  }
+                  onApprove={() => {
+                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    if (!requestId) {
+                      console.warn(
+                        "Approval request missing requestId",
+                        pendingApprovals.latest,
+                      );
+                      setActivityExpanded(true);
+                      return;
+                    }
+                    return approvalsAvailable ? replyToApproval(requestId, "once") : undefined;
+                  }}
+                  onAlwaysApprove={() => {
+                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    if (!requestId) {
+                      console.warn(
+                        "Approval request missing requestId",
+                        pendingApprovals.latest,
+                      );
+                      setActivityExpanded(true);
+                      return;
+                    }
+                    return approvalsAvailable ? replyToApproval(requestId, "always") : undefined;
+                  }}
+                  onDeny={() => {
+                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    if (!requestId) {
+                      console.warn(
+                        "Approval request missing requestId",
+                        pendingApprovals.latest,
+                      );
+                      setActivityExpanded(true);
+                      return;
+                    }
+                    return approvalsAvailable ? replyToApproval(requestId, "deny") : undefined;
+                  }}
+                />
+
+                {!approvalsAvailable && (
+                  <p className="mt-2 text-[11px] text-destructive">
+                    Approvals bridge unavailable — restart FlowState to reload the preload API.
+                  </p>
+                )}
+
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-[11px] text-muted-foreground">
+                    {pendingApprovals.count > 1
+                      ? `${pendingApprovals.count} approvals pending - showing latest.`
+                      : "Approval pending."}
+                  </span>
+                  {timeline.length > 1 && !activityExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => setActivityExpanded(true)}
+                      className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                    >
+                      View activity
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {showThinking && <ThinkingIndicator />}
 
           <div ref={messagesEndRef} />
         </div>
       </div>
-
-      {handoffTask && (
-        <div className="px-6 pb-4">
-          <div className="w-full max-w-4xl mx-auto">
-            <TaskHandoffCard
-              title={handoffTask.title}
-              description={handoffTask.description}
-              onViewTask={onViewTask}
-            />
-          </div>
-        </div>
-      )}
 
       <div className="flex-shrink-0 px-6 pb-6">
         <div className="w-full max-w-4xl mx-auto">
@@ -626,6 +854,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           <p className="text-xs text-muted-foreground mt-2 text-center">
             Press Enter to send, Shift+Enter for new line
           </p>
+          {handoffTask && (
+            <div className="mt-2">
+              <TaskHandoffCard
+                title={handoffTask.title}
+                description={handoffTask.description}
+                onViewTask={onViewTask}
+                compact
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -27,12 +27,17 @@ const formatToolError = (error: unknown): string => {
   return String(error);
 };
 
-// Tool definitions with autonomy levels
+// Tool definitions with MCP annotations for better LLM understanding
 const GMAIL_TOOLS = [
   {
     name: 'gmail_list',
     description: 'List emails from inbox with optional filters (metadata by default)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -59,7 +64,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_read',
     description: 'Read a specific email (metadata by default)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -86,7 +96,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_search',
     description: 'Search emails using Gmail query syntax (metadata by default)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -109,7 +124,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_draft',
     description: 'Create an email draft (does not send)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -140,7 +160,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_label',
     description: 'Add or remove labels from an email',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -165,7 +190,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_send',
     description: 'Send an email',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -196,7 +226,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_reply',
     description: 'Reply to an email thread',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -219,7 +254,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_get_thread',
     description: 'Get messages from a thread (metadata by default)',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -242,7 +282,12 @@ const GMAIL_TOOLS = [
   {
     name: 'gmail_delete',
     description: 'Move an email to trash',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -259,7 +304,7 @@ const GMAIL_TOOLS = [
 export function registerTools(server: Server): void {
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: GMAIL_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: GMAIL_TOOLS,
   }));
 
   // Handle tool calls

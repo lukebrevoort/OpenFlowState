@@ -22,6 +22,14 @@ class WorkflowsStore {
     this.templates.set(record.id, record);
   }
 
+  removeDefinition(workflowId: string): void {
+    this.definitions.delete(workflowId);
+  }
+
+  removeTemplate(workflowId: string): void {
+    this.templates.delete(workflowId);
+  }
+
   listDefinitions(): WorkflowDefinition[] {
     return Array.from(this.definitions.values()).sort((a, b) => a.title.localeCompare(b.title));
   }
@@ -32,6 +40,10 @@ class WorkflowsStore {
 
   getTemplate(workflowId: string): string | null {
     return this.templates.get(workflowId)?.template ?? null;
+  }
+
+  getDefinition(workflowId: string): WorkflowDefinition | null {
+    return this.definitions.get(workflowId) ?? null;
   }
 
   createRun(run: WorkflowRun): void {

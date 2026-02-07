@@ -24,12 +24,17 @@ const formatToolError = (error: unknown): string => {
   return String(error);
 };
 
-// Tool definitions with autonomy levels
+// Tool definitions with MCP annotations for better LLM understanding
 const GCAL_TOOLS = [
   {
     name: 'gcal_list_calendars',
     description: 'List calendars available in the connected Google account',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -38,7 +43,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_list_events',
     description: 'List calendar events within a time range. By default, queries all calendars selected by the user in FlowState settings. Use calendarId or calendarIds parameters to override and query specific calendars.',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -69,7 +79,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_get_event',
     description: 'Get details of a specific calendar event',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,7 +103,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_free_busy',
     description: 'Check availability/free-busy times for calendars. By default, checks all calendars selected by the user in FlowState settings.',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -112,7 +132,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_find_conflicts',
     description: 'Find scheduling conflicts within a time range across all selected calendars. Checks all calendars the user has selected in FlowState settings.',
-    autonomy: 'auto',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -136,7 +161,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_create_event',
     description: 'Create a new calendar event',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -176,7 +206,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_update_event',
     description: 'Update an existing calendar event',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -216,7 +251,12 @@ const GCAL_TOOLS = [
   {
     name: 'gcal_delete_event',
     description: 'Delete a calendar event',
-    autonomy: 'approval',
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -237,7 +277,7 @@ const GCAL_TOOLS = [
 export function registerTools(server: Server): void {
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: GCAL_TOOLS.map(({ autonomy, ...tool }) => tool),
+    tools: GCAL_TOOLS,
   }));
 
   // Handle tool calls

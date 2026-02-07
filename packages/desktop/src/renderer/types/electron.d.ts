@@ -92,12 +92,17 @@ export interface TaskRun {
   sessionId: string;
   title: string;
   description: string;
-  status: 'running' | 'waiting_approval' | 'completed' | 'failed';
+  status: 'running' | 'waiting_approval' | 'completed' | 'failed' | 'cancelled';
+  /** Why the task is currently blocked (if it is). */
+  blockingReason?:
+    | { kind: 'permission' }
+    | { kind: 'response' };
   startedAt: number;
   updatedAt: number;
   progress: number;
   summary?: string;
   summarySent?: boolean;
+  metadata?: unknown;
 }
 
 export interface Session {
@@ -114,16 +119,44 @@ export interface WorkflowDefinition {
 export interface WorkflowRun {
   id: string;
   workflowId: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  taskRunId?: string;
+  sessionId?: string;
+  assistantMessageId?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | (string & {});
   startedAt: number;
   finishedAt?: number;
+  durationMs?: number;
+  inputJson?: string;
+  outputPreview?: string;
   output?: unknown;
   error?: string;
+}
+
+export interface WorkflowArtifact {
+  artifactId: string;
+  workflowRunId: string;
+  kind: 'final_output' | 'summary' | 'export' | (string & {});
+  title?: string;
+  mime?: string;
+  createdAt: number;
+  payloadText?: string;
 }
 
 export interface WorkflowGenerationResult {
   definition: WorkflowDefinition;
   skillMarkdown: string;
+}
+
+export interface WorkflowSkillFile {
+  workflowId: string;
+  skillMarkdown: string;
+  source: 'user' | 'project';
+}
+
+export interface WorkflowSkillSaveResult {
+  definition: WorkflowDefinition;
+  skillMarkdown: string;
+  source: 'user' | 'project';
 }
 
 export type ChatSendResult = {
@@ -180,6 +213,12 @@ export interface OAuthErrorEvent {
 
 export interface ApiTokenSuccessEvent {
   service: string;
+}
+
+export interface ApprovalNotificationClickEvent {
+  requestId: string;
+  sessionId: string;
+  taskRunId?: string;
 }
 
 export interface McpServerStatus {
@@ -258,6 +297,9 @@ export interface FlowstateAPI {
     // Send a message (triggers streaming response via events)
     send: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
 
+    // Fire-and-forget send (response still streams via events)
+    sendAsync: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
+
     // Get status
     status: () => Promise<OpenCodeStatus>;
     restart: () => Promise<{ success: boolean; error?: string }>;
@@ -287,6 +329,10 @@ export interface FlowstateAPI {
 
   approvals: {
     reply: (requestId: string, reply: 'once' | 'always' | 'deny') => Promise<{ success: boolean; error?: string }>;
+  };
+
+  notifications: {
+    onApprovalClick: (callback: (event: ApprovalNotificationClickEvent) => void) => () => void;
   };
 
   mcp: {
@@ -330,12 +376,32 @@ export interface FlowstateAPI {
   tasks: {
     listRuns: () => Promise<IpcResult<TaskRun[]>>;
     getActiveRun: () => Promise<IpcResult<TaskRun | null>>;
+    cancelRun: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
+    removeRun: (taskRunId: string) => Promise<IpcResult<{ removed: boolean }>>;
+    markRunning: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
+    markComplete: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
   };
 
   workflows: {
     list: () => Promise<IpcResult<WorkflowDefinition[]>>;
     run: (workflowId: string, input?: unknown) => Promise<IpcResult<WorkflowRun>>;
     generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
+    getSkillMarkdown: (workflowId: string) => Promise<IpcResult<WorkflowSkillFile>>;
+    saveSkillMarkdown: (workflowId: string, skillMarkdown: string) => Promise<IpcResult<WorkflowSkillSaveResult>>;
+    deleteWorkflow: (workflowId: string) => Promise<IpcResult<{ removed: boolean }>>;
+
+    listRuns: (workflowId: string, limit?: number, offset?: number) => Promise<IpcResult<WorkflowRun[]>>;
+    listArtifacts: (workflowRunId: string) => Promise<IpcResult<WorkflowArtifact[]>>;
+
+    getPins: () => Promise<IpcResult<string[]>>;
+    setPinned: (workflowId: string, pinned: boolean) => Promise<IpcResult<{ pinnedIds: string[] }>>;
+
+    getApprovalOptIn: (workflowId: string) => Promise<IpcResult<boolean>>;
+    setApprovalOptIn: (
+      workflowId: string,
+      optedIn: boolean,
+    ) => Promise<IpcResult<{ workflowId: string; optedIn: boolean }>>;
+    listApprovalOptIns: () => Promise<IpcResult<Record<string, boolean>>>;
   };
 
   integrations: {

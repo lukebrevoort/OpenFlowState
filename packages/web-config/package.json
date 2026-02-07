@@ -10,7 +10,7 @@
     "server": "node dist-server/server/index.js",
     "build": "tsc && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"

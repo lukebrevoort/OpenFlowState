@@ -41,6 +41,63 @@ const slugify = (raw: string): string => {
   return lowered;
 };
 
+const WORKFLOW_NAME_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'to',
+  'for',
+  'of',
+  'on',
+  'in',
+  'at',
+  'with',
+  'and',
+  'or',
+  'my',
+  'your',
+  'our',
+  'their',
+  'me',
+  'you',
+  'we',
+  'they',
+  'add',
+  'create',
+  'make',
+  'build',
+  'workflow',
+  'workflows',
+  'please',
+  'that',
+  'this',
+  'from',
+  'into',
+  'every',
+  'each',
+  'daily',
+  'weekly',
+  'monthly',
+]);
+
+const buildWorkflowSlug = (intent: string): string => {
+  const tokens = intent
+    .toLowerCase()
+    .replace(/["']/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const filtered = tokens.filter((token) => !WORKFLOW_NAME_STOPWORDS.has(token));
+  const baseTokens = (filtered.length ? filtered : tokens).slice(0, 6);
+  const base = baseTokens.join(' ');
+
+  const slug = slugify(base).slice(0, 32);
+  if (slug.length > 0) return slug;
+
+  return slugify(intent).slice(0, 48);
+};
+
 const escapeYamlString = (value: string): string => {
   // Keep it single-line; YAML double-quoted string.
   const singleLine = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -79,7 +136,7 @@ const redactSecrets = (input: string): string => {
   return redacted;
 };
 
-const parseSkillMarkdown = (raw: string): { description?: string; body: string } => {
+const parseSkillMarkdown = (raw: string): { title?: string; description?: string; body: string } => {
   const trimmed = raw.replace(/\r\n/g, '\n').trim();
   if (!trimmed.startsWith('---')) {
     return { body: trimmed };
@@ -103,6 +160,7 @@ const parseSkillMarkdown = (raw: string): { description?: string; body: string }
   }
 
   return {
+    title: ensureString(record.title) ?? undefined,
     description: ensureString(record.description) ?? undefined,
     body,
   };
@@ -143,8 +201,9 @@ const buildGeneratorPrompt = (intent: string, workflowId: string): string => {
     '',
     'Strict format requirements:',
     '- The first line MUST be "---".',
-    '- YAML frontmatter MUST contain ONLY these keys: name, description.',
+    '- YAML frontmatter MUST contain ONLY these keys: name, title, description.',
     `- name MUST be exactly: ${workflowId}`,
+    '- title MUST be a short, human-friendly workflow title.',
     '- description MUST be a single sentence (<= 140 chars) describing what the workflow does.',
     '- After YAML, include a markdown body with these sections:',
     '  - A title heading ("# ...")',
@@ -173,14 +232,17 @@ class WorkflowsGenerator {
 
     const intentRedacted = redactSecrets(rawIntent);
     const baseWorkflowsDir = path.join(configStore.getDataDir(), 'workflows');
-    const slugBase = slugify(intentRedacted).slice(0, 48);
+    const slugBase = buildWorkflowSlug(intentRedacted);
     const workflowId = await ensureUniqueWorkflowId(baseWorkflowsDir, slugBase);
 
     const prompt = buildGeneratorPrompt(intentRedacted, workflowId);
 
     let generated = '';
     try {
-      const response = await processManager.sendMessage(prompt);
+      const response = await processManager.sendMessage(prompt, undefined, {
+        skipTaskTracking: true,
+        skipWorkflowSync: true,
+      });
       generated = response.content ?? '';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -188,6 +250,7 @@ class WorkflowsGenerator {
     }
 
     const parsed = parseSkillMarkdown(generated);
+    const title = parsed.title ?? humanizeId(workflowId);
     const description =
       parsed.description ??
       ensureString(intentRedacted.replace(/\s+/g, ' ').trim().slice(0, 140)) ??
@@ -196,6 +259,7 @@ class WorkflowsGenerator {
     const normalized = [
       '---',
       `name: ${workflowId}`,
+      `title: ${escapeYamlString(title)}`,
       `description: ${escapeYamlString(description)}`,
       '---',
       '',
@@ -217,7 +281,7 @@ class WorkflowsGenerator {
 
     const definition: WorkflowDefinition = {
       id: workflowId,
-      title: humanizeId(workflowId),
+      title,
       description,
     };
 

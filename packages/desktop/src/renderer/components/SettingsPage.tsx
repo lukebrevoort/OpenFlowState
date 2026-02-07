@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw } from "lucide-react";
 import { useConfig } from "../hooks/useConfig";
+import type { WorkflowDefinition } from "../types/electron";
 
 export function SettingsPage() {
   const { config, isLoaded, loadConfig, updateConfig } = useConfig();
@@ -14,6 +15,13 @@ export function SettingsPage() {
   const [systemPrefersReducedMotion, setSystemPrefersReducedMotion] = useState(false);
   const [resetStatus, setResetStatus] = useState<"idle" | "done">("idle");
   const resetLabel = resetStatus === "done" ? "Reset" : "Reset now";
+
+  const [approvalGrants, setApprovalGrants] = useState<
+    Array<{ workflowId: string; title?: string }>
+  >([]);
+  const [approvalGrantsLoading, setApprovalGrantsLoading] = useState(false);
+  const [approvalGrantsError, setApprovalGrantsError] = useState<string | null>(null);
+  const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -37,6 +45,77 @@ export function SettingsPage() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+
+  const loadApprovalGrants = async () => {
+    const listFn = window.flowstate?.workflows?.listApprovalOptIns;
+    if (!listFn) return;
+
+    setApprovalGrantsLoading(true);
+    setApprovalGrantsError(null);
+    try {
+      const [optInsResult, workflowsResult] = await Promise.all([
+        listFn(),
+        window.flowstate?.workflows?.list?.(),
+      ]);
+
+      if (!optInsResult.ok) {
+        setApprovalGrants([]);
+        setApprovalGrantsError(optInsResult.error.message);
+        return;
+      }
+
+      const titleById = new Map<string, string>();
+      if (workflowsResult && "ok" in workflowsResult && workflowsResult.ok) {
+        (workflowsResult.data as WorkflowDefinition[]).forEach((workflow) => {
+          titleById.set(workflow.id, workflow.title);
+        });
+      }
+
+      const grantedIds = Object.entries(optInsResult.data)
+        .filter(([, optedIn]) => Boolean(optedIn))
+        .map(([workflowId]) => workflowId);
+
+      const next = grantedIds
+        .map((workflowId) => ({
+          workflowId,
+          title: titleById.get(workflowId),
+        }))
+        .sort((a, b) => (a.title ?? a.workflowId).localeCompare(b.title ?? b.workflowId));
+
+      setApprovalGrants(next);
+    } catch (error) {
+      console.error("Failed to load approval grants", error);
+      setApprovalGrants([]);
+      setApprovalGrantsError("Failed to load approval grants.");
+    } finally {
+      setApprovalGrantsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadApprovalGrants().catch(() => {});
+  }, []);
+
+  const handleRevokeApprovalGrant = async (workflowId: string) => {
+    const setFn = window.flowstate?.workflows?.setApprovalOptIn;
+    if (!setFn) return;
+
+    setRevokingGrantId(workflowId);
+    setApprovalGrantsError(null);
+    try {
+      const result = await setFn(workflowId, false);
+      if (!result.ok) {
+        setApprovalGrantsError(result.error.message);
+        return;
+      }
+      await loadApprovalGrants();
+    } catch (error) {
+      console.error("Failed to revoke approval grant", error);
+      setApprovalGrantsError("Failed to revoke approval grant.");
+    } finally {
+      setRevokingGrantId(null);
+    }
+  };
 
   const handleResetOnboarding = async () => {
     try {
@@ -473,7 +552,62 @@ export function SettingsPage() {
               <h3 className="text-xl text-foreground">Privacy & Security</h3>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-5">
+              <div className="rounded-xl border border-border bg-muted/10 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-foreground">Approval grants</p>
+                    <p className="text-xs text-muted-foreground">
+                      Workflows you set to Always Approve can skip permission prompts. Revoke any time.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => loadApprovalGrants()}
+                    className="fs-button-secondary text-xs px-3 py-1.5"
+                    disabled={approvalGrantsLoading}
+                  >
+                    {approvalGrantsLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                {approvalGrantsError ? (
+                  <p className="mt-2 text-xs text-destructive">{approvalGrantsError}</p>
+                ) : null}
+
+                {approvalGrantsLoading ? (
+                  <p className="mt-3 text-xs text-muted-foreground">Loading...</p>
+                ) : approvalGrants.length === 0 ? (
+                  <p className="mt-3 text-xs text-muted-foreground">No stored approval grants.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {approvalGrants.map((grant) => (
+                      <div
+                        key={grant.workflowId}
+                        className="flex items-center justify-between gap-4 rounded-lg border border-border bg-card/60 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm text-foreground truncate">
+                            {grant.title ?? grant.workflowId}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate font-mono">
+                            {grant.workflowId}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRevokeApprovalGrant(grant.workflowId)}
+                          disabled={revokingGrantId === grant.workflowId}
+                          className="fs-button-secondary text-xs px-3 py-1.5 flex-shrink-0"
+                        >
+                          {revokingGrantId === grant.workflowId ? "Revoking..." : "Revoke"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-foreground">
