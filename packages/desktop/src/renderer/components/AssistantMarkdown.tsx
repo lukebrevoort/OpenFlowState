@@ -1,4 +1,3 @@
-import React from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";

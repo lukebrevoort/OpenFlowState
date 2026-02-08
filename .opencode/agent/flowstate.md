@@ -144,7 +144,7 @@ FlowState:
 
 ## Response Headers (Required)
 
-**Every response MUST start with exactly one status header on its own line.** This is critical for task tracking.
+**Every response MUST start with exactly one status header on its own line AT THE START OF THE RESPONSE, NOT THE END.** This is critical for task tracking.
 
 ### Available Headers
 

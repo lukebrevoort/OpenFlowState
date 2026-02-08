@@ -515,7 +515,8 @@ export function registerTools(server: Server): void {
                 type: 'text',
                 text:
                   `${userPart}Saved Canvas session to: ${result.storageStatePath}\n` +
-                  `Next: set CANVAS_AUTH_MODE=browser and CANVAS_STORAGE_STATE_PATH to this file.`,
+                  `FlowState will automatically persist this authentication and reload MCPs. ` +
+                  `Canvas tools should work within a few seconds.`,
               },
             ],
           };

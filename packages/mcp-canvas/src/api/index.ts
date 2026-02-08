@@ -563,6 +563,34 @@ export async function browserLoginWithPlaywright(options?: {
         if (response.ok()) {
           const user = await response.json();
           await context.storageState({ path: storageStatePath });
+
+          // Write pending auth file for desktop to pick up and persist
+          const flowstateDataDir = process.env.FLOWSTATE_DATA_DIR;
+          if (flowstateDataDir) {
+            const pendingAuthDir = path.join(flowstateDataDir, 'pending-auth');
+            const pendingAuthFile = path.join(pendingAuthDir, `canvas-browser-${Date.now()}.json`);
+            try {
+              await fs.mkdir(pendingAuthDir, { recursive: true });
+              await fs.writeFile(
+                pendingAuthFile,
+                JSON.stringify({
+                  service: 'canvas',
+                  canvasApiUrl: baseUrl,
+                  canvasAuthMode: 'browser',
+                  canvasStorageStatePath: storageStatePath,
+                  timestamp: new Date().toISOString(),
+                  userId: typeof user?.id === 'number' ? user.id : undefined,
+                  userName: typeof user?.name === 'string' ? user.name : undefined,
+                }),
+                'utf8'
+              );
+              console.error(`[mcp-canvas] Wrote pending auth file: ${pendingAuthFile}`);
+            } catch (err) {
+              console.error('[mcp-canvas] Failed to write pending auth file:', err);
+              // Continue anyway - the login still succeeded
+            }
+          }
+
           return {
             storageStatePath,
             userId: typeof user?.id === 'number' ? user.id : undefined,

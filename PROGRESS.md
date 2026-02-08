@@ -1,13 +1,13 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 4, 2026 (Phase 3 Session 5 - Workflows QoL)
+> **Last Updated**: February 7, 2026 (Canvas Browser Auth Fix)
 
 ---
 
-## Current Status: 🔄 Desktop Phase 3 IN PROGRESS
+## Current Status: ✅ Phases 5 & 5.5 COMPLETE → Ready for Phase 6
 
-**Desktop Phase 3: Integrations & Config is underway!** MCP server configuration and debugging improved.
+**Phase 5 (Workflows + Commands Productization)** and **Phase 5.5 (Inline Approvals System)** are both complete!
 
 ### What's Working:
 - Electron main process with macOS window management
@@ -29,6 +29,39 @@
 - **User profile store (local JSON) with system tools**
 - **Shared LRU cache with TTL for MCP servers**
 - **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
+- **Canvas browser auth persistence via MCP-to-desktop pending auth files**
+
+---
+
+## Tasks Completed (Feb 7, 2026 - Canvas Browser Auth Fix)
+
+Fixed an issue where Canvas browser authentication (via `canvas_auth_browser_login` MCP tool) wasn't persisting:
+
+**Problem**: When the agent called `canvas_auth_browser_login`:
+1. Browser opened, user logged in successfully
+2. Playwright storage state was saved to file
+3. But the desktop app didn't know about it - auth wasn't persisted
+4. Subsequent Canvas tool calls failed because MCP didn't have `CANVAS_STORAGE_STATE_PATH`
+
+**Solution**: Implemented a "pending auth" file-based IPC mechanism:
+1. After `canvas_auth_browser_login` succeeds, the MCP writes a pending auth JSON file to `${FLOWSTATE_DATA_DIR}/pending-auth/`
+2. Desktop main process watches this directory with chokidar
+3. When a pending auth file is detected, desktop:
+   - Parses and validates the auth data
+   - Stores the token via authManager (with browser mode + storage state path in additionalData)
+   - Reloads MCPs so Canvas MCP restarts with correct environment variables
+   - Deletes the processed file
+
+**Files Created:**
+- `packages/desktop/src/main/pending-auth-watcher.ts` - Watches for and processes pending auth files
+
+**Files Modified:**
+- `packages/mcp-canvas/src/api/index.ts` - Write pending auth file after successful browser login
+- `packages/mcp-canvas/src/tools/index.ts` - Updated success message to reflect automatic persistence
+- `packages/desktop/src/main/index.ts` - Import and start pending auth watcher, stop on quit
+
+**Dependencies Added:**
+- `chokidar` (devDependency in @flowstate/desktop)
 
 ---
 
@@ -403,20 +436,43 @@ packages/desktop/src/
 - [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
 **BLOCKERS**
 - None
-**NEXT STEPS**
-- Begin Desktop Phase 4 onboarding and polish work (welcome flow, provider selection, inline approvals) while watching the refreshed chat UX.
 
 ---
 
-## Tasks Completed (Jan 14, 2026 - Desktop Phase 3 Session 5 - Chat Overflow Fixes)
-**Timestamp**: Jan 14, 2026 22:10
-**TASKS COMPLETED**
-- ✅ Filtered MCP status chips to FlowState servers and capped lists so the FlowState Pulse + Live Activity panels no longer overflow with global MCP entries.
-- ✅ Added "+ more" summary badges for MCP lists to keep the chat header compact without losing context.
+## Tasks Completed (Feb 7, 2026 - Phase 5 & 5.5 Status Update)
+**Timestamp**: Feb 7, 2026 21:15
+
+**SUMMARY**
+- ✅ Analyzed Phase 5 and Phase 5.5 implementation status against PLAN.md
+- ✅ Verified all 12 Phase 5.5 (Inline Approvals) PM tasks are marked SUCCESS
+- ✅ Verified Phase 5 (Workflows + Commands) features are implemented in code:
+  - Task created immediately on workflow start (`workflows-runner.ts` line 396-412)
+  - WorkflowRuns + artifacts persisted in SQLite (`workflow-run-store.ts`)
+  - Workflow run history with last N runs visible in UI
+  - Dedicated OpenCode sessions via `createDetachedSession()`
+  - Pin limit enforcement (3 max) via `PinnedWorkflowsLimitError`
+  - WorkflowDetailsDrawer with Always Approve toggle
+  - Workflows vs Commands separation ready via `allowlistedGlobalCommands` hook
+- ✅ Updated PLAN.md to mark Phases 5 and 5.5 as COMPLETE
+- ✅ Fixed TypeScript lint errors (unused imports in timeline-normalizer.ts and AssistantMarkdown.tsx)
+- ✅ Verified desktop build passes
+
+**KEY FINDINGS**
+- Phase 5 was largely complete in code but PLAN.md checkboxes weren't updated
+- The "Workflows vs Commands" separation is architecturally complete (allowlist hook exists)
+- Global commands (like `tdd`) aren't shown by design; when needed, add to `allowlistedGlobalCommands`
+- Phase 5.5 approvals system fully implemented with security hardening, full payloads, and state machine tests
+
 **IN PROGRESS**
-- [ ] Phase 4 prep: Draft the onboarding/wow flow, provider selector, and UX polish that kick off the next phase.
-**BLOCKERS**
-- None
+- [x] Phase 5 complete
+- [x] Phase 5.5 complete
+- [ ] Phase 6: Onboarding + UX Polish (next)
+
+**NEXT STEPS**
+- Begin Phase 6: tighten onboarding → integrations handshake, add missing UI wiring
+- Consider adding specific global commands to allowlist (e.g., `tdd`, `debug`) if desired
+- Run `pnpm dev:desktop` to manually test workflow flows
+
 **NEXT STEPS**
 - Re-check the chat layout after any new MCP additions and continue Phase 4 onboarding work.
 

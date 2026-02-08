@@ -21,6 +21,7 @@ import { oauthServer } from './oauth-server.js';
 import { listGoogleCalendars } from './google-calendar.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 import { approvalsAuditStore } from './approvals-audit-store.js';
+import { startPendingAuthWatcher, stopPendingAuthWatcher } from './pending-auth-watcher.js';
 import type {
   IpcError,
   IpcResult,
@@ -117,6 +118,14 @@ async function initialize(): Promise<void> {
     console.error('Failed to initialize auth manager:', error);
   }
 
+  // Start pending auth watcher (for MCP tools that trigger auth flows)
+  try {
+    await startPendingAuthWatcher(dataDir);
+    console.log('Pending auth watcher started');
+  } catch (error) {
+    console.error('Failed to start pending auth watcher:', error);
+  }
+
   // Set main window reference for OAuth server
   if (mainWindow) {
     oauthServer.setMainWindow(mainWindow);
@@ -157,6 +166,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+// Clean up before quitting
+app.on('before-quit', async () => {
+  await stopPendingAuthWatcher();
 });
 
 // ============================================================================
@@ -1430,22 +1444,31 @@ ipcMain.handle('opencode:switchSession', async (_event, sessionId: string) => {
     }
 
     const normalizedRequestId = requestId.trim();
-    const sessionId = await processManager.getSessionIdForApprovalRequest(normalizedRequestId);
+    if (!normalizedRequestId) {
+      return { success: false, error: 'Empty requestId' };
+    }
 
-    if (sessionId) {
-      try {
-        configureApprovalsAuditStore();
-        approvalsAuditStore.log({
-          kind: 'user_reply',
-          requestId: normalizedRequestId,
-          sessionId,
-          reply,
-          timestamp: Date.now(),
-          summary: { source: 'ipc' },
-        });
-      } catch (error) {
-        console.warn('[IPC] Failed to audit approval reply:', error);
-      }
+    // Security: Verify the requestId was actually tracked before accepting the reply.
+    // This prevents malicious or stale requests from being processed.
+    const sessionId = await processManager.getSessionIdForApprovalRequest(normalizedRequestId);
+    if (!sessionId) {
+      console.warn('[IPC] Rejected approval reply for unknown/untracked requestId:', normalizedRequestId);
+      return { success: false, error: 'Unknown or expired approval request' };
+    }
+
+    // Audit the user's reply
+    try {
+      configureApprovalsAuditStore();
+      approvalsAuditStore.log({
+        kind: 'user_reply',
+        requestId: normalizedRequestId,
+        sessionId,
+        reply,
+        timestamp: Date.now(),
+        summary: { source: 'ipc' },
+      });
+    } catch (error) {
+      console.warn('[IPC] Failed to audit approval reply:', error);
     }
 
     try {

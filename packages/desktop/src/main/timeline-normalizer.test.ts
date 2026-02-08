@@ -51,4 +51,57 @@ describe('normalizeOpenCodeEvent approval payloads', () => {
       requestId: 'perm-456',
     });
   });
+
+  it('does NOT truncate long approval payloads (Phase 5.5 Step 2)', () => {
+    // Generate a body longer than the old MAX_APPROVAL_BODY_LENGTH (5000 chars)
+    const longCommand = `echo "${'x'.repeat(6000)}"`;
+    const longMetadata = { data: 'y'.repeat(3000) };
+
+    const normalized = normalizeOpenCodeEvent(
+      {
+        type: 'permission.updated',
+        properties: {
+          id: 'perm-long',
+          type: 'bash',
+          body: longCommand,
+          metadata: longMetadata,
+        },
+      },
+      'session-1'
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.event.kind).toBe('approval_request');
+
+    const payload = normalized?.payload as Record<string, unknown>;
+    // The body should be the exact long command, not truncated
+    expect(payload.body).toBe(longCommand);
+    expect((payload.body as string).length).toBeGreaterThan(5000);
+    // Should not contain truncation marker
+    expect(payload.body).not.toContain('…');
+  });
+
+  it('does NOT truncate long approval summary', () => {
+    // Generate a summary longer than the old MAX_APPROVAL_SUMMARY_LENGTH (220 chars)
+    const longSummary = 'A '.repeat(200).trim(); // trim to match pickText behavior
+
+    const normalized = normalizeOpenCodeEvent(
+      {
+        type: 'permission.asked',
+        properties: {
+          requestId: 'perm-summary',
+          summary: longSummary,
+        },
+      },
+      'session-1'
+    );
+
+    expect(normalized).not.toBeNull();
+    const payload = normalized?.payload as Record<string, unknown>;
+    // The summary should be the exact long summary, not truncated
+    expect(payload.summary).toBe(longSummary);
+    expect((payload.summary as string).length).toBeGreaterThan(220);
+    // Should not contain truncation marker
+    expect(payload.summary).not.toContain('…');
+  });
 });

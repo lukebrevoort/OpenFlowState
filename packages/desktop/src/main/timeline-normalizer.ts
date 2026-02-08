@@ -5,8 +5,12 @@ type OpenCodeEventPayload = Record<string, unknown>;
 const SECRET_PATTERN = /(token|secret|key|password|credential|bearer)/i;
 
 const MAX_DETAIL_LENGTH = 120;
-const MAX_APPROVAL_SUMMARY_LENGTH = 220;
-const MAX_APPROVAL_BODY_LENGTH = 5000;
+
+// Approval payloads should NOT be truncated - users need full context to make
+// informed decisions. TimelineStore handles large payloads via inline/blob storage
+// (10KB inline, blob for larger). The UI (ApprovalCard) is responsible for
+// rendering large content gracefully with expandable sections.
+// See Phase 5.5 Step 2 in PLAN.md for details.
 
 const friendlyToolNames: Record<string, string> = {
   gmail: 'Gmail',
@@ -19,11 +23,6 @@ const clampDetail = (value?: string) => {
   if (!value) return undefined;
   if (value.length <= MAX_DETAIL_LENGTH) return value;
   return `${value.slice(0, MAX_DETAIL_LENGTH)}…`;
-};
-
-const clampText = (value: string, max: number) => {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}…`;
 };
 
 const extractToolName = (data: OpenCodeEventPayload) => {
@@ -160,23 +159,27 @@ const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: str
     explicitTitle ??
     (permissionLabel ? `Approval requested: ${permissionLabel}` : 'Approval requested');
 
+  // Approval summaries are NOT truncated - users need full context.
+  // TimelineStore handles large payloads via blob storage.
   const summary =
     explicitSummary ??
     (() => {
       if (permissionLabel && patterns.length > 0) {
         const preview = patterns.slice(0, 2).join(', ');
         const extra = patterns.length > 2 ? ` +${patterns.length - 2} more` : '';
-        return clampText(`${permissionLabel} requested for ${preview}${extra}`, MAX_APPROVAL_SUMMARY_LENGTH);
+        return `${permissionLabel} requested for ${preview}${extra}`;
       }
       if (permissionLabel) {
-        return clampText(`${permissionLabel} permission requested`, MAX_APPROVAL_SUMMARY_LENGTH);
+        return `${permissionLabel} permission requested`;
       }
       if (fallbackDetail) {
-        return clampText(fallbackDetail, MAX_APPROVAL_SUMMARY_LENGTH);
+        return fallbackDetail;
       }
       return undefined;
     })();
 
+  // Approval bodies are NOT truncated - users need full context to make
+  // informed decisions. The UI (ApprovalCard) handles large content.
   const body =
     explicitBody ??
     (() => {
@@ -214,7 +217,7 @@ const extractApprovalPayload = (data: OpenCodeEventPayload, fallbackDetail?: str
         return undefined;
       }
 
-      return clampText(sections.join('\n\n'), MAX_APPROVAL_BODY_LENGTH);
+      return sections.join('\n\n');
     })();
 
   return {
