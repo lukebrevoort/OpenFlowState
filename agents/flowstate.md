@@ -2,7 +2,7 @@
 name: flowstate-assistant
 description: FlowState - Your productivity orchestrator
 mode: primary
-model: opencode/big-pickle
+model: opencode/kimi-k2.5-free
 temperature: 0.3
 ---
 

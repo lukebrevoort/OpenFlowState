@@ -434,17 +434,17 @@ class ProcessManager {
 
   private getApprovalsNotificationEnabled(): boolean {
     try {
-      return Boolean(configStore.get()?.preferences?.notifications?.approvals);
+      return configStore.get()?.preferences?.notifications?.approvals ?? true;
     } catch {
-      return false;
+      return true;
     }
   }
 
   private getTaskCompletionNotificationEnabled(): boolean {
     try {
-      return Boolean(configStore.get()?.preferences?.notifications?.taskComplete);
+      return configStore.get()?.preferences?.notifications?.taskComplete ?? true;
     } catch {
-      return false;
+      return true;
     }
   }
 

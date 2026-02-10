@@ -35,3 +35,4 @@ coverage/
 tmp/
 temp/
 .opencode/pm.db
+.opencode/pm-phase6.db

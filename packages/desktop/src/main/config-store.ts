@@ -188,7 +188,25 @@ class ConfigStore {
 
     try {
       const data = await fs.readFile(this.configPath, 'utf-8');
-      this.config = JSON.parse(data) as FlowStateConfig;
+      const loaded = JSON.parse(data) as FlowStateConfig;
+      // Deep-merge with defaults so upgraded configs with missing nested
+      // fields (e.g. notifications.taskComplete) inherit the correct defaults
+      this.config = {
+        ...DEFAULT_CONFIG,
+        ...loaded,
+        preferences: {
+          ...DEFAULT_CONFIG.preferences,
+          ...loaded.preferences,
+          notifications: {
+            ...DEFAULT_CONFIG.preferences.notifications,
+            ...loaded.preferences?.notifications,
+          },
+          workingHours: {
+            ...DEFAULT_CONFIG.preferences.workingHours,
+            ...loaded.preferences?.workingHours,
+          },
+        },
+      };
       return this.config;
     } catch (error) {
       // File doesn't exist or is invalid - create default config
