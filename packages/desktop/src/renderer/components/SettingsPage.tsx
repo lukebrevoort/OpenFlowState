@@ -160,6 +160,9 @@ export function SettingsPage() {
   const reduceMotionPreference = config?.preferences.reduceMotion;
   const effectiveReduceMotion = reduceMotionPreference ?? systemPrefersReducedMotion;
   const backgroundMotionPreference = config?.preferences.backgroundMotion ?? "animated";
+  const notificationPreferences = config?.preferences.notifications;
+  const approvalsNotificationsEnabled = notificationPreferences?.approvals ?? true;
+  const taskCompletionNotificationsEnabled = notificationPreferences?.taskComplete ?? true;
 
   const handleToggleReducedMotion = async () => {
     if (!config) return;
@@ -219,6 +222,40 @@ export function SettingsPage() {
       });
     } catch (error) {
       console.error("Failed to reset background motion preference", error);
+    }
+  };
+
+  const handleToggleTaskCompletionNotifications = async () => {
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          notifications: {
+            ...config.preferences.notifications,
+            taskComplete: !taskCompletionNotificationsEnabled,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update task completion notifications", error);
+    }
+  };
+
+  const handleToggleApprovalNotifications = async () => {
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          notifications: {
+            ...config.preferences.notifications,
+            approvals: !approvalsNotificationsEnabled,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update approval notifications", error);
     }
   };
 
@@ -656,28 +693,32 @@ export function SettingsPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-foreground">
-                    Task completion alerts
-                  </p>
+                  <p className="text-sm text-foreground">Approval requests</p>
                   <p className="text-xs text-muted-foreground">
-                    Get notified when tasks finish
+                    Get notified when an action needs your approval
                   </p>
                 </div>
-                <button className="relative w-12 h-6 border border-border rounded-full bg-primary transition-colors">
-                  <div className="absolute right-1 top-1 w-4 h-4 rounded-full bg-white transition-transform" />
-                </button>
+                <ToggleSwitch
+                  checked={approvalsNotificationsEnabled}
+                  onToggle={handleToggleApprovalNotifications}
+                  disabled={!config}
+                  label="Approval requests"
+                />
               </div>
 
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-foreground">Workflow updates</p>
+                  <p className="text-sm text-foreground">Task completion alerts</p>
                   <p className="text-xs text-muted-foreground">
-                    Notify about workflow status changes
+                    Get notified when tasks finish
                   </p>
                 </div>
-                <button className="relative w-12 h-6 border border-border rounded-full bg-switch-background transition-colors">
-                  <div className="absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-transform" />
-                </button>
+                <ToggleSwitch
+                  checked={taskCompletionNotificationsEnabled}
+                  onToggle={handleToggleTaskCompletionNotifications}
+                  disabled={!config}
+                  label="Task completion alerts"
+                />
               </div>
             </div>
           </div>

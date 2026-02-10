@@ -193,7 +193,7 @@ function App() {
           />
         );
       case 'integrations':
-        return <IntegrationsMode />;
+        return <IntegrationsMode onOpenSettings={() => setCurrentPage('settings')} />;
       case 'settings':
         return <SettingsPage />;
       default:
@@ -280,43 +280,55 @@ function App() {
   }, [currentPage, isDesktop, isOnMainPage]);
 
   const mainContent = isOnboarding ? (
-    <main className="flex-1 overflow-auto">
-      <OnboardingFlow
-        currentStep={currentStep}
-        onStepChange={setStep}
-        selectedApps={selectedApps}
-        onToggleApp={toggleApp}
-        integrations={integrations}
-        authStatuses={authStatuses}
-        providerOptions={providerOptions}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        onSelectProvider={setProvider}
-        onSelectModel={setModel}
-        onStartProviderSetup={() => {
-          const command = getProviderAuthCommand(selectedProvider);
-          if (typeof window.flowstate.app.openTerminal === 'function') {
-            window.flowstate.app.openTerminal(command);
-          } else {
-            window.flowstate.app.openExternal(
-              `terminal://${encodeURIComponent(command)}`,
-            );
-          }
-          const authUrl = getProviderAuthUrl(selectedProvider);
-          if (authUrl) {
-            window.flowstate.app.openExternal(authUrl);
-          }
-        }}
-        wowPrompts={onboardingWowPrompts}
-        selectedWowPrompt={selectedWowPrompt}
-        onSelectWowPrompt={setSelectedWowPrompt}
-        onFinish={handleOnboardingFinish}
-        onSkipWow={handleOnboardingSkipWow}
-        onConnectIntegration={(integrationId) => {
-          setOnboardingConnect(integrationId);
-        }}
-      />
-    </main>
+    currentPage === 'integrations' ? (
+      <main className="flex-1 overflow-auto">
+        <IntegrationsMode
+          onboardingMode
+          onReturnToOnboarding={() => {
+            setCurrentPage('home');
+          }}
+        />
+      </main>
+    ) : (
+      <main className="flex-1 overflow-auto">
+        <OnboardingFlow
+          currentStep={currentStep}
+          onStepChange={setStep}
+          selectedApps={selectedApps}
+          onToggleApp={toggleApp}
+          integrations={integrations}
+          authStatuses={authStatuses}
+          providerOptions={providerOptions}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onSelectProvider={setProvider}
+          onSelectModel={setModel}
+          onStartProviderSetup={() => {
+            const command = getProviderAuthCommand(selectedProvider);
+            if (typeof window.flowstate.app.openTerminal === 'function') {
+              window.flowstate.app.openTerminal(command);
+            } else {
+              window.flowstate.app.openExternal(
+                `terminal://${encodeURIComponent(command)}`,
+              );
+            }
+            const authUrl = getProviderAuthUrl(selectedProvider);
+            if (authUrl) {
+              window.flowstate.app.openExternal(authUrl);
+            }
+          }}
+          wowPrompts={onboardingWowPrompts}
+          selectedWowPrompt={selectedWowPrompt}
+          onSelectWowPrompt={setSelectedWowPrompt}
+          onFinish={handleOnboardingFinish}
+          onSkipWow={handleOnboardingSkipWow}
+          onConnectIntegration={(integrationId) => {
+            setOnboardingConnect(integrationId);
+            setCurrentPage('integrations');
+          }}
+        />
+      </main>
+    )
   ) : (
     <main className="flex-1 overflow-auto">
       <div key={currentPage} className="h-full page-fade-up">

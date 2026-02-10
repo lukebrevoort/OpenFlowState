@@ -12,7 +12,7 @@ import { useEffect, useCallback } from 'react';
 import { useChatStore } from '../stores/chatStore';
 import type { TaskRun } from '../stores/chatStore';
 import { useConfigStore } from '../stores/configStore';
-import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError, TimelineEvent } from '../types/electron';
+import type { OpenCodeMessage, OpenCodeProgress, OpenCodeError, TimelineEvent, TimelineEventEnvelope } from '../types/electron';
 
 let listenersInitialized = false;
 
@@ -162,6 +162,10 @@ export function useOpenCode() {
         setHandoffTaskFromTimeline(event);
       }
 
+      if (event.kind === 'status' && event.title === 'Retrying integration' && event.detail) {
+        updateActiveTask({ status: 'running', description: event.detail });
+      }
+
       if (event.kind === 'approval_request') {
         updateActiveTask({ status: 'waiting_approval', blockingReason: { kind: 'permission' } });
       }
@@ -198,7 +202,7 @@ export function useOpenCode() {
       }
     };
 
-    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload) => {
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload: TimelineEventEnvelope) => {
       const events = unwrapBatch<TimelineEvent>(payload);
       if (events.length === 0) return;
 
@@ -218,12 +222,18 @@ export function useOpenCode() {
 
         let nextStatus: TaskRun['status'] | null = null;
         let nextSummary: string | null = null;
+        let nextDescription: string | null = null;
 
         // Compute final task state based on in-batch ordering.
         for (const event of resolvedEvents) {
           if (event.kind === 'approval_request') nextStatus = 'waiting_approval';
           if (event.kind === 'approval_response') nextStatus = 'running';
           if (event.kind === 'error') nextStatus = 'failed';
+
+          if (event.kind === 'status' && event.title === 'Retrying integration' && event.detail) {
+            nextStatus = 'running';
+            nextDescription = event.detail;
+          }
 
           if (event.kind === 'status' && event.title === 'Task completed') nextStatus = 'completed';
           if (event.kind === 'status' && event.title === 'Task summary' && event.detail) {
@@ -235,6 +245,7 @@ export function useOpenCode() {
         if (nextStatus) updates.status = nextStatus;
         if (nextStatus === 'waiting_approval') updates.blockingReason = { kind: 'permission' };
         if (nextStatus && nextStatus !== 'waiting_approval') updates.blockingReason = undefined;
+        if (nextDescription) updates.description = nextDescription;
         if (nextSummary) {
           updates.summary = nextSummary;
           updates.summarySent = false;

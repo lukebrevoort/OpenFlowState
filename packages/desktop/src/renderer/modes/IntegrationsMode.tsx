@@ -18,6 +18,7 @@ import {
   AuthMethod,
   AuthOption,
 } from "../stores/integrationsStore";
+import type { MCPServerConfig } from "../types/electron";
 
 type GoogleCalendarListEntry = {
   id: string;
@@ -1031,12 +1032,190 @@ function GcalCalendarsModal({ onClose }: { onClose: () => void }) {
 /**
  * IntegrationsMode - Connect and manage external services
  */
-function IntegrationsMode() {
+interface IntegrationsModeProps {
+  onboardingMode?: boolean;
+  onReturnToOnboarding?: () => void;
+  onOpenSettings?: () => void;
+}
+
+interface AddCustomMcpModalProps {
+  isSaving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (payload: {
+    name: string;
+    commandInput: string;
+    envInput: string;
+  }) => void;
+}
+
+function AddCustomMcpModal({
+  isSaving,
+  error,
+  onClose,
+  onSubmit,
+}: AddCustomMcpModalProps) {
+  const [name, setName] = useState("");
+  const [commandInput, setCommandInput] = useState("");
+  const [envInput, setEnvInput] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      name,
+      commandInput,
+      envInput,
+    });
+  };
+
+  return (
+    <div
+      className="fs-modal-overlay"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="fs-modal">
+        <div className="fs-modal-header">
+          <div className="flex items-center gap-3">
+            <Plus className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                Add Custom MCP
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Add a local MCP server command.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="fs-modal-body space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Server name
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-custom-mcp"
+              className="fs-input"
+              required
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Use letters, numbers, dots, underscores, or hyphens.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Command
+            </label>
+            <input
+              type="text"
+              value={commandInput}
+              onChange={(e) => setCommandInput(e.target.value)}
+              placeholder='npx -y @modelcontextprotocol/server-filesystem "/Users/you/Documents"'
+              className="fs-input font-mono text-sm"
+              required
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Include the executable and any arguments.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Environment (optional JSON)
+            </label>
+            <textarea
+              value={envInput}
+              onChange={(e) => setEnvInput(e.target.value)}
+              placeholder='{"API_KEY":"..."}'
+              className="fs-input font-mono text-xs min-h-24"
+            />
+          </div>
+
+          {error ? <p className="text-sm text-semantic-denied">{error}</p> : null}
+
+          <div className="fs-modal-footer">
+            <button
+              type="button"
+              className="fs-button-ghost"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="fs-button-primary" disabled={isSaving}>
+              {isSaving ? "Adding..." : "Add MCP"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function isBuiltInMcpServer(name: string) {
+  return name.startsWith("flowstate-");
+}
+
+function parseCommandInput(input: string): string[] {
+  const matches = input
+    .trim()
+    .match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+
+  if (!matches) {
+    return [];
+  }
+
+  return matches
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0)
+    .map((segment) => {
+      if (
+        (segment.startsWith('"') && segment.endsWith('"')) ||
+        (segment.startsWith("'") && segment.endsWith("'"))
+      ) {
+        return segment.slice(1, -1);
+      }
+      return segment;
+    });
+}
+
+function parseEnvInput(input: string): Record<string, string> | undefined {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Environment must be a JSON object");
+  }
+
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "string") {
+      throw new Error("Environment values must be strings");
+    }
+    normalized[key] = value;
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function IntegrationsMode({
+  onboardingMode = false,
+  onReturnToOnboarding,
+  onOpenSettings,
+}: IntegrationsModeProps) {
   const {
     integrations,
     isLoading,
     connectingService,
     onboardingConnectId,
+    onboardingConnectNonce,
     setOnboardingConnect,
   } = useIntegrationsStore();
 
@@ -1053,6 +1232,31 @@ function IntegrationsMode() {
   const [selectedIntegration, setSelectedIntegration] =
     useState<Integration | null>(null);
   const [showGcalCalendarsModal, setShowGcalCalendarsModal] = useState(false);
+  const [customMcps, setCustomMcps] = useState<
+    Array<{ name: string; config: MCPServerConfig }>
+  >([]);
+  const [customMcpLoading, setCustomMcpLoading] = useState(false);
+  const [showAddCustomMcpModal, setShowAddCustomMcpModal] = useState(false);
+  const [addCustomMcpError, setAddCustomMcpError] = useState<string | null>(null);
+  const [addCustomMcpSaving, setAddCustomMcpSaving] = useState(false);
+
+  const loadCustomMcps = async () => {
+    if (onboardingMode) return;
+    setCustomMcpLoading(true);
+    try {
+      const config = await window.flowstate.config.get();
+      const entries = Object.entries(config.mcpServers ?? {})
+        .filter(([name]) => !isBuiltInMcpServer(name))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, mcpConfig]) => ({
+          name,
+          config: mcpConfig,
+        }));
+      setCustomMcps(entries);
+    } finally {
+      setCustomMcpLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!showModal) {
@@ -1065,11 +1269,24 @@ function IntegrationsMode() {
     const integration = integrations.find(
       (item) => item.id === onboardingConnectId,
     );
-    if (!integration) return;
-    setSelectedIntegration(integration);
-    setShowModal(true);
+    if (integration) {
+      setSelectedIntegration(integration);
+      setShowModal(true);
+    }
     setOnboardingConnect(null);
-  }, [integrations, onboardingConnectId, setOnboardingConnect]);
+  }, [
+    integrations,
+    onboardingConnectId,
+    onboardingConnectNonce,
+    setOnboardingConnect,
+  ]);
+
+  useEffect(() => {
+    loadCustomMcps().catch(() => {
+      setCustomMcps([]);
+      setCustomMcpLoading(false);
+    });
+  }, [onboardingMode]);
 
   // Handlers
   const handleConnect = (integration: Integration) => {
@@ -1095,6 +1312,88 @@ function IntegrationsMode() {
 
   const handleRefresh = () => {
     refresh();
+    loadCustomMcps().catch(() => {
+      setCustomMcps([]);
+      setCustomMcpLoading(false);
+    });
+  };
+
+  const handleAddCustomMcp = async ({
+    name,
+    commandInput,
+    envInput,
+  }: {
+    name: string;
+    commandInput: string;
+    envInput: string;
+  }) => {
+    const normalizedName = name.trim();
+
+    if (!normalizedName) {
+      setAddCustomMcpError("Server name is required");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(normalizedName)) {
+      setAddCustomMcpError(
+        "Server name can only include letters, numbers, dots, underscores, and hyphens",
+      );
+      return;
+    }
+
+    if (isBuiltInMcpServer(normalizedName)) {
+      setAddCustomMcpError("Names starting with 'flowstate-' are reserved");
+      return;
+    }
+
+    const command = parseCommandInput(commandInput);
+    if (command.length === 0) {
+      setAddCustomMcpError("Command is required");
+      return;
+    }
+
+    let env: Record<string, string> | undefined;
+    try {
+      env = parseEnvInput(envInput);
+    } catch (error) {
+      setAddCustomMcpError(
+        error instanceof Error ? error.message : "Invalid environment JSON",
+      );
+      return;
+    }
+
+    setAddCustomMcpError(null);
+    setAddCustomMcpSaving(true);
+
+    try {
+      const currentConfig = await window.flowstate.config.get();
+      if (currentConfig.mcpServers[normalizedName]) {
+        setAddCustomMcpError("An MCP with this name already exists");
+        return;
+      }
+
+      const nextMcpServers: Record<string, MCPServerConfig> = {
+        ...currentConfig.mcpServers,
+        [normalizedName]: {
+          enabled: true,
+          command,
+          ...(env ? { env } : {}),
+        },
+      };
+
+      await window.flowstate.config.set({
+        mcpServers: nextMcpServers,
+      });
+      await window.flowstate.mcp.reload();
+      await loadCustomMcps();
+      setShowAddCustomMcpModal(false);
+    } catch (error) {
+      setAddCustomMcpError(
+        error instanceof Error ? error.message : "Failed to add custom MCP",
+      );
+    } finally {
+      setAddCustomMcpSaving(false);
+    }
   };
 
   // Separate integrations
@@ -1260,19 +1559,31 @@ function IntegrationsMode() {
               Integrations
             </h1>
             <p className="text-muted-foreground mt-1">
-              Connect your apps to FlowState
+              {onboardingMode
+                ? "Connect your apps, then return to continue onboarding"
+                : "Connect your apps to FlowState"}
             </p>
           </div>
-          <button
-            className="fs-button-ghost flex items-center gap-2"
-            onClick={handleRefresh}
-            disabled={isLoading}
-          >
-            <RefreshCw
-              className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="fs-button-ghost flex items-center gap-2"
+              onClick={handleRefresh}
+              disabled={isLoading}
+            >
+              <RefreshCw
+                className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </button>
+            {onboardingMode && onReturnToOnboarding && (
+              <button
+                className="fs-button-primary"
+                onClick={onReturnToOnboarding}
+              >
+                Back to onboarding
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Official Integrations */}
@@ -1287,83 +1598,129 @@ function IntegrationsMode() {
           </div>
         </section>
 
-        {/* Coming Soon */}
-        <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">
-            Coming Soon
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {comingSoonIntegrations.map((item) => (
-              <div key={item.id} className="fs-card opacity-60">
-                <div className="flex items-start gap-3">
-                  <span className="text-2xl">{item.icon}</span>
-                  <div>
-                    <h3 className="font-medium text-foreground">{item.name}</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {item.description}
-                    </p>
+        {!onboardingMode && (
+          <section>
+            <h2 className="text-lg font-semibold text-foreground mb-4">
+              Coming Soon
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {comingSoonIntegrations.map((item) => (
+                <div key={item.id} className="fs-card opacity-60">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{item.icon}</span>
+                    <div>
+                      <h3 className="font-medium text-foreground">{item.name}</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <span className="text-xs text-muted-foreground">
+                      Coming soon
+                    </span>
                   </div>
                 </div>
-                <div className="mt-4 pt-4 border-t border-border">
-                  <span className="text-xs text-muted-foreground">
-                    Coming soon
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Custom MCPs */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">
-              Custom MCPs
-            </h2>
-            <button className="fs-button-primary text-sm flex items-center gap-1">
-              <Plus className="w-4 h-4" />
-              Add MCP
-            </button>
-          </div>
-
-          <div className="fs-card text-center py-8">
-            <div className="text-3xl mb-3">🔧</div>
-            <h3 className="font-medium text-foreground mb-2">
-              No custom MCPs configured
-            </h3>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Add your own MCP servers to extend FlowState with custom
-              integrations.
-            </p>
-            <button
-              className="fs-button-ghost text-sm mt-4 flex items-center gap-1 mx-auto"
-              onClick={() =>
-                window.flowstate.app.openExternal(
-                  "https://modelcontextprotocol.io/introduction",
-                )
-              }
-            >
-              <ExternalLink className="w-3 h-3" />
-              Learn about MCPs
-            </button>
-          </div>
-        </section>
-
-        {/* Settings Link */}
-        <div className="fs-card bg-muted/50 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Settings className="w-5 h-5 text-muted-foreground" />
-            <div>
-              <p className="font-medium text-foreground">
-                Integration Settings
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Configure sync intervals, permissions, and more
-              </p>
+              ))}
             </div>
+          </section>
+        )}
+
+        {!onboardingMode && (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-foreground">
+                Custom MCPs
+              </h2>
+              <button
+                className="fs-button-primary text-sm flex items-center gap-1"
+                onClick={() => {
+                  setAddCustomMcpError(null);
+                  setShowAddCustomMcpModal(true);
+                }}
+              >
+                <Plus className="w-4 h-4" />
+                Add MCP
+              </button>
+            </div>
+
+            {customMcpLoading ? (
+              <div className="fs-card text-center py-8 text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin mx-auto mb-2" />
+                Loading custom MCPs...
+              </div>
+            ) : customMcps.length === 0 ? (
+              <div className="fs-card text-center py-8">
+                <div className="text-3xl mb-3">🔧</div>
+                <h3 className="font-medium text-foreground mb-2">
+                  No custom MCPs configured
+                </h3>
+                <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                  Add your own MCP servers to extend FlowState with custom
+                  integrations.
+                </p>
+                <button
+                  className="fs-button-ghost text-sm mt-4 flex items-center gap-1 mx-auto"
+                  onClick={() =>
+                    window.flowstate.app.openExternal(
+                      "https://modelcontextprotocol.io/introduction",
+                    )
+                  }
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Learn about MCPs
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {customMcps.map(({ name, config }) => (
+                  <div key={name} className="fs-card">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-medium text-foreground truncate">
+                        {name}
+                      </h3>
+                      <span
+                        className={
+                          config.enabled
+                            ? "fs-badge-success"
+                            : "fs-badge bg-card text-muted-foreground"
+                        }
+                      >
+                        {config.enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">Command</p>
+                    <p className="text-xs font-mono text-foreground break-all mt-1">
+                      {config.command?.join(" ") ?? "-"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {!onboardingMode && (
+          <div className="fs-card bg-muted/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Settings className="w-5 h-5 text-muted-foreground" />
+              <div>
+                <p className="font-medium text-foreground">
+                  Integration Settings
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Configure sync intervals, permissions, and more
+                </p>
+              </div>
+            </div>
+            <button
+              className="fs-button-ghost text-sm"
+              onClick={() => onOpenSettings?.()}
+            >
+              Open Settings
+            </button>
           </div>
-          <button className="fs-button-ghost text-sm">Open Settings</button>
-        </div>
+        )}
 
         {/* Connection Modal */}
         {showModal && selectedIntegration && (
@@ -1382,6 +1739,18 @@ function IntegrationsMode() {
         {showGcalCalendarsModal && (
           <GcalCalendarsModal
             onClose={() => setShowGcalCalendarsModal(false)}
+          />
+        )}
+
+        {showAddCustomMcpModal && (
+          <AddCustomMcpModal
+            isSaving={addCustomMcpSaving}
+            error={addCustomMcpError}
+            onClose={() => {
+              if (addCustomMcpSaving) return;
+              setShowAddCustomMcpModal(false);
+            }}
+            onSubmit={handleAddCustomMcp}
           />
         )}
       </div>

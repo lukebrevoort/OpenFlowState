@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   WorkflowDefinition,
+  WorkflowDuplicateResult,
   WorkflowGenerationResult,
   WorkflowRun,
   WorkflowSkillFile,
@@ -38,6 +39,9 @@ interface WorkflowsState {
     skillMarkdown: string,
   ) => Promise<{ ok: boolean; data?: WorkflowSkillSaveResult; error?: string }>;
   deleteWorkflow: (workflowId: string) => Promise<{ ok: boolean; error?: string }>;
+  duplicateWorkflow: (
+    workflowId: string,
+  ) => Promise<{ ok: boolean; data?: WorkflowDuplicateResult; error?: string }>;
 }
 
 const upsertWorkflow = (current: WorkflowDefinition[], next: WorkflowDefinition): WorkflowDefinition[] => {
@@ -210,6 +214,17 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
         ),
       }));
       return { ok: true };
+    }
+    return { ok: false, error: result.error.message };
+  },
+
+  duplicateWorkflow: async (workflowId: string) => {
+    const result = await workflowsAdapter.duplicateWorkflow(workflowId);
+    if (result.ok) {
+      set((state) => ({
+        workflows: upsertWorkflow(state.workflows, result.data.definition),
+      }));
+      return { ok: true, data: result.data };
     }
     return { ok: false, error: result.error.message };
   },

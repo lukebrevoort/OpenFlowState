@@ -416,10 +416,11 @@ export function OnboardingFlow({
                   } ready to go.`}
             </div>
             <div className="rounded-2xl border border-border bg-card/70 p-4 text-sm text-muted-foreground">
-              You can manage each connection later in the Integrations tab.
+              Connect opens the integration setup flow right away. You can also manage
+              each connection later in Integrations.
             </div>
             <div className="rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-              To connect right now, open the Integrations tab after onboarding.
+              After you finish connecting, return here to continue onboarding.
             </div>
           </StepCard>
         )}

@@ -1307,6 +1307,14 @@ ipcMain.handle('workflows:skill:save', async (_event, workflowId: string, skillM
   return ipcError(result.code, result.message);
 });
 
+ipcMain.handle('workflows:duplicate', async (_event, workflowId: string) => {
+  const result = await workflowsRunner.duplicateWorkflow(workflowId);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
 ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
   const id = typeof workflowId === 'string' ? workflowId.trim() : '';
   const result = await workflowsRunner.deleteWorkflow(id);

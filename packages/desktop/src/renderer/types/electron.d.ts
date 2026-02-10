@@ -87,6 +87,13 @@ export interface TimelineEvent {
   redacted?: boolean;
 }
 
+export type TimelineEventBatch = {
+  type: 'batch';
+  events: TimelineEvent[];
+};
+
+export type TimelineEventEnvelope = TimelineEvent | TimelineEventBatch;
+
 export interface TaskRun {
   id: string;
   sessionId: string;
@@ -157,6 +164,10 @@ export interface WorkflowSkillSaveResult {
   definition: WorkflowDefinition;
   skillMarkdown: string;
   source: 'user' | 'project';
+}
+
+export interface WorkflowDuplicateResult {
+  definition: WorkflowDefinition;
 }
 
 export type ChatSendResult = {
@@ -316,7 +327,7 @@ export interface FlowstateAPI {
     onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
     onError: (callback: (error: OpenCodeError) => void) => () => void;
     onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
-    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void) => () => void;
 
     // Cleanup
     removeAllListeners: () => void;
@@ -369,7 +380,7 @@ export interface FlowstateAPI {
     onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
     onError: (callback: (error: OpenCodeError) => void) => () => void;
     onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
-    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void) => () => void;
     removeAllListeners: () => void;
   };
 
@@ -388,6 +399,7 @@ export interface FlowstateAPI {
     generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
     getSkillMarkdown: (workflowId: string) => Promise<IpcResult<WorkflowSkillFile>>;
     saveSkillMarkdown: (workflowId: string, skillMarkdown: string) => Promise<IpcResult<WorkflowSkillSaveResult>>;
+    duplicateWorkflow: (workflowId: string) => Promise<IpcResult<WorkflowDuplicateResult>>;
     deleteWorkflow: (workflowId: string) => Promise<IpcResult<{ removed: boolean }>>;
 
     listRuns: (workflowId: string, limit?: number, offset?: number) => Promise<IpcResult<WorkflowRun[]>>;

@@ -42,6 +42,7 @@ interface IntegrationsState {
   // OAuth flow
   connectingService: string | null;
   onboardingConnectId: string | null;
+  onboardingConnectNonce: number;
   
   // Actions
   setIntegrations: (integrations: Integration[]) => void;
@@ -130,6 +131,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
   isLoading: false,
   connectingService: null,
   onboardingConnectId: null,
+  onboardingConnectNonce: 0,
 
   // Actions
   setIntegrations: (integrations) => {
@@ -156,7 +158,13 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
   },
 
   setOnboardingConnect: (service) => {
-    set({ onboardingConnectId: service });
+    set((state) => ({
+      onboardingConnectId: service,
+      onboardingConnectNonce:
+        service === null
+          ? state.onboardingConnectNonce
+          : state.onboardingConnectNonce + 1,
+    }));
   },
 
   loadIntegrations: async () => {
