@@ -470,21 +470,32 @@ class ProcessManager {
     return true;
   }
 
-  private shouldNotifyTaskCompletion(taskRunId: string): boolean {
+  /**
+   * Build a per-run dedupe key. Chat task IDs are session-scoped and can be
+   * reused across runs (e.g. "task-1" appears in every conversation), so keying
+   * only on `taskRunId` would suppress later completions for an hour. Including
+   * `startedAt` (the run's start timestamp) makes the key unique per run.
+   */
+  private buildCompletionDedupeKey(taskRunId: string, startedAt?: number): string {
     const id = taskRunId.trim();
-    if (!id) return false;
+    return startedAt != null ? `${id}:${startedAt}` : id;
+  }
+
+  private shouldNotifyTaskCompletion(taskRunId: string, startedAt?: number): boolean {
+    const key = this.buildCompletionDedupeKey(taskRunId, startedAt);
+    if (!key) return false;
 
     const now = Date.now();
-    const last = this.taskCompletionNotificationSeenAt.get(id);
+    const last = this.taskCompletionNotificationSeenAt.get(key);
     if (last && now - last < this.taskCompletionNotificationDedupeTtlMs) {
       return false;
     }
 
-    this.taskCompletionNotificationSeenAt.set(id, now);
+    this.taskCompletionNotificationSeenAt.set(key, now);
 
-    for (const [key, ts] of this.taskCompletionNotificationSeenAt.entries()) {
+    for (const [k, ts] of this.taskCompletionNotificationSeenAt.entries()) {
       if (now - ts > this.taskCompletionNotificationDedupeTtlMs) {
-        this.taskCompletionNotificationSeenAt.delete(key);
+        this.taskCompletionNotificationSeenAt.delete(k);
       }
     }
 
@@ -568,6 +579,7 @@ class ProcessManager {
   private notifyTaskCompleted(args: {
     sessionId: string;
     taskRunId: string;
+    startedAt?: number;
     webContents: Electron.WebContents;
     title?: unknown;
     summary?: unknown;
@@ -575,7 +587,7 @@ class ProcessManager {
   }): void {
     if (!Notification.isSupported()) return;
     if (!this.getTaskCompletionNotificationEnabled()) return;
-    if (!this.shouldNotifyTaskCompletion(args.taskRunId)) return;
+    if (!this.shouldNotifyTaskCompletion(args.taskRunId, args.startedAt)) return;
 
     const title =
       this.safeNotificationText(args.title, 72) ??
@@ -939,6 +951,7 @@ class ProcessManager {
           this.notifyTaskCompleted({
             sessionId,
             taskRunId: id,
+            startedAt: run?.startedAt,
             webContents,
             title: run?.title ?? normalized.event.title,
             summary: run?.summary,
