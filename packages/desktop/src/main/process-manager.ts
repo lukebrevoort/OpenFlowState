@@ -14,13 +14,14 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
-import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
+import { createOpencode, McpLocalConfig, McpRemoteConfig } from '@opencode-ai/sdk';
 import { userProfile, type UserProfile } from '@flowstate/core';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
 import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
+import { normalizeCustomMcpServers, type OpencodeMcpConfig } from './mcp-config.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 import { approvalsAuditStore } from './approvals-audit-store.js';
 import { deriveApprovalBlockingPatch, isApprovalEventType } from './approval-blocking.js';
@@ -173,6 +174,46 @@ class ProcessManager {
   private eventStreamWebContents: Electron.WebContents | null = null;
   private flowstatePrompt: string | null = null;
   private timelineInitialized = false;
+
+  private redactMcpConfigForLog(config: OpencodeMcpConfig): Record<string, unknown> {
+    const redacted: Record<string, unknown> = {};
+
+    for (const [name, entry] of Object.entries(config)) {
+      if (!entry || typeof entry !== 'object') {
+        redacted[name] = entry as unknown;
+        continue;
+      }
+
+      const type = (entry as { type?: string }).type;
+      if (type === 'local') {
+        const env = (entry as McpLocalConfig).environment;
+        const environment = env
+          ? Object.fromEntries(Object.keys(env).map((key) => [key, '[redacted]']))
+          : undefined;
+        redacted[name] = {
+          ...(entry as McpLocalConfig),
+          ...(environment ? { environment } : {}),
+        };
+        continue;
+      }
+
+      if (type === 'remote') {
+        const hdrs = (entry as McpRemoteConfig).headers;
+        const headers = hdrs
+          ? Object.fromEntries(Object.keys(hdrs).map((key) => [key, '[redacted]']))
+          : undefined;
+        redacted[name] = {
+          ...(entry as McpRemoteConfig),
+          ...(headers ? { headers } : {}),
+        };
+        continue;
+      }
+
+      redacted[name] = entry as unknown;
+    }
+
+    return redacted;
+  }
   private reauthCooldown = new Map<string, number>();
   private readonly reauthCooldownMs = 5 * 60 * 1000;
 
@@ -1431,10 +1472,27 @@ class ProcessManager {
     }
   }
 
-  private async buildMcpConfig(): Promise<Record<string, McpLocalConfig>> {
-    const mcpConfig: Record<string, McpLocalConfig> = {};
+  private async buildMcpConfigWithDiagnostics(): Promise<{
+    config: OpencodeMcpConfig;
+    errors: Record<string, string>;
+    skipped: Record<string, string>;
+  }> {
+    const mcpConfig: OpencodeMcpConfig = {};
     const packagesDir = this.getMcpPackagesDir();
     const flowstateDataDir = configStore.getDataDir();
+
+    const currentConfig = (() => {
+      try {
+        return configStore.get();
+      } catch {
+        return null;
+      }
+    })();
+
+    const loadedConfig = currentConfig ?? (await configStore.load());
+
+    const errors: Record<string, string> = {};
+    const skipped: Record<string, string> = {};
 
     if (!this.flowstatePrompt) {
       this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
@@ -1457,7 +1515,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Gmail MCP configured with token and credentials');
     } else if (gmailToken && !gmailPath) {
       console.error('[ProcessManager] Gmail token found but MCP server not built!');
@@ -1468,7 +1526,7 @@ class ProcessManager {
     const gcalCreds = await authManager.getClientCredentials('gcal');
     const gcalPath = this.verifyMcpServer(packagesDir, 'mcp-gcal');
     if (gcalToken && gcalPath) {
-      const gcalPrefs = configStore.get()?.integrations?.gcal;
+      const gcalPrefs = loadedConfig.integrations?.gcal;
       const readCalendarIds = Array.isArray(gcalPrefs?.readCalendarIds)
         ? gcalPrefs?.readCalendarIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
         : undefined;
@@ -1510,7 +1568,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Google Calendar MCP configured with token and credentials');
     } else if (gcalToken && !gcalPath) {
       console.error('[ProcessManager] GCal token found but MCP server not built!');
@@ -1528,7 +1586,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Notion MCP configured with token');
     }
 
@@ -1546,7 +1604,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] System MCP configured');
     }
 
@@ -1575,7 +1633,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log(
         `[ProcessManager] Canvas LMS MCP configured (${useBrowserAuth ? 'browser' : 'token'} auth)`
       );
@@ -1583,8 +1641,25 @@ class ProcessManager {
       console.error('[ProcessManager] Canvas token found but MCP server not built!');
     }
 
-    console.log('[ProcessManager] Final MCP config keys:', Object.keys(mcpConfig));
-    return mcpConfig;
+    // Custom MCP servers (user-defined in config)
+    const custom = normalizeCustomMcpServers(loadedConfig.mcpServers);
+    Object.assign(errors, custom.errors);
+    Object.assign(skipped, custom.skipped);
+
+    for (const [name, config] of Object.entries(custom.config)) {
+      if (name in mcpConfig) {
+        errors[name] = 'Name collides with managed FlowState integration';
+        continue;
+      }
+      mcpConfig[name] = config as McpLocalConfig | McpRemoteConfig;
+    }
+
+    const keys = Object.keys(mcpConfig);
+    console.log('[ProcessManager] Final MCP config keys:', keys);
+    if (Object.keys(errors).length > 0) {
+      console.warn('[ProcessManager] MCP config validation errors:', JSON.stringify(errors, null, 2));
+    }
+    return { config: mcpConfig, errors, skipped };
   }
 
   /**
@@ -1603,9 +1678,15 @@ class ProcessManager {
       await this.updateAgentModelFiles(selectedModel);
 
       // Build MCP configuration with auth tokens
-      const mcpConfig = await this.buildMcpConfig();
+      const { config: mcpConfig, errors } = await this.buildMcpConfigWithDiagnostics();
       console.log('[ProcessManager] MCP servers configured:', Object.keys(mcpConfig));
-      console.log('[ProcessManager] Full MCP config:', JSON.stringify(mcpConfig, null, 2));
+      console.log(
+        '[ProcessManager] Full MCP config (redacted):',
+        JSON.stringify(this.redactMcpConfigForLog(mcpConfig), null, 2)
+      );
+      if (Object.keys(errors).length > 0) {
+        console.warn('[ProcessManager] Some custom MCP servers are invalid and were not added');
+      }
 
       // Start OpenCode (both server and client)
       // Using port 0 lets the OS assign an available port
@@ -1696,40 +1777,67 @@ class ProcessManager {
    * Reload MCP configuration (call after connecting/disconnecting integrations)
    * Uses the mcp.add() API for dynamic server management
    */
-  async reloadMcpConfig(): Promise<void> {
+  async reloadMcpConfig(): Promise<{ success: boolean; error?: string }>
+  {
     if (!this.instance?.client) {
-      console.warn('[ProcessManager] Cannot reload MCP config: OpenCode not running');
-      return;
+      const error = 'OpenCode not running';
+      console.warn(`[ProcessManager] Cannot reload MCP config: ${error}`);
+      return { success: false, error };
     }
 
+    console.log('[ProcessManager] Reloading MCP configuration...');
+
+    const { config: desired, errors: validationErrors } = await this.buildMcpConfigWithDiagnostics();
+    const failed: Record<string, string> = { ...validationErrors };
+
     try {
-      console.log('[ProcessManager] Reloading MCP configuration...');
-      
-      const mcpConfig = await this.buildMcpConfig();
-      
-      // Add each MCP server individually using the mcp.add() API
-      for (const [name, config] of Object.entries(mcpConfig)) {
+      const status = await this.instance.client.mcp.status({});
+      const current = status.data ? Object.keys(status.data) : [];
+
+      // Disconnect MCPs removed from config (best-effort; OpenCode has no remove API).
+      for (const name of current) {
+        if (name in desired) continue;
         try {
-          console.log(`[ProcessManager] Adding MCP server: ${name}`);
-          const result = await this.instance.client.mcp.add({
-            body: {
-              name,
-              config,
-            },
-          });
-          console.log(`[ProcessManager] MCP server ${name} add result:`, JSON.stringify(result.data, null, 2));
-        } catch (addError) {
-          console.error(`[ProcessManager] Failed to add MCP server ${name}:`, addError);
+          console.log(`[ProcessManager] Disconnecting MCP server: ${name}`);
+          await this.instance.client.mcp.disconnect({ path: { name } });
+        } catch (disconnectError) {
+          const message = disconnectError instanceof Error ? disconnectError.message : String(disconnectError);
+          console.warn(`[ProcessManager] Failed to disconnect MCP server ${name}: ${message}`);
         }
       }
-      
-      // Log final status
-      await this.logMcpStatus();
-      
-      console.log('[ProcessManager] MCP config reload complete');
-    } catch (error) {
-      console.error('[ProcessManager] Failed to reload MCP config:', error);
+    } catch (statusError) {
+      console.warn('[ProcessManager] Unable to read current MCP status before reload:', statusError);
     }
+
+    // Add each MCP server individually using the mcp.add() API
+    for (const [name, config] of Object.entries(desired)) {
+      try {
+        console.log(`[ProcessManager] Adding MCP server: ${name}`);
+        const result = await this.instance.client.mcp.add({
+          body: {
+            name,
+            config,
+          },
+        });
+        console.log(`[ProcessManager] MCP server ${name} add result:`, JSON.stringify(result.data?.[name] ?? result.data, null, 2));
+      } catch (addError) {
+        const message = addError instanceof Error ? addError.message : String(addError);
+        console.error(`[ProcessManager] Failed to add MCP server ${name}: ${message}`);
+        failed[name] = message;
+      }
+    }
+
+    await this.logMcpStatus();
+
+    const failedNames = Object.keys(failed);
+    if (failedNames.length > 0) {
+      const error = `Failed to load ${failedNames.length} MCP server(s): ${failedNames.join(', ')}`;
+      console.warn(`[ProcessManager] MCP config reload completed with errors: ${error}`);
+      return { success: false, error };
+    }
+
+    console.log('[ProcessManager] MCP config reload complete');
+    return { success: true };
   }
 
   /**

@@ -36,7 +36,7 @@ import { toRendererTaskRun } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
 import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
 import { userProfile } from '@flowstate/core';
-import { runIntegrationHealthCheck } from './integrations-health.js';
+import { runIntegrationHealthCheck, runOAuthBatchHealthCheck } from './integrations-health.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -856,8 +856,11 @@ ipcMain.handle('integrations:getMcpStatus', async () => {
 
 ipcMain.handle('integrations:reloadMcp', async () => {
   try {
-    await processManager.reloadMcpConfig();
-    return { success: true };
+    const result = await processManager.reloadMcpConfig();
+    if (result.success) {
+      return { success: true };
+    }
+    return { success: false, error: result.error ?? 'Failed to reload MCP config' };
   } catch (error) {
     console.error('[Integrations] Error reloading MCP config:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -866,6 +869,10 @@ ipcMain.handle('integrations:reloadMcp', async () => {
 
 ipcMain.handle('integrations:healthCheck', async (_event, service: string) => {
   return await runIntegrationHealthCheck(service);
+});
+
+ipcMain.handle('integrations:healthCheckOAuthBatch', async () => {
+  return await runOAuthBatchHealthCheck();
 });
 
 ipcMain.handle(

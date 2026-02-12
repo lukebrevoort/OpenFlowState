@@ -10,7 +10,12 @@ export type IntegrationHealthCheckResult = {
   email?: string;
 };
 
+export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion';
+
+export type OAuthBatchHealthCheckResult = Record<OAuthIntegrationService, IntegrationHealthCheckResult>;
+
 const NOTION_VERSION = '2022-06-28';
+const OAUTH_SERVICES: readonly OAuthIntegrationService[] = ['gmail', 'gcal', 'notion'];
 
 const done = (result: Omit<IntegrationHealthCheckResult, 'checkedAt'>): IntegrationHealthCheckResult => ({
   ...result,
@@ -290,4 +295,18 @@ export async function runIntegrationHealthCheck(service: string): Promise<Integr
   } catch (error) {
     return fail(`Health check failed: ${extractErrorMessage(error)}`);
   }
+}
+
+export async function runOAuthBatchHealthCheck(): Promise<OAuthBatchHealthCheckResult> {
+  const checks = await Promise.all(
+    OAUTH_SERVICES.map(async (service) => {
+      try {
+        return [service, await runIntegrationHealthCheck(service)] as const;
+      } catch (error) {
+        return [service, fail(`Health check failed: ${extractErrorMessage(error)}`)] as const;
+      }
+    }),
+  );
+
+  return Object.fromEntries(checks) as OAuthBatchHealthCheckResult;
 }

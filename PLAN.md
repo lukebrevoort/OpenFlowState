@@ -1011,16 +1011,16 @@ Use this when your desktop is cluttered and needs organization.
 - [x] ProcessManager starts OpenCode + streams events
 - [x] Chat mode streaming with session management
 
-### Phase 3: Integrations + Config Baseline - MOSTLY DONE
+### Phase 3: Integrations + Config Baseline - DONE
 
 Value: users can connect core services (Gmail/GCal/Notion/Canvas) and persist config.
 
 - [x] Config store persisted to disk
 - [x] Auth manager + OAuth server
 - [x] Integrations UI + connect/disconnect
-- [ ] Confirm OAuth end-to-end with real credentials across Gmail + GCal (and Notion OAuth if we keep it)
-- [ ] Decide + implement secrets storage policy: keep encrypted files vs move to macOS Keychain
-- [ ] Implement Custom MCP add/configure UI (currently placeholder)
+- [x] Confirm OAuth end-to-end with real credentials across Gmail + GCal (and Notion OAuth if we keep it)
+- [x] Decide + implement secrets storage policy: keep encrypted files vs move to macOS Keychain
+- [x] Implement Custom MCP add/configure UI (currently placeholder)
 
 ### Phase 4: Execution Core (Timeline + Approvals + Tasks)
 

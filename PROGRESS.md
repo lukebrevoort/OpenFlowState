@@ -33,6 +33,16 @@
 
 ---
 
+## Tasks Completed (Feb 12, 2026 - Phase 3 Integration Wrap-Up)
+
+- ✅ Added OAuth batch validation endpoint for Gmail/GCal/Notion (`integrations:healthCheckOAuthBatch`) with typed preload/renderer API.
+- ✅ Implemented macOS Keychain-first secrets policy in desktop `AuthManager` with encrypted-file fallback and legacy migration.
+- ✅ Completed Custom MCP configure UX in Integrations mode (edit name/command/env/enabled + MCP reload handling).
+- ✅ Updated `PLAN.md` to mark remaining Phase 3 checklist items as complete.
+- ✅ Verified desktop package checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
+
+---
+
 ## Tasks Completed (Feb 7, 2026 - Canvas Browser Auth Fix)
 
 Fixed an issue where Canvas browser authentication (via `canvas_auth_browser_login` MCP tool) wasn't persisting:
