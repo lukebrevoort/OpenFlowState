@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import type { WebContents } from 'electron';
 import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { approvalPolicyStore } from './approval-policy-store.js';
 import { configStore } from './config-store.js';
@@ -498,7 +499,7 @@ class WorkflowsRunner {
     return { ok: true, data: definitions };
   }
 
-  async run(workflowId: string, input?: unknown): Promise<{ ok: true; data: WorkflowRun } | { ok: false; code: IpcErrorCode; message: string; details?: unknown }>{
+  async run(workflowId: string, input?: unknown, webContents?: WebContents): Promise<{ ok: true; data: WorkflowRun } | { ok: false; code: IpcErrorCode; message: string; details?: unknown }>{
     const id = ensureString(workflowId);
     if (!id) {
       return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a non-empty string.' };
@@ -635,6 +636,18 @@ class WorkflowsRunner {
           description: getTaskDescription(),
         });
 
+        processManager.notifyWorkflowRunStatus({
+          sessionId: workflowSessionId,
+          taskRunId,
+          startedAt,
+          webContents,
+          title: humanizeId(id),
+          summary: needsInput ? 'Needs response' : 'Task complete ✅',
+          detail: getTaskDescription(),
+          needsResponse: needsInput,
+          completed: !blocked && !needsInput,
+        });
+
         const completed = workflowsStore.updateRun(workflowRunId, {
           status: runStatus,
           ...(needsInput || blocked ? {} : { finishedAt }),
@@ -727,6 +740,18 @@ class WorkflowsRunner {
         progress: blocked || needsInput ? 50 : 100,
         updatedAt: finishedAt,
         description: getTaskDescription(),
+      });
+
+      processManager.notifyWorkflowRunStatus({
+        sessionId: workflowSessionId,
+        taskRunId,
+        startedAt,
+        webContents,
+        title: humanizeId(id),
+        summary: needsInput ? 'Needs response' : 'Task complete ✅',
+        detail: getTaskDescription(),
+        needsResponse: needsInput,
+        completed: !blocked && !needsInput,
       });
 
       const completed = workflowsStore.updateRun(workflowRunId, {

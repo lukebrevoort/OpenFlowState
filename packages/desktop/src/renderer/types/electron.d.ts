@@ -237,6 +237,13 @@ export interface McpServerStatus {
   error?: string;
 }
 
+export interface IntegrationHealthCheckResult {
+  ok: boolean;
+  checkedAt: string;
+  message?: string;
+  email?: string;
+}
+
 export interface GoogleCalendarListEntry {
   id: string;
   summary?: string;
@@ -420,6 +427,7 @@ export interface FlowstateAPI {
     listAuthStatuses: () => Promise<AuthStatus[]>;
     getMcpStatus: () => Promise<Record<string, McpServerStatus> | null>;
     reloadMcp: () => Promise<{ success: boolean; error?: string }>;
+    healthCheck: (service: string) => Promise<IntegrationHealthCheckResult>;
 
     oauthStart: (service: string, clientId: string, clientSecret: string) => Promise<AuthToken>;
     oauthRefresh: (service: string) => Promise<AuthToken | null>;

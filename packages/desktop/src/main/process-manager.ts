@@ -621,6 +621,93 @@ class ProcessManager {
     }
   }
 
+  private notifyTaskNeedsResponse(args: {
+    sessionId: string;
+    taskRunId: string;
+    webContents: Electron.WebContents;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+  }): void {
+    if (!Notification.isSupported()) return;
+    if (!this.getApprovalsNotificationEnabled()) return;
+
+    const title =
+      this.safeNotificationText(args.title, 72) ??
+      this.safeNotificationText(args.detail, 72) ??
+      'Response needed';
+    const body =
+      this.safeNotificationText(args.summary, 200) ??
+      this.safeNotificationText(args.detail, 200) ??
+      'Open FlowState to continue this workflow.';
+
+    const notification = new Notification({ title, body });
+    notification.on('click', () => {
+      try {
+        const win = BrowserWindow.fromWebContents(args.webContents);
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        } else {
+          app.focus({ steal: true });
+        }
+      } catch {
+        // ignore
+      }
+
+      args.webContents.send('notifications:approvalClick', {
+        requestId: `workflow-response-${args.taskRunId}`,
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+      });
+    });
+
+    try {
+      notification.show();
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to show response-needed notification:', error);
+    }
+  }
+
+  notifyWorkflowRunStatus(args: {
+    sessionId: string;
+    taskRunId: string;
+    startedAt?: number;
+    webContents?: Electron.WebContents;
+    title?: string;
+    summary?: string;
+    detail?: string;
+    needsResponse?: boolean;
+    completed?: boolean;
+  }): void {
+    if (!args.webContents) return;
+
+    if (args.needsResponse) {
+      this.notifyTaskNeedsResponse({
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+        webContents: args.webContents,
+        title: args.title,
+        summary: args.summary,
+        detail: args.detail,
+      });
+      return;
+    }
+
+    if (args.completed) {
+      this.notifyTaskCompleted({
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+        startedAt: args.startedAt,
+        webContents: args.webContents,
+        title: args.title,
+        summary: args.summary,
+        detail: args.detail,
+      });
+    }
+  }
+
   // Batch timeline IPC events to reduce renderer churn during high-volume streams.
   private timelineEventBuffer: unknown[] = [];
   private timelineFlushTimer: NodeJS.Timeout | null = null;
@@ -1112,7 +1199,7 @@ class ProcessManager {
         ? path.resolve(appPath, '../../..')
         : path.resolve(appPath, '..');
     } else {
-      packagesDir = path.join(appPath, 'mcp-servers');
+      packagesDir = path.join(process.resourcesPath, 'mcp-servers');
     }
     
     console.log('[ProcessManager] App path:', appPath);
@@ -1258,19 +1345,29 @@ class ProcessManager {
    * Build MCP configuration with auth tokens from auth-manager
    */
   private loadFlowstatePrompt(packagesDir: string): string | null {
-    try {
-      const agentsDir = path.resolve(packagesDir, '..', 'agents');
-      const agentPath = path.join(agentsDir, 'flowstate.md');
-      const raw = fs.readFileSync(agentPath, 'utf8');
-      const parts = raw.split('---');
-      if (parts.length >= 3) {
-        return parts.slice(2).join('---').trim();
+    const candidatePaths = [
+      path.join(path.resolve(packagesDir, '..', 'agents'), 'flowstate.md'),
+      path.join(this.getRepoRoot(), 'agents', 'flowstate.md'),
+    ];
+
+    for (const agentPath of candidatePaths) {
+      try {
+        if (!fs.existsSync(agentPath)) {
+          continue;
+        }
+        const raw = fs.readFileSync(agentPath, 'utf8');
+        const parts = raw.split('---');
+        if (parts.length >= 3) {
+          return parts.slice(2).join('---').trim();
+        }
+        return raw.trim();
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to load FlowState agent prompt candidate:', agentPath, error);
       }
-      return raw.trim();
-    } catch (error) {
-      console.error('[ProcessManager] Failed to load FlowState agent prompt:', error);
-      return null;
     }
+
+    console.error('[ProcessManager] Failed to load FlowState agent prompt from all candidates');
+    return null;
   }
 
   private formatUserProfileForPrompt(profile: UserProfile): string | null {
@@ -1438,11 +1535,14 @@ class ProcessManager {
     // System MCP (no auth needed)
     const systemPath = this.verifyMcpServer(packagesDir, 'mcp-system');
     if (systemPath) {
+      const systemNotificationsEnabled =
+        this.getApprovalsNotificationEnabled() || this.getTaskCompletionNotificationEnabled();
       mcpConfig['flowstate-system'] = {
         type: 'local',
         command: ['node', systemPath],
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          FLOWSTATE_NOTIFY_SYSTEM_ENABLED: String(systemNotificationsEnabled),
         },
         enabled: true,
         timeout: 10000,

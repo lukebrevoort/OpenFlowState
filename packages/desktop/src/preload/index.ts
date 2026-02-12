@@ -300,6 +300,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
     listAuthStatuses: () => ipcRenderer.invoke('integrations:listAuthStatuses'),
     getMcpStatus: () => ipcRenderer.invoke('integrations:getMcpStatus'),
     reloadMcp: () => ipcRenderer.invoke('integrations:reloadMcp'),
+    healthCheck: (service: string) => ipcRenderer.invoke('integrations:healthCheck', service),
 
     oauthStart: (service: string, clientId: string, clientSecret: string) =>
       ipcRenderer.invoke('integrations:oauthStart', service, clientId, clientSecret),

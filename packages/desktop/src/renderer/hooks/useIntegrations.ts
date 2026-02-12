@@ -40,6 +40,10 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
       (event: OAuthSuccessEvent) => {
         updateIntegration(event.service, {
           status: "connected",
+          healthStatus: "unverified",
+          isCheckingHealth: false,
+          lastCheckedAt: undefined,
+          healthMessage: undefined,
           error: undefined,
         });
         setConnecting(null);
@@ -61,6 +65,10 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
       (event: ApiTokenSuccessEvent) => {
         updateIntegration(event.service, {
           status: "connected",
+          healthStatus: "unverified",
+          isCheckingHealth: false,
+          lastCheckedAt: undefined,
+          healthMessage: undefined,
           error: undefined,
         });
         setConnecting(null);
@@ -83,7 +91,14 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
   const connectOAuth = useCallback(
     async (service: string, clientId: string, clientSecret: string) => {
       setConnecting(service);
-      updateIntegration(service, { status: "connecting", error: undefined });
+      updateIntegration(service, {
+        status: "connecting",
+        healthStatus: undefined,
+        isCheckingHealth: false,
+        lastCheckedAt: undefined,
+        healthMessage: undefined,
+        error: undefined,
+      });
 
       try {
         await window.flowstate.auth.setCredentials(service, {
@@ -109,7 +124,14 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
   const connectApiToken = useCallback(
     async (service: string, apiToken: string, additionalData?: Record<string, string>) => {
       setConnecting(service);
-      updateIntegration(service, { status: "connecting", error: undefined });
+      updateIntegration(service, {
+        status: "connecting",
+        healthStatus: undefined,
+        isCheckingHealth: false,
+        lastCheckedAt: undefined,
+        healthMessage: undefined,
+        error: undefined,
+      });
 
       try {
         // For Canvas, pass additional data (like API URL)
@@ -139,9 +161,13 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
         await window.flowstate.oauth.disconnect(service);
         updateIntegration(service, {
           status: "disconnected",
+          healthStatus: undefined,
+          isCheckingHealth: false,
           error: undefined,
           email: undefined,
           lastSync: undefined,
+          lastCheckedAt: undefined,
+          healthMessage: undefined,
           activeAuthMethod: undefined,
         });
       } catch (error) {
@@ -159,6 +185,69 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
     await loadIntegrations();
   }, [loadIntegrations]);
 
+  const healthCheck = useCallback(
+    async (service: string) => {
+      const integration = integrations.find((item) => item.id === service);
+      if (!integration || integration.status !== "connected") {
+        return;
+      }
+
+      updateIntegration(service, {
+        isCheckingHealth: true,
+        error: undefined,
+      });
+
+      try {
+        const result = await window.flowstate.integrations.healthCheck(service);
+        const checkedAtCandidate = result.checkedAt
+          ? new Date(result.checkedAt)
+          : new Date();
+        const checkedAtDate = Number.isNaN(checkedAtCandidate.getTime())
+          ? new Date()
+          : checkedAtCandidate;
+
+        if (result.ok) {
+          updateIntegration(service, {
+            status: "connected",
+            healthStatus: "verified",
+            isCheckingHealth: false,
+            email: result.email ?? integration.email,
+            lastSync: checkedAtDate,
+            lastCheckedAt: checkedAtDate,
+            healthMessage: result.message,
+            error: undefined,
+          });
+          return;
+        }
+
+        const message = result.message ?? "Health check failed. Reconnect this integration.";
+        updateIntegration(service, {
+          status: "connected",
+          healthStatus: "needs_reconnect",
+          isCheckingHealth: false,
+          lastCheckedAt: checkedAtDate,
+          healthMessage: message,
+          error: message,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Health check failed. Reconnect this integration.";
+        updateIntegration(service, {
+          status: "connected",
+          healthStatus: "needs_reconnect",
+          isCheckingHealth: false,
+          lastCheckedAt: new Date(),
+          healthMessage: message,
+          error: message,
+        });
+        options.onError?.(message);
+      }
+    },
+    [integrations, options, updateIntegration],
+  );
+
   return {
     integrations,
     isLoading,
@@ -167,6 +256,7 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
     connectApiToken,
     disconnect,
     refresh,
+    healthCheck,
   };
 }
 
