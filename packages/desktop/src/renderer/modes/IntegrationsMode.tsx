@@ -1049,6 +1049,21 @@ interface AddCustomMcpModalProps {
   }) => void;
 }
 
+interface ConfigureCustomMcpModalProps {
+  name: string;
+  config: MCPServerConfig;
+  isSaving: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (payload: {
+    originalName: string;
+    name: string;
+    commandInput: string;
+    envInput: string;
+    enabled: boolean;
+  }) => void;
+}
+
 function AddCustomMcpModal({
   isSaving,
   error,
@@ -1156,8 +1171,141 @@ function AddCustomMcpModal({
   );
 }
 
-function isBuiltInMcpServer(name: string) {
-  return name.startsWith("flowstate-");
+function ConfigureCustomMcpModal({
+  name,
+  config,
+  isSaving,
+  error,
+  onClose,
+  onSubmit,
+}: ConfigureCustomMcpModalProps) {
+  const [nextName, setNextName] = useState(name);
+  const [commandInput, setCommandInput] = useState((config.command ?? []).join(" "));
+  const [envInput, setEnvInput] = useState(
+    config.env ? JSON.stringify(config.env, null, 2) : "",
+  );
+  const [enabled, setEnabled] = useState(Boolean(config.enabled));
+
+  useEffect(() => {
+    setNextName(name);
+    setCommandInput((config.command ?? []).join(" "));
+    setEnvInput(config.env ? JSON.stringify(config.env, null, 2) : "");
+    setEnabled(Boolean(config.enabled));
+  }, [name, config]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      originalName: name,
+      name: nextName,
+      commandInput,
+      envInput,
+      enabled,
+    });
+  };
+
+  return (
+    <div
+      className="fs-modal-overlay"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="fs-modal">
+        <div className="fs-modal-header">
+          <div className="flex items-center gap-3">
+            <Settings className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">
+                Configure Custom MCP
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Update server name, command, environment, and enabled state.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="fs-modal-body space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Server name
+            </label>
+            <input
+              type="text"
+              value={nextName}
+              onChange={(e) => setNextName(e.target.value)}
+              placeholder="my-custom-mcp"
+              className="fs-input"
+              required
+            />
+          </div>
+
+          <div className="rounded-lg border border-border p-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Enabled</p>
+              <p className="text-xs text-muted-foreground">
+                Disable to keep this MCP in config without loading it.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+                disabled={isSaving}
+              />
+              {enabled ? "On" : "Off"}
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Command
+            </label>
+            <input
+              type="text"
+              value={commandInput}
+              onChange={(e) => setCommandInput(e.target.value)}
+              placeholder='npx -y @modelcontextprotocol/server-filesystem "/Users/you/Documents"'
+              className="fs-input font-mono text-sm"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Environment (optional JSON)
+            </label>
+            <textarea
+              value={envInput}
+              onChange={(e) => setEnvInput(e.target.value)}
+              placeholder='{"API_KEY":"..."}'
+              className="fs-input font-mono text-xs min-h-24"
+            />
+          </div>
+
+          {error ? <p className="text-sm text-semantic-denied">{error}</p> : null}
+
+          <div className="fs-modal-footer">
+            <button
+              type="button"
+              className="fs-button-ghost"
+              onClick={onClose}
+              disabled={isSaving}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="fs-button-primary" disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function isReservedMcpName(name: string) {
+  return name.startsWith("flowstate-") || name === "notion";
 }
 
 function parseCommandInput(input: string): string[] {
@@ -1240,6 +1388,14 @@ function IntegrationsMode({
   const [showAddCustomMcpModal, setShowAddCustomMcpModal] = useState(false);
   const [addCustomMcpError, setAddCustomMcpError] = useState<string | null>(null);
   const [addCustomMcpSaving, setAddCustomMcpSaving] = useState(false);
+  const [configureCustomMcpTarget, setConfigureCustomMcpTarget] = useState<{
+    name: string;
+    config: MCPServerConfig;
+  } | null>(null);
+  const [configureCustomMcpError, setConfigureCustomMcpError] = useState<string | null>(
+    null,
+  );
+  const [configureCustomMcpSaving, setConfigureCustomMcpSaving] = useState(false);
 
   const loadCustomMcps = async () => {
     if (onboardingMode) return;
@@ -1247,7 +1403,7 @@ function IntegrationsMode({
     try {
       const config = await window.flowstate.config.get();
       const entries = Object.entries(config.mcpServers ?? {})
-        .filter(([name]) => !isBuiltInMcpServer(name))
+        .filter(([name]) => !isReservedMcpName(name))
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, mcpConfig]) => ({
           name,
@@ -1346,8 +1502,8 @@ function IntegrationsMode({
       return;
     }
 
-    if (isBuiltInMcpServer(normalizedName)) {
-      setAddCustomMcpError("Names starting with 'flowstate-' are reserved");
+    if (isReservedMcpName(normalizedName)) {
+      setAddCustomMcpError("This name is reserved by FlowState");
       return;
     }
 
@@ -1372,13 +1528,14 @@ function IntegrationsMode({
 
     try {
       const currentConfig = await window.flowstate.config.get();
-      if (currentConfig.mcpServers[normalizedName]) {
+      const currentMcpServers = currentConfig.mcpServers ?? {};
+      if (currentMcpServers[normalizedName]) {
         setAddCustomMcpError("An MCP with this name already exists");
         return;
       }
 
       const nextMcpServers: Record<string, MCPServerConfig> = {
-        ...currentConfig.mcpServers,
+        ...currentMcpServers,
         [normalizedName]: {
           enabled: true,
           command,
@@ -1389,7 +1546,10 @@ function IntegrationsMode({
       await window.flowstate.config.set({
         mcpServers: nextMcpServers,
       });
-      await window.flowstate.mcp.reload();
+      const reloadResult = await window.flowstate.mcp.reload();
+      if (!reloadResult.success) {
+        throw new Error(reloadResult.error ?? "Failed to reload MCP servers");
+      }
       await loadCustomMcps();
       setShowAddCustomMcpModal(false);
     } catch (error) {
@@ -1398,6 +1558,109 @@ function IntegrationsMode({
       );
     } finally {
       setAddCustomMcpSaving(false);
+    }
+  };
+
+  const handleConfigureCustomMcp = async ({
+    originalName,
+    name,
+    commandInput,
+    envInput,
+    enabled,
+  }: {
+    originalName: string;
+    name: string;
+    commandInput: string;
+    envInput: string;
+    enabled: boolean;
+  }) => {
+    const normalizedName = name.trim();
+
+    if (!normalizedName) {
+      setConfigureCustomMcpError("Server name is required");
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(normalizedName)) {
+      setConfigureCustomMcpError(
+        "Server name can only include letters, numbers, dots, underscores, and hyphens",
+      );
+      return;
+    }
+
+    if (isReservedMcpName(normalizedName)) {
+      setConfigureCustomMcpError("This name is reserved by FlowState");
+      return;
+    }
+
+    const command = parseCommandInput(commandInput);
+    if (command.length === 0) {
+      setConfigureCustomMcpError("Command is required");
+      return;
+    }
+
+    let env: Record<string, string> | undefined;
+    try {
+      env = parseEnvInput(envInput);
+    } catch (error) {
+      setConfigureCustomMcpError(
+        error instanceof Error ? error.message : "Invalid environment JSON",
+      );
+      return;
+    }
+
+    setConfigureCustomMcpError(null);
+    setConfigureCustomMcpSaving(true);
+
+    try {
+      const currentConfig = await window.flowstate.config.get();
+      const currentMcpServers = currentConfig.mcpServers ?? {};
+
+      if (!currentMcpServers[originalName]) {
+        setConfigureCustomMcpError(
+          "This MCP no longer exists in config. Refresh and try again.",
+        );
+        return;
+      }
+
+      if (normalizedName !== originalName && currentMcpServers[normalizedName]) {
+        setConfigureCustomMcpError("An MCP with this name already exists");
+        return;
+      }
+
+      const nextMcpServers: Record<string, MCPServerConfig> = {
+        ...currentMcpServers,
+      };
+
+      delete nextMcpServers[originalName];
+      nextMcpServers[normalizedName] = {
+        ...currentMcpServers[originalName],
+        enabled,
+        command,
+        ...(env ? { env } : {}),
+      };
+
+      if (!env && "env" in nextMcpServers[normalizedName]) {
+        delete nextMcpServers[normalizedName].env;
+      }
+
+      await window.flowstate.config.set({
+        mcpServers: nextMcpServers,
+      });
+
+      const reloadResult = await window.flowstate.mcp.reload();
+      if (!reloadResult.success) {
+        throw new Error(reloadResult.error ?? "Failed to reload MCP servers");
+      }
+
+      await loadCustomMcps();
+      setConfigureCustomMcpTarget(null);
+    } catch (error) {
+      setConfigureCustomMcpError(
+        error instanceof Error ? error.message : "Failed to save custom MCP",
+      );
+    } finally {
+      setConfigureCustomMcpSaving(false);
     }
   };
 
@@ -1744,6 +2007,27 @@ function IntegrationsMode({
                     <p className="text-xs font-mono text-foreground break-all mt-1">
                       {config.command?.join(" ") ?? "-"}
                     </p>
+                    {config.env && Object.keys(config.env).length > 0 && (
+                      <>
+                        <p className="text-xs text-muted-foreground mt-3">Environment</p>
+                        <p className="text-xs font-mono text-foreground break-all mt-1">
+                          {Object.keys(config.env).join(", ")}
+                        </p>
+                      </>
+                    )}
+                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
+                      <button
+                        type="button"
+                        className="fs-button-ghost text-sm py-1.5 flex items-center gap-1"
+                        onClick={() => {
+                          setConfigureCustomMcpError(null);
+                          setConfigureCustomMcpTarget({ name, config });
+                        }}
+                      >
+                        <Settings className="w-3 h-3" />
+                        Configure
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1802,6 +2086,20 @@ function IntegrationsMode({
               setShowAddCustomMcpModal(false);
             }}
             onSubmit={handleAddCustomMcp}
+          />
+        )}
+
+        {configureCustomMcpTarget && (
+          <ConfigureCustomMcpModal
+            name={configureCustomMcpTarget.name}
+            config={configureCustomMcpTarget.config}
+            isSaving={configureCustomMcpSaving}
+            error={configureCustomMcpError}
+            onClose={() => {
+              if (configureCustomMcpSaving) return;
+              setConfigureCustomMcpTarget(null);
+            }}
+            onSubmit={handleConfigureCustomMcp}
           />
         )}
       </div>

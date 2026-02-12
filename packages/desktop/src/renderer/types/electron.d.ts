@@ -244,6 +244,10 @@ export interface IntegrationHealthCheckResult {
   email?: string;
 }
 
+export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion';
+
+export type OAuthBatchHealthCheckResult = Record<OAuthIntegrationService, IntegrationHealthCheckResult>;
+
 export interface GoogleCalendarListEntry {
   id: string;
   summary?: string;
@@ -428,6 +432,7 @@ export interface FlowstateAPI {
     getMcpStatus: () => Promise<Record<string, McpServerStatus> | null>;
     reloadMcp: () => Promise<{ success: boolean; error?: string }>;
     healthCheck: (service: string) => Promise<IntegrationHealthCheckResult>;
+    healthCheckOAuthBatch: () => Promise<OAuthBatchHealthCheckResult>;
 
     oauthStart: (service: string, clientId: string, clientSecret: string) => Promise<AuthToken>;
     oauthRefresh: (service: string) => Promise<AuthToken | null>;

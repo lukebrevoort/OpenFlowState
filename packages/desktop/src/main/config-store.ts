@@ -16,9 +16,22 @@ import path from 'path';
  * MCP Server configuration
  */
 export interface MCPServerConfig {
-  command: string[];
+  /** Local MCP server command (type=local). */
+  command?: string[];
+
+  /** Remote MCP server URL (type=remote). */
+  url?: string;
+
+  /** Remote MCP request headers (type=remote). */
+  headers?: Record<string, string>;
+
   enabled: boolean;
+
+  /** Local MCP env vars (type=local). */
   env?: Record<string, string>;
+
+  /** Optional tool-fetch timeout (ms). */
+  timeout?: number;
 }
 
 /**
@@ -383,13 +396,26 @@ class ConfigStore {
 
     const mcpConfig: Record<string, unknown> = {};
     for (const [name, config] of Object.entries(this.config.mcpServers)) {
-      if (config.enabled) {
+      if (!config.enabled) continue;
+
+      if (typeof config.url === 'string' && config.url.trim().length > 0) {
         mcpConfig[name] = {
-          type: 'local',
-          command: config.command,
-          env: config.env,
+          type: 'remote',
+          url: config.url.trim(),
+          headers: config.headers,
+          enabled: true,
+          timeout: config.timeout,
         };
+        continue;
       }
+
+      mcpConfig[name] = {
+        type: 'local',
+        command: config.command,
+        environment: config.env,
+        enabled: true,
+        timeout: config.timeout,
+      };
     }
 
     return {
