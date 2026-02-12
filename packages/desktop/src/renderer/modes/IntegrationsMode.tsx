@@ -146,7 +146,7 @@ function OAuthForm({
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Instructions */}
       {instructions && (
-        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+        <div className="fs-connection-instructions">
           <h3 className="text-sm font-medium text-foreground mb-2">
             {instructions.title}
           </h3>
@@ -245,7 +245,7 @@ function ApiTokenForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Instructions for Notion Internal Integration */}
-      <div className="p-4 bg-muted/50 rounded-lg border border-border">
+      <div className="fs-connection-instructions">
         <h3 className="text-sm font-medium text-foreground mb-2">
           Notion Internal Integration Setup
         </h3>
@@ -467,7 +467,7 @@ function CanvasConnectionForm({
 
       {/* Instructions */}
       {authMode === "token" ? (
-        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+        <div className="fs-connection-instructions">
           <h3 className="text-sm font-medium text-foreground mb-2">
             Canvas API Token Setup
           </h3>
@@ -480,7 +480,7 @@ function CanvasConnectionForm({
           </ol>
         </div>
       ) : (
-        <div className="p-4 bg-muted/50 rounded-lg border border-border">
+        <div className="fs-connection-instructions">
           <h3 className="text-sm font-medium text-foreground mb-2">
             Browser Login Setup
           </h3>
@@ -1224,6 +1224,7 @@ function IntegrationsMode({
     connectApiToken,
     disconnect,
     refresh,
+    healthCheck,
   } = useIntegrations({
     onError: (message) => console.error("Integration error:", message),
   });
@@ -1316,6 +1317,10 @@ function IntegrationsMode({
       setCustomMcps([]);
       setCustomMcpLoading(false);
     });
+  };
+
+  const handleSyncIntegration = async (service: string) => {
+    await healthCheck(service);
   };
 
   const handleAddCustomMcp = async ({
@@ -1431,7 +1436,15 @@ function IntegrationsMode({
     const isConnecting =
       integration.status === "connecting" ||
       connectingService === integration.id;
-    const hasError = integration.status === "error";
+    const hasConnectionError = integration.status === "error";
+    const isCheckingHealth = Boolean(integration.isCheckingHealth);
+    const isVerified = isConnected && integration.healthStatus === "verified";
+    const needsReconnect =
+      isConnected && integration.healthStatus === "needs_reconnect";
+    const isUnverified =
+      isConnected &&
+      integration.healthStatus !== "verified" &&
+      integration.healthStatus !== "needs_reconnect";
 
     return (
       <div className="fs-card">
@@ -1447,15 +1460,25 @@ function IntegrationsMode({
                   <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                   Connecting
                 </span>
-              ) : isConnected ? (
+              ) : isVerified ? (
                 <span className="fs-badge-success">
                   <Check className="w-3 h-3 mr-1" />
-                  Connected
+                  Verified
                 </span>
-              ) : hasError ? (
+              ) : needsReconnect ? (
                 <span className="fs-badge-error">
                   <AlertCircle className="w-3 h-3 mr-1" />
-                  Error
+                  Needs reconnect
+                </span>
+              ) : isUnverified ? (
+                <span className="fs-badge-warning">
+                  <Shield className="w-3 h-3 mr-1" />
+                  Connected, unverified
+                </span>
+              ) : hasConnectionError ? (
+                <span className="fs-badge-error">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Connection error
                 </span>
               ) : (
                 <span className="fs-badge bg-card text-muted-foreground">
@@ -1471,6 +1494,18 @@ function IntegrationsMode({
                     {integration.email}
                   </p>
                 )}
+                {needsReconnect && (
+                  <p className="text-sm text-semantic-denied">
+                    {integration.error ??
+                      integration.healthMessage ??
+                      "This integration failed the last health check. Reconnect and check again."}
+                  </p>
+                )}
+                {isUnverified && (
+                  <p className="text-xs text-muted-foreground">
+                    Connected, but not yet verified. Click Sync to run a manual health check.
+                  </p>
+                )}
                 {integration.activeAuthMethod && (
                   <p className="text-xs text-muted-foreground">
                     via{" "}
@@ -1479,13 +1514,18 @@ function IntegrationsMode({
                       : "OAuth"}
                   </p>
                 )}
+                {integration.lastCheckedAt && (
+                  <p className="text-xs text-muted-foreground">
+                    Last check: {formatLastSync(integration.lastCheckedAt)}
+                  </p>
+                )}
                 {integration.lastSync && (
                   <p className="text-xs text-muted-foreground">
                     Last sync: {formatLastSync(integration.lastSync)}
                   </p>
                 )}
               </div>
-            ) : hasError && integration.error ? (
+            ) : hasConnectionError && integration.error ? (
               <p className="text-sm text-semantic-denied mt-1">
                 {integration.error}
               </p>
@@ -1500,22 +1540,33 @@ function IntegrationsMode({
         <div className="flex flex-wrap items-center gap-2 mt-4 pt-4 border-t border-border">
           {isConnected ? (
             <>
-              <button
-                className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
-                onClick={handleRefresh}
-                disabled={isLoading}
-              >
-                <RefreshCw
-                  className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`}
-                />
-                Sync
-              </button>
+                <button
+                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => handleSyncIntegration(integration.id)}
+                  disabled={isLoading || isCheckingHealth}
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${isCheckingHealth ? "animate-spin" : ""}`}
+                  />
+                  {isCheckingHealth ? "Checking..." : "Sync"}
+                </button>
+
+              {needsReconnect && (
+                <button
+                  className="fs-button-primary text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => handleConnect(integration)}
+                  disabled={isConnecting}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Reconnect
+                </button>
+              )}
 
               {integration.id === "gcal" && (
                 <button
                   className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
                   onClick={() => setShowGcalCalendarsModal(true)}
-                  disabled={isLoading}
+                  disabled={isLoading || isCheckingHealth}
                 >
                   <Settings className="w-3 h-3" />
                   Calendars

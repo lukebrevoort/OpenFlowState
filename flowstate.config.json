@@ -11,7 +11,7 @@
     }
   },
   "preferences": {
-    "defaultProvider": "opencode/kimi-k2.5-free",
+    "defaultProvider": "opencode/big-pickle",
     "progressiveAutonomy": {
       "readOperations": "auto",
       "writeOperations": "approval"

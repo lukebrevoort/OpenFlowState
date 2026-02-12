@@ -12,6 +12,16 @@ files:
   - "!**/*.map"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme,test,__tests__,tests,powered-test,example,examples}"
 
+extraResources:
+  - from: ../mcp-gmail/dist
+    to: mcp-servers/mcp-gmail/dist
+  - from: ../mcp-gcal/dist
+    to: mcp-servers/mcp-gcal/dist
+  - from: ../mcp-system/dist
+    to: mcp-servers/mcp-system/dist
+  - from: ../mcp-canvas/dist
+    to: mcp-servers/mcp-canvas/dist
+
 mac:
   target:
     - target: dmg

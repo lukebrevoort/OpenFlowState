@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 
 const assistantMarkdownComponents: Components = {
   p: ({ children }) => (
-    <p className="text-foreground whitespace-pre-wrap break-words mb-2 last:mb-0">
+    <p className="text-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere] mb-2 last:mb-0">
       {children}
     </p>
   ),
@@ -19,7 +19,7 @@ const assistantMarkdownComponents: Components = {
       {children}
     </ol>
   ),
-  li: ({ children }) => <li className="text-foreground">{children}</li>,
+  li: ({ children }) => <li className="text-foreground break-words [overflow-wrap:anywhere]">{children}</li>,
   a: ({ href, children, ...props }) => (
     <a
       href={href}
@@ -37,9 +37,10 @@ const assistantMarkdownComponents: Components = {
 };
 
 const assistantMarkdownClassName =
-  "break-words " +
-  "[&_pre]:bg-accent/30 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:text-sm [&_pre]:font-mono " +
-  "[&_code]:font-mono [&_code]:text-[0.85em] [&_code]:rounded [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 " +
+  "break-words overflow-hidden max-w-full [overflow-wrap:anywhere] " +
+  "[&_pre]:bg-accent/30 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:text-sm [&_pre]:font-mono [&_pre]:max-w-full " +
+  "[&_pre_code]:whitespace-pre-wrap [&_pre_code]:break-words [&_pre_code]:[overflow-wrap:anywhere] " +
+  "[&_code]:font-mono [&_code]:text-[0.85em] [&_code]:rounded [&_code]:bg-muted/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:[overflow-wrap:anywhere] " +
   "[&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_pre_code]:rounded-none [&_pre_code]:text-sm";
 
 const normalizeAssistantMarkdown = (content: string) => {
