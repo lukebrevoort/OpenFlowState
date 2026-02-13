@@ -1,7 +1,6 @@
 import {
   ArrowRight,
   CheckCircle2,
-  Sparkles,
   Zap,
   Shield,
   Brain,
@@ -10,7 +9,7 @@ import type { ReactNode } from "react";
 import type { Integration } from "../stores/integrationsStore";
 import type { AuthStatus } from "../types/electron";
 
-type OnboardingStep = "welcome" | "apps" | "connect" | "provider" | "wow";
+type OnboardingStep = "welcome" | "apps" | "connect" | "provider" | "finish";
 
 interface OnboardingFlowProps {
   currentStep: OnboardingStep;
@@ -19,17 +18,14 @@ interface OnboardingFlowProps {
   onToggleApp: (appId: string) => void;
   integrations: Integration[];
   authStatuses: Record<string, AuthStatus | undefined>;
+  recentlyConnectedIds: string[];
   providerOptions: ProviderOption[];
   selectedProvider: ProviderOption;
   selectedModel: string;
   onSelectProvider: (providerId: string) => void;
   onSelectModel: (model: string) => void;
   onStartProviderSetup: () => void;
-  wowPrompts: string[];
-  selectedWowPrompt: string | null;
-  onSelectWowPrompt: (prompt: string) => void;
   onFinish: () => void;
-  onSkipWow: () => void;
   onConnectIntegration: (integrationId: string) => void;
 }
 
@@ -46,7 +42,7 @@ const stepOrder: OnboardingStep[] = [
   "apps",
   "connect",
   "provider",
-  "wow",
+  "finish",
 ];
 
 const stepLabels: Record<OnboardingStep, string> = {
@@ -54,7 +50,7 @@ const stepLabels: Record<OnboardingStep, string> = {
   apps: "Your Apps",
   connect: "Connect",
   provider: "Provider",
-  wow: "Wow Moment",
+  finish: "Finish",
 };
 
 const appHighlights: Record<string, string> = {
@@ -91,9 +87,9 @@ const welcomeHighlights = [
     color: "#3E2F27",
   },
   {
-    title: "See the magic",
-    detail: "Get an instant wow moment with guided prompts.",
-    icon: <Sparkles className="h-5 w-5 text-white" />,
+    title: "Launch with confidence",
+    detail: "Pick your provider, then start FlowState right away.",
+    icon: <Brain className="h-5 w-5 text-white" />,
     color: "#A5B574",
   },
 ];
@@ -171,17 +167,14 @@ export function OnboardingFlow({
   onToggleApp,
   integrations,
   authStatuses,
+  recentlyConnectedIds,
   providerOptions,
   selectedProvider,
   selectedModel,
   onSelectProvider,
   onSelectModel,
   onStartProviderSetup,
-  wowPrompts,
-  selectedWowPrompt,
-  onSelectWowPrompt,
   onFinish,
-  onSkipWow,
   onConnectIntegration,
 }: OnboardingFlowProps) {
   const currentIndex = stepOrder.indexOf(currentStep);
@@ -204,6 +197,7 @@ export function OnboardingFlow({
   const selectedIntegrations = integrations.filter((integration) =>
     selectedApps.includes(integration.id),
   );
+  const recentConnectedSet = new Set(recentlyConnectedIds);
 
   return (
     <div className="h-full overflow-y-auto px-6 py-10">
@@ -383,11 +377,18 @@ export function OnboardingFlow({
                           <p className="text-sm text-muted-foreground">
                             {integration.description}
                           </p>
+                          {status?.email ? (
+                            <p className="text-xs text-muted-foreground mt-1">{status.email}</p>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
                         {isConnected ? (
-                          <span className="fs-badge-success">Connected</span>
+                          <span className="fs-badge-success">
+                            {recentConnectedSet.has(integration.id)
+                              ? "Connected just now"
+                              : "Connected"}
+                          </span>
                         ) : (
                           <span className="fs-badge-warning">Not connected</span>
                         )}
@@ -416,10 +417,11 @@ export function OnboardingFlow({
                   } ready to go.`}
             </div>
             <div className="rounded-2xl border border-border bg-card/70 p-4 text-sm text-muted-foreground">
-              You can manage each connection later in the Integrations tab.
+              Connect opens the integration setup flow right away. You can also manage
+              each connection later in Integrations.
             </div>
             <div className="rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
-              To connect right now, open the Integrations tab after onboarding.
+              After you finish connecting, return here to continue onboarding.
             </div>
           </StepCard>
         )}
@@ -528,58 +530,38 @@ export function OnboardingFlow({
           </StepCard>
         )}
 
-        {currentStep === "wow" && (
+        {currentStep === "finish" && (
           <StepCard
-            title="Pick your first wow moment"
-            description="Try a guided prompt to see FlowState in action."
+            title="You're all set"
+            description="Your workspace is ready. Start FlowState when you are."
             footer={
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <button type="button" className="fs-button-ghost" onClick={goBack}>
                   Back
                 </button>
-                <div className="flex items-center gap-2">
-                  <button type="button" className="fs-button-ghost" onClick={onSkipWow}>
-                    Skip and explore
-                  </button>
-                  <button
-                    type="button"
-                    className="fs-button-primary inline-flex items-center gap-2"
-                    onClick={onFinish}
-                  >
-                    Start FlowState
-                    <ArrowRight className="h-4 w-4" />
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="fs-button-primary inline-flex items-center gap-2"
+                  onClick={onFinish}
+                >
+                  Start FlowState
+                  <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
             }
           >
-            <div className="grid gap-4">
-              {wowPrompts.map((prompt) => {
-                const isSelected = prompt === selectedWowPrompt;
-
-                return (
-                  <button
-                    key={prompt}
-                    type="button"
-                    onClick={() => onSelectWowPrompt(prompt)}
-                    className={`flex items-start gap-3 rounded-2xl border px-5 py-4 text-left transition-all duration-300 ease-in-out ${
-                      isSelected
-                        ? "border-primary bg-primary/10"
-                        : "border-border bg-card/70 hover:border-primary/40"
-                    }`}
-                  >
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C87137]/15 text-[#C87137]">
-                      <Sparkles className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-foreground">{prompt}</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        We’ll run this right after onboarding.
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="rounded-2xl border border-border bg-card/70 p-5 space-y-3">
+              <div className="flex items-center gap-2 text-foreground">
+                <CheckCircle2 className="h-4 w-4 text-[#A5B574]" />
+                <span>Default model selected</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                FlowState will use <span className="text-foreground">{selectedModel}</span> as
+                your default model.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                You can update integrations and model preferences any time in Settings.
+              </p>
             </div>
           </StepCard>
         )}

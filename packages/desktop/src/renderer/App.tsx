@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatMode from './modes/ChatMode';
 import TasksMode from './modes/TasksMode';
@@ -18,11 +18,53 @@ import { useOnboardingStore } from './stores/onboardingStore';
 import { useProviderStore } from './stores/providerStore';
 import { useTasksStore } from './stores/tasksStore';
 import { providerDefinitions } from './data/providerData';
-import { onboardingWowPrompts } from './data/onboardingData';
+import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
 import type { AuthStatus } from './types/electron';
 
 export type AppPage = 'home' | 'chat' | 'tasks' | 'workflows' | 'integrations' | 'settings';
+
+const formatProviderName = (providerId: string): string =>
+  providerId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+
+const buildProviderOptionsFromModels = (models: string[]): ProviderDefinition[] => {
+  const groupedByProvider = new Map<string, string[]>();
+
+  for (const value of models) {
+    const modelId = value.trim();
+    const separatorIndex = modelId.indexOf('/');
+    if (separatorIndex <= 0 || separatorIndex === modelId.length - 1) {
+      continue;
+    }
+
+    const providerId = modelId.slice(0, separatorIndex);
+    const existingModels = groupedByProvider.get(providerId) ?? [];
+    if (!existingModels.includes(modelId)) {
+      existingModels.push(modelId);
+      groupedByProvider.set(providerId, existingModels);
+    }
+  }
+
+  const fallbackById = new Map(providerDefinitions.map((provider) => [provider.id, provider]));
+
+  return Array.from(groupedByProvider.entries()).map(([providerId, providerModels]) => {
+    const fallback = fallbackById.get(providerId);
+    const providerName = fallback?.name ?? formatProviderName(providerId);
+
+    return {
+      id: providerId,
+      name: providerName,
+      description:
+        fallback?.description ?? `Models discovered from OpenCode for ${providerName}.`,
+      models: providerModels,
+      badge: fallback?.badge,
+    };
+  });
+};
 
 function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -48,10 +90,8 @@ function App() {
   const {
     currentStep,
     selectedApps,
-    selectedWowPrompt,
     setStep,
     toggleApp,
-    setSelectedWowPrompt,
     reset: resetOnboarding,
   } = useOnboardingStore();
   const {
@@ -107,10 +147,60 @@ function App() {
     }
   }, [isOnboarding, setOnboardingConnect]);
 
-  const providerOptions = providerDefinitions;
+  const [providerOptions, setProviderOptions] = useState<ProviderDefinition[]>(providerDefinitions);
+
+  useEffect(() => {
+    if (!isOnboarding) {
+      setProviderOptions(providerDefinitions);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProviderOptions = async () => {
+      try {
+        const models = await window.flowstate.opencode.listModels();
+        if (cancelled) return;
+        const dynamicProviderOptions = buildProviderOptionsFromModels(models);
+        setProviderOptions(
+          dynamicProviderOptions.length > 0 ? dynamicProviderOptions : providerDefinitions,
+        );
+      } catch (error) {
+        console.error('Failed to load OpenCode provider models for onboarding:', error);
+        if (!cancelled) {
+          setProviderOptions(providerDefinitions);
+        }
+      }
+    };
+
+    loadProviderOptions().catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnboarding]);
+
   const selectedProvider =
     providerOptions.find((provider) => provider.id === selectedProviderId) ??
     providerOptions[0];
+
+  useEffect(() => {
+    if (providerOptions.length === 0) return;
+
+    const matchingProvider = providerOptions.find(
+      (provider) => provider.id === selectedProviderId,
+    );
+    const activeProvider = matchingProvider ?? providerOptions[0];
+
+    if (!matchingProvider) {
+      setProvider(activeProvider.id, activeProvider.models[0]);
+      return;
+    }
+
+    if (!activeProvider.models.includes(selectedModel)) {
+      setModel(activeProvider.models[0]);
+    }
+  }, [providerOptions, selectedModel, selectedProviderId, setModel, setProvider]);
 
   const [integrations, setIntegrations] = useState(
     useIntegrationsStore.getState().integrations,
@@ -118,6 +208,9 @@ function App() {
   const [authStatuses, setAuthStatuses] = useState<
     Record<string, AuthStatus | undefined>
   >({});
+  const previousAuthStatusesRef = useRef<Record<string, AuthStatus | undefined>>({});
+  const [onboardingPendingIntegrationId, setOnboardingPendingIntegrationId] = useState<string | null>(null);
+  const [recentlyConnectedAt, setRecentlyConnectedAt] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const unsubscribe = useIntegrationsStore.subscribe((state) => {
@@ -159,6 +252,58 @@ function App() {
     fetchStatuses();
   }, [integrations, isOnboarding]);
 
+  useEffect(() => {
+    if (!isOnboarding) {
+      setRecentlyConnectedAt({});
+      return;
+    }
+
+    const previousStatuses = previousAuthStatusesRef.current;
+    const updates: Record<string, number> = {};
+
+    for (const [service, status] of Object.entries(authStatuses)) {
+      const wasConnected = Boolean(previousStatuses[service]?.connected);
+      const isConnected = Boolean(status?.connected);
+      if (!wasConnected && isConnected) {
+        updates[service] = Date.now();
+      }
+    }
+
+    previousAuthStatusesRef.current = authStatuses;
+    if (Object.keys(updates).length > 0) {
+      setRecentlyConnectedAt((current) => ({ ...current, ...updates }));
+    }
+  }, [authStatuses, isOnboarding]);
+
+  useEffect(() => {
+    if (!isOnboarding) {
+      setOnboardingPendingIntegrationId(null);
+      return;
+    }
+    if (currentPage !== 'integrations') return;
+    if (!onboardingPendingIntegrationId) return;
+
+    const connected = Boolean(authStatuses[onboardingPendingIntegrationId]?.connected);
+    if (!connected) return;
+
+    setStep('connect');
+    setCurrentPage('home');
+    setOnboardingPendingIntegrationId(null);
+  }, [
+    authStatuses,
+    currentPage,
+    isOnboarding,
+    onboardingPendingIntegrationId,
+    setStep,
+  ]);
+
+  const recentConnectedIds = useMemo(() => {
+    const cutoff = Date.now() - 5 * 60 * 1000;
+    return Object.entries(recentlyConnectedAt)
+      .filter(([, ts]) => ts >= cutoff)
+      .map(([id]) => id);
+  }, [recentlyConnectedAt]);
+
   const renderPage = () => {
     switch (currentPage) {
       case 'chat':
@@ -193,7 +338,7 @@ function App() {
           />
         );
       case 'integrations':
-        return <IntegrationsMode />;
+        return <IntegrationsMode onOpenSettings={() => setCurrentPage('settings')} />;
       case 'settings':
         return <SettingsPage />;
       default:
@@ -201,9 +346,7 @@ function App() {
     }
   };
 
-  const handleOnboardingFinish = async (promptOverride?: string | null) => {
-    const promptToSend = promptOverride ?? selectedWowPrompt;
-
+  const handleOnboardingFinish = async () => {
     try {
       await updateConfig({
         onboardingComplete: true,
@@ -222,22 +365,10 @@ function App() {
       console.error('Failed to restart OpenCode after onboarding:', error);
     }
 
-    if (promptToSend) {
-      setCurrentPage('chat');
-      const result = await window.flowstate.opencode.send(promptToSend);
-      if (result.error) {
-        console.error('Failed to send wow prompt:', result.error);
-      }
-    } else {
-      setCurrentPage('home');
-    }
+    setCurrentPage('home');
 
     resetOnboarding();
     resetProvider();
-  };
-
-  const handleOnboardingSkipWow = async () => {
-    await handleOnboardingFinish(null);
   };
 
   const showMainShell = !isOnboarding;
@@ -280,43 +411,57 @@ function App() {
   }, [currentPage, isDesktop, isOnMainPage]);
 
   const mainContent = isOnboarding ? (
-    <main className="flex-1 overflow-auto">
-      <OnboardingFlow
-        currentStep={currentStep}
-        onStepChange={setStep}
-        selectedApps={selectedApps}
-        onToggleApp={toggleApp}
-        integrations={integrations}
-        authStatuses={authStatuses}
-        providerOptions={providerOptions}
-        selectedProvider={selectedProvider}
-        selectedModel={selectedModel}
-        onSelectProvider={setProvider}
-        onSelectModel={setModel}
-        onStartProviderSetup={() => {
-          const command = getProviderAuthCommand(selectedProvider);
-          if (typeof window.flowstate.app.openTerminal === 'function') {
-            window.flowstate.app.openTerminal(command);
-          } else {
-            window.flowstate.app.openExternal(
-              `terminal://${encodeURIComponent(command)}`,
-            );
-          }
-          const authUrl = getProviderAuthUrl(selectedProvider);
-          if (authUrl) {
-            window.flowstate.app.openExternal(authUrl);
-          }
-        }}
-        wowPrompts={onboardingWowPrompts}
-        selectedWowPrompt={selectedWowPrompt}
-        onSelectWowPrompt={setSelectedWowPrompt}
-        onFinish={handleOnboardingFinish}
-        onSkipWow={handleOnboardingSkipWow}
-        onConnectIntegration={(integrationId) => {
-          setOnboardingConnect(integrationId);
-        }}
-      />
-    </main>
+    currentPage === 'integrations' ? (
+      <main className="flex-1 overflow-auto">
+        <IntegrationsMode
+          onboardingMode
+          onReturnToOnboarding={() => {
+            setCurrentPage('home');
+          }}
+        />
+      </main>
+    ) : (
+      <main className="flex-1 overflow-auto">
+        <OnboardingFlow
+          currentStep={currentStep}
+          onStepChange={setStep}
+          selectedApps={selectedApps}
+          onToggleApp={toggleApp}
+          integrations={integrations}
+          authStatuses={authStatuses}
+          recentlyConnectedIds={recentConnectedIds}
+          providerOptions={providerOptions}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          onSelectProvider={(providerId) => {
+            const provider = providerOptions.find((item) => item.id === providerId);
+            if (!provider) return;
+            setProvider(providerId, provider.models[0]);
+          }}
+          onSelectModel={setModel}
+          onStartProviderSetup={() => {
+            const command = getProviderAuthCommand(selectedProvider);
+            if (typeof window.flowstate.app.openTerminal === 'function') {
+              window.flowstate.app.openTerminal(command);
+            } else {
+              window.flowstate.app.openExternal(
+                `terminal://${encodeURIComponent(command)}`,
+              );
+            }
+            const authUrl = getProviderAuthUrl(selectedProvider);
+            if (authUrl) {
+              window.flowstate.app.openExternal(authUrl);
+            }
+          }}
+          onFinish={handleOnboardingFinish}
+          onConnectIntegration={(integrationId) => {
+            setOnboardingPendingIntegrationId(integrationId);
+            setOnboardingConnect(integrationId);
+            setCurrentPage('integrations');
+          }}
+        />
+      </main>
+    )
   ) : (
     <main className="flex-1 overflow-auto">
       <div key={currentPage} className="h-full page-fade-up">

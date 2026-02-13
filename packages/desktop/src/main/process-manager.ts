@@ -14,13 +14,14 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
-import { createOpencode, McpLocalConfig } from '@opencode-ai/sdk';
+import { createOpencode, McpLocalConfig, McpRemoteConfig } from '@opencode-ai/sdk';
 import { userProfile, type UserProfile } from '@flowstate/core';
 import { authManager } from './auth-manager.js';
 import { configStore } from './config-store.js';
 import { oauthServer } from './oauth-server.js';
 import { timelineStore } from './timeline-store.js';
 import { normalizeOpenCodeEvent } from './timeline-normalizer.js';
+import { normalizeCustomMcpServers, type OpencodeMcpConfig } from './mcp-config.js';
 import { approvalPolicyStore, type ApprovalReply } from './approval-policy-store.js';
 import { approvalsAuditStore } from './approvals-audit-store.js';
 import { deriveApprovalBlockingPatch, isApprovalEventType } from './approval-blocking.js';
@@ -170,13 +171,56 @@ class ProcessManager {
   private isRunning: boolean = false;
   private activeSessionId: string | null = null;
   private eventStreamAbortController: AbortController | null = null;
+  private eventStreamWebContents: Electron.WebContents | null = null;
   private flowstatePrompt: string | null = null;
   private timelineInitialized = false;
+
+  private redactMcpConfigForLog(config: OpencodeMcpConfig): Record<string, unknown> {
+    const redacted: Record<string, unknown> = {};
+
+    for (const [name, entry] of Object.entries(config)) {
+      if (!entry || typeof entry !== 'object') {
+        redacted[name] = entry as unknown;
+        continue;
+      }
+
+      const type = (entry as { type?: string }).type;
+      if (type === 'local') {
+        const env = (entry as McpLocalConfig).environment;
+        const environment = env
+          ? Object.fromEntries(Object.keys(env).map((key) => [key, '[redacted]']))
+          : undefined;
+        redacted[name] = {
+          ...(entry as McpLocalConfig),
+          ...(environment ? { environment } : {}),
+        };
+        continue;
+      }
+
+      if (type === 'remote') {
+        const hdrs = (entry as McpRemoteConfig).headers;
+        const headers = hdrs
+          ? Object.fromEntries(Object.keys(hdrs).map((key) => [key, '[redacted]']))
+          : undefined;
+        redacted[name] = {
+          ...(entry as McpRemoteConfig),
+          ...(headers ? { headers } : {}),
+        };
+        continue;
+      }
+
+      redacted[name] = entry as unknown;
+    }
+
+    return redacted;
+  }
   private reauthCooldown = new Map<string, number>();
   private readonly reauthCooldownMs = 5 * 60 * 1000;
 
   private approvalNotificationSeenAt = new Map<string, number>();
   private readonly approvalNotificationDedupeTtlMs = 60 * 60 * 1000;
+  private taskCompletionNotificationSeenAt = new Map<string, number>();
+  private readonly taskCompletionNotificationDedupeTtlMs = 60 * 60 * 1000;
 
   // Sessions whose timeline events should be persisted, even when not active.
   // This is used by workflow sessions so the Tasks UI can load their timelines.
@@ -185,6 +229,218 @@ class ProcessManager {
     string,
     { promoted: boolean; completed: boolean; startAt: number; toolCalls: number; message?: string }
   >();
+
+  private readonly reliabilityMaxAttempts = 5;
+  private readonly reliabilityBaseBackoffMs = 1000;
+  private readonly reliabilityMaxBackoffMs = 15000;
+  private reliabilityRetryState = new Map<
+    string,
+    { requestId: string; attempt: number; startedAt: number; lastError?: OpenCodeErrorPayload }
+  >();
+
+  private getTimelineWebContents(explicit?: Electron.WebContents): Electron.WebContents | null {
+    const candidate = explicit ?? this.eventStreamWebContents;
+    if (!candidate || candidate.isDestroyed()) return null;
+    return candidate;
+  }
+
+  private computeReliabilityBackoffMs(nextAttempt: number): number {
+    // nextAttempt is 2..N (attempt 1 has no backoff).
+    const exponent = Math.max(0, nextAttempt - 2);
+    const value = this.reliabilityBaseBackoffMs * 2 ** exponent;
+    return Math.min(this.reliabilityMaxBackoffMs, Math.max(0, Math.trunc(value)));
+  }
+
+  private isRetryableIntegrationFailure(errorPayload: OpenCodeErrorPayload): boolean {
+    const message = (errorPayload.message ?? errorPayload.error ?? '').toLowerCase();
+    const code = (errorPayload.code ?? '').toLowerCase();
+    const details = (() => {
+      try {
+        return JSON.stringify(errorPayload.details ?? {});
+      } catch {
+        return '';
+      }
+    })().toLowerCase();
+    const haystack = `${code} ${message} ${details}`;
+
+    const mentionsTooling = haystack.includes('mcp') || haystack.includes('tool');
+    if (!mentionsTooling) return false;
+
+    const transientMarkers = [
+      'disconnected',
+      'disconnect',
+      'connection',
+      'socket',
+      'hang up',
+      'timeout',
+      'timed out',
+      'econnreset',
+      'econnrefused',
+      'epipe',
+      'eof',
+      'broken pipe',
+      'stream closed',
+      'transport',
+      'temporarily unavailable',
+    ];
+    if (transientMarkers.some((marker) => haystack.includes(marker))) return true;
+
+    const status = errorPayload.status;
+    if (status && [502, 503, 504].includes(status)) return true;
+
+    return false;
+  }
+
+  private async emitReliabilityTimelineEvent(args: {
+    type: 'flowstate.reliability.retry' | 'flowstate.reliability.failed';
+    sessionId: string;
+    attempt: number;
+    maxAttempts: number;
+    waitMs?: number;
+    reason?: string;
+    action?: string;
+    error?: OpenCodeErrorPayload;
+    webContents?: Electron.WebContents;
+  }): Promise<void> {
+    const webContents = this.getTimelineWebContents(args.webContents);
+    if (!webContents) return;
+
+    const payload: Record<string, unknown> = {
+      attempt: args.attempt,
+      maxAttempts: args.maxAttempts,
+      ...(typeof args.waitMs === 'number'
+        ? { waitMs: args.waitMs, waitSeconds: Math.max(1, Math.ceil(args.waitMs / 1000)) }
+        : {}),
+      ...(args.reason ? { reason: args.reason } : {}),
+      ...(args.action ? { action: args.action } : {}),
+      ...(args.error
+        ? {
+            error: args.error.message ?? args.error.error,
+            code: args.error.code,
+            provider: args.error.provider,
+            model: args.error.model,
+            status: args.error.status,
+          }
+        : {}),
+    };
+
+    const normalized = normalizeOpenCodeEvent({ type: args.type, properties: payload }, args.sessionId);
+    if (!normalized) return;
+
+    try {
+      const stored = await timelineStore.appendWithPayload({
+        ...normalized.event,
+        redacted: normalized.redacted,
+        payload: normalized.payload,
+      });
+      this.enqueueTimelineEvent(webContents, stored);
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to persist reliability timeline event:', error);
+    }
+  }
+
+  private async sleepReliability(ms: number): Promise<void> {
+    if (ms <= 0) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async promptWithReliabilityPolicy(args: {
+    sessionId: string;
+    body: { agent: string; system?: string; parts: Array<{ type: 'text'; text: string }> };
+    webContents?: Electron.WebContents;
+  }): Promise<{ data?: unknown; error?: unknown }> {
+    if (!this.instance?.client) {
+      throw new Error('OpenCode not started');
+    }
+
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    this.reliabilityRetryState.set(args.sessionId, { requestId, attempt: 1, startedAt });
+
+    try {
+      for (let attempt = 1; attempt <= this.reliabilityMaxAttempts; attempt += 1) {
+        const state = this.reliabilityRetryState.get(args.sessionId);
+        if (!state || state.requestId !== requestId) {
+          // Another request superseded this one.
+          throw new Error('Request superseded');
+        }
+
+        let result: { data?: unknown; error?: unknown };
+        try {
+          result = (await this.instance.client.session.prompt({
+            path: { id: args.sessionId },
+            body: args.body,
+          })) as { data?: unknown; error?: unknown };
+        } catch (error) {
+          result = { error };
+        }
+
+        if (!result.error) {
+          return result;
+        }
+
+        const errorPayload = buildOpenCodeError(result.error, {
+          model: configStore.get()?.provider.default,
+        });
+        this.reliabilityRetryState.set(args.sessionId, {
+          requestId,
+          attempt,
+          startedAt,
+          lastError: errorPayload,
+        });
+
+        const retryable = this.isRetryableIntegrationFailure(errorPayload);
+        if (!retryable || attempt >= this.reliabilityMaxAttempts) {
+          if (retryable) {
+            const finalMessage = `Integration connection dropped during tool use. Retried ${attempt}/${this.reliabilityMaxAttempts} times but the integration is still unavailable. Open Integrations to reconnect, then retry.`;
+            await this.emitReliabilityTimelineEvent({
+              type: 'flowstate.reliability.failed',
+              sessionId: args.sessionId,
+              attempt,
+              maxAttempts: this.reliabilityMaxAttempts,
+              reason: errorPayload.message ?? errorPayload.error,
+              action: 'Open Integrations to reconnect, then retry the task.',
+              error: errorPayload,
+              webContents: args.webContents,
+            });
+            const thrown = new Error(finalMessage);
+            (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = {
+              ...errorPayload,
+              error: finalMessage,
+              message: finalMessage,
+            };
+            throw thrown;
+          }
+
+          const thrown = new Error(errorPayload.error);
+          (thrown as Error & { opencode?: OpenCodeErrorPayload }).opencode = errorPayload;
+          throw thrown;
+        }
+
+        const nextAttempt = attempt + 1;
+        const waitMs = this.computeReliabilityBackoffMs(nextAttempt);
+        await this.emitReliabilityTimelineEvent({
+          type: 'flowstate.reliability.retry',
+          sessionId: args.sessionId,
+          attempt: nextAttempt,
+          maxAttempts: this.reliabilityMaxAttempts,
+          waitMs,
+          reason: errorPayload.message ?? errorPayload.error,
+          error: errorPayload,
+          webContents: args.webContents,
+        });
+        await this.sleepReliability(waitMs);
+      }
+
+      // Should be unreachable.
+      throw new Error('Retry budget exhausted');
+    } finally {
+      const state = this.reliabilityRetryState.get(args.sessionId);
+      if (state?.requestId === requestId) {
+        this.reliabilityRetryState.delete(args.sessionId);
+      }
+    }
+  }
 
   private registerTimelineSession(sessionId: string): void {
     if (!sessionId || typeof sessionId !== 'string') return;
@@ -219,9 +475,17 @@ class ProcessManager {
 
   private getApprovalsNotificationEnabled(): boolean {
     try {
-      return Boolean(configStore.get()?.preferences?.notifications?.approvals);
+      return configStore.get()?.preferences?.notifications?.approvals ?? true;
     } catch {
-      return false;
+      return true;
+    }
+  }
+
+  private getTaskCompletionNotificationEnabled(): boolean {
+    try {
+      return configStore.get()?.preferences?.notifications?.taskComplete ?? true;
+    } catch {
+      return true;
     }
   }
 
@@ -241,6 +505,38 @@ class ProcessManager {
     for (const [key, ts] of this.approvalNotificationSeenAt.entries()) {
       if (now - ts > this.approvalNotificationDedupeTtlMs) {
         this.approvalNotificationSeenAt.delete(key);
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Build a per-run dedupe key. Chat task IDs are session-scoped and can be
+   * reused across runs (e.g. "task-1" appears in every conversation), so keying
+   * only on `taskRunId` would suppress later completions for an hour. Including
+   * `startedAt` (the run's start timestamp) makes the key unique per run.
+   */
+  private buildCompletionDedupeKey(taskRunId: string, startedAt?: number): string {
+    const id = taskRunId.trim();
+    return startedAt != null ? `${id}:${startedAt}` : id;
+  }
+
+  private shouldNotifyTaskCompletion(taskRunId: string, startedAt?: number): boolean {
+    const key = this.buildCompletionDedupeKey(taskRunId, startedAt);
+    if (!key) return false;
+
+    const now = Date.now();
+    const last = this.taskCompletionNotificationSeenAt.get(key);
+    if (last && now - last < this.taskCompletionNotificationDedupeTtlMs) {
+      return false;
+    }
+
+    this.taskCompletionNotificationSeenAt.set(key, now);
+
+    for (const [k, ts] of this.taskCompletionNotificationSeenAt.entries()) {
+      if (now - ts > this.taskCompletionNotificationDedupeTtlMs) {
+        this.taskCompletionNotificationSeenAt.delete(k);
       }
     }
 
@@ -318,6 +614,138 @@ class ProcessManager {
       notification.show();
     } catch (error) {
       console.warn('[ProcessManager] Failed to show approval notification:', error);
+    }
+  }
+
+  private notifyTaskCompleted(args: {
+    sessionId: string;
+    taskRunId: string;
+    startedAt?: number;
+    webContents: Electron.WebContents;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+  }): void {
+    if (!Notification.isSupported()) return;
+    if (!this.getTaskCompletionNotificationEnabled()) return;
+    if (!this.shouldNotifyTaskCompletion(args.taskRunId, args.startedAt)) return;
+
+    const title =
+      this.safeNotificationText(args.title, 72) ??
+      this.safeNotificationText(args.detail, 72) ??
+      'Task completed';
+    const body =
+      this.safeNotificationText(args.summary, 200) ??
+      this.safeNotificationText(args.detail, 200) ??
+      'Open FlowState for details.';
+
+    const notification = new Notification({ title, body });
+    notification.on('click', () => {
+      try {
+        const win = BrowserWindow.fromWebContents(args.webContents);
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        } else {
+          app.focus({ steal: true });
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    try {
+      notification.show();
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to show task completion notification:', error);
+    }
+  }
+
+  private notifyTaskNeedsResponse(args: {
+    sessionId: string;
+    taskRunId: string;
+    webContents: Electron.WebContents;
+    title?: unknown;
+    summary?: unknown;
+    detail?: unknown;
+  }): void {
+    if (!Notification.isSupported()) return;
+    if (!this.getApprovalsNotificationEnabled()) return;
+
+    const title =
+      this.safeNotificationText(args.title, 72) ??
+      this.safeNotificationText(args.detail, 72) ??
+      'Response needed';
+    const body =
+      this.safeNotificationText(args.summary, 200) ??
+      this.safeNotificationText(args.detail, 200) ??
+      'Open FlowState to continue this workflow.';
+
+    const notification = new Notification({ title, body });
+    notification.on('click', () => {
+      try {
+        const win = BrowserWindow.fromWebContents(args.webContents);
+        if (win) {
+          if (win.isMinimized()) win.restore();
+          win.show();
+          win.focus();
+        } else {
+          app.focus({ steal: true });
+        }
+      } catch {
+        // ignore
+      }
+
+      args.webContents.send('notifications:approvalClick', {
+        requestId: `workflow-response-${args.taskRunId}`,
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+      });
+    });
+
+    try {
+      notification.show();
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to show response-needed notification:', error);
+    }
+  }
+
+  notifyWorkflowRunStatus(args: {
+    sessionId: string;
+    taskRunId: string;
+    startedAt?: number;
+    webContents?: Electron.WebContents;
+    title?: string;
+    summary?: string;
+    detail?: string;
+    needsResponse?: boolean;
+    completed?: boolean;
+  }): void {
+    if (!args.webContents) return;
+
+    if (args.needsResponse) {
+      this.notifyTaskNeedsResponse({
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+        webContents: args.webContents,
+        title: args.title,
+        summary: args.summary,
+        detail: args.detail,
+      });
+      return;
+    }
+
+    if (args.completed) {
+      this.notifyTaskCompleted({
+        sessionId: args.sessionId,
+        taskRunId: args.taskRunId,
+        startedAt: args.startedAt,
+        webContents: args.webContents,
+        title: args.title,
+        summary: args.summary,
+        detail: args.detail,
+      });
     }
   }
 
@@ -544,7 +972,8 @@ class ProcessManager {
       event: { sessionId: string; taskId?: string; title: string; detail?: string; timestamp: number };
       payload?: unknown;
     },
-    sessionId: string
+    sessionId: string,
+    webContents?: Electron.WebContents
   ): void {
     try {
       const workflowTaskRunId = this.getWorkflowTaskRunId(sessionId);
@@ -644,6 +1073,20 @@ class ProcessManager {
             progress: 100,
           });
         }
+
+        if (webContents) {
+          const run = taskStore.getRun(id);
+          this.notifyTaskCompleted({
+            sessionId,
+            taskRunId: id,
+            startedAt: run?.startedAt,
+            webContents,
+            title: run?.title ?? normalized.event.title,
+            summary: run?.summary,
+            detail: normalized.event.detail ?? run?.description,
+          });
+        }
+
         return;
       }
 
@@ -797,7 +1240,7 @@ class ProcessManager {
         ? path.resolve(appPath, '../../..')
         : path.resolve(appPath, '..');
     } else {
-      packagesDir = path.join(appPath, 'mcp-servers');
+      packagesDir = path.join(process.resourcesPath, 'mcp-servers');
     }
     
     console.log('[ProcessManager] App path:', appPath);
@@ -943,19 +1386,29 @@ class ProcessManager {
    * Build MCP configuration with auth tokens from auth-manager
    */
   private loadFlowstatePrompt(packagesDir: string): string | null {
-    try {
-      const agentsDir = path.resolve(packagesDir, '..', 'agents');
-      const agentPath = path.join(agentsDir, 'flowstate.md');
-      const raw = fs.readFileSync(agentPath, 'utf8');
-      const parts = raw.split('---');
-      if (parts.length >= 3) {
-        return parts.slice(2).join('---').trim();
+    const candidatePaths = [
+      path.join(path.resolve(packagesDir, '..', 'agents'), 'flowstate.md'),
+      path.join(this.getRepoRoot(), 'agents', 'flowstate.md'),
+    ];
+
+    for (const agentPath of candidatePaths) {
+      try {
+        if (!fs.existsSync(agentPath)) {
+          continue;
+        }
+        const raw = fs.readFileSync(agentPath, 'utf8');
+        const parts = raw.split('---');
+        if (parts.length >= 3) {
+          return parts.slice(2).join('---').trim();
+        }
+        return raw.trim();
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to load FlowState agent prompt candidate:', agentPath, error);
       }
-      return raw.trim();
-    } catch (error) {
-      console.error('[ProcessManager] Failed to load FlowState agent prompt:', error);
-      return null;
     }
+
+    console.error('[ProcessManager] Failed to load FlowState agent prompt from all candidates');
+    return null;
   }
 
   private formatUserProfileForPrompt(profile: UserProfile): string | null {
@@ -1019,10 +1472,27 @@ class ProcessManager {
     }
   }
 
-  private async buildMcpConfig(): Promise<Record<string, McpLocalConfig>> {
-    const mcpConfig: Record<string, McpLocalConfig> = {};
+  private async buildMcpConfigWithDiagnostics(): Promise<{
+    config: OpencodeMcpConfig;
+    errors: Record<string, string>;
+    skipped: Record<string, string>;
+  }> {
+    const mcpConfig: OpencodeMcpConfig = {};
     const packagesDir = this.getMcpPackagesDir();
     const flowstateDataDir = configStore.getDataDir();
+
+    const currentConfig = (() => {
+      try {
+        return configStore.get();
+      } catch {
+        return null;
+      }
+    })();
+
+    const loadedConfig = currentConfig ?? (await configStore.load());
+
+    const errors: Record<string, string> = {};
+    const skipped: Record<string, string> = {};
 
     if (!this.flowstatePrompt) {
       this.flowstatePrompt = this.loadFlowstatePrompt(packagesDir);
@@ -1045,7 +1515,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Gmail MCP configured with token and credentials');
     } else if (gmailToken && !gmailPath) {
       console.error('[ProcessManager] Gmail token found but MCP server not built!');
@@ -1056,7 +1526,7 @@ class ProcessManager {
     const gcalCreds = await authManager.getClientCredentials('gcal');
     const gcalPath = this.verifyMcpServer(packagesDir, 'mcp-gcal');
     if (gcalToken && gcalPath) {
-      const gcalPrefs = configStore.get()?.integrations?.gcal;
+      const gcalPrefs = loadedConfig.integrations?.gcal;
       const readCalendarIds = Array.isArray(gcalPrefs?.readCalendarIds)
         ? gcalPrefs?.readCalendarIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
         : undefined;
@@ -1098,7 +1568,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Google Calendar MCP configured with token and credentials');
     } else if (gcalToken && !gcalPath) {
       console.error('[ProcessManager] GCal token found but MCP server not built!');
@@ -1116,22 +1586,25 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] Notion MCP configured with token');
     }
 
     // System MCP (no auth needed)
     const systemPath = this.verifyMcpServer(packagesDir, 'mcp-system');
     if (systemPath) {
+      const systemNotificationsEnabled =
+        this.getApprovalsNotificationEnabled() || this.getTaskCompletionNotificationEnabled();
       mcpConfig['flowstate-system'] = {
         type: 'local',
         command: ['node', systemPath],
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          FLOWSTATE_NOTIFY_SYSTEM_ENABLED: String(systemNotificationsEnabled),
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log('[ProcessManager] System MCP configured');
     }
 
@@ -1160,7 +1633,7 @@ class ProcessManager {
         },
         enabled: true,
         timeout: 10000,
-      };
+      } satisfies McpLocalConfig;
       console.log(
         `[ProcessManager] Canvas LMS MCP configured (${useBrowserAuth ? 'browser' : 'token'} auth)`
       );
@@ -1168,8 +1641,25 @@ class ProcessManager {
       console.error('[ProcessManager] Canvas token found but MCP server not built!');
     }
 
-    console.log('[ProcessManager] Final MCP config keys:', Object.keys(mcpConfig));
-    return mcpConfig;
+    // Custom MCP servers (user-defined in config)
+    const custom = normalizeCustomMcpServers(loadedConfig.mcpServers);
+    Object.assign(errors, custom.errors);
+    Object.assign(skipped, custom.skipped);
+
+    for (const [name, config] of Object.entries(custom.config)) {
+      if (name in mcpConfig) {
+        errors[name] = 'Name collides with managed FlowState integration';
+        continue;
+      }
+      mcpConfig[name] = config as McpLocalConfig | McpRemoteConfig;
+    }
+
+    const keys = Object.keys(mcpConfig);
+    console.log('[ProcessManager] Final MCP config keys:', keys);
+    if (Object.keys(errors).length > 0) {
+      console.warn('[ProcessManager] MCP config validation errors:', JSON.stringify(errors, null, 2));
+    }
+    return { config: mcpConfig, errors, skipped };
   }
 
   /**
@@ -1188,9 +1678,15 @@ class ProcessManager {
       await this.updateAgentModelFiles(selectedModel);
 
       // Build MCP configuration with auth tokens
-      const mcpConfig = await this.buildMcpConfig();
+      const { config: mcpConfig, errors } = await this.buildMcpConfigWithDiagnostics();
       console.log('[ProcessManager] MCP servers configured:', Object.keys(mcpConfig));
-      console.log('[ProcessManager] Full MCP config:', JSON.stringify(mcpConfig, null, 2));
+      console.log(
+        '[ProcessManager] Full MCP config (redacted):',
+        JSON.stringify(this.redactMcpConfigForLog(mcpConfig), null, 2)
+      );
+      if (Object.keys(errors).length > 0) {
+        console.warn('[ProcessManager] Some custom MCP servers are invalid and were not added');
+      }
 
       // Start OpenCode (both server and client)
       // Using port 0 lets the OS assign an available port
@@ -1281,40 +1777,67 @@ class ProcessManager {
    * Reload MCP configuration (call after connecting/disconnecting integrations)
    * Uses the mcp.add() API for dynamic server management
    */
-  async reloadMcpConfig(): Promise<void> {
+  async reloadMcpConfig(): Promise<{ success: boolean; error?: string }>
+  {
     if (!this.instance?.client) {
-      console.warn('[ProcessManager] Cannot reload MCP config: OpenCode not running');
-      return;
+      const error = 'OpenCode not running';
+      console.warn(`[ProcessManager] Cannot reload MCP config: ${error}`);
+      return { success: false, error };
     }
 
+    console.log('[ProcessManager] Reloading MCP configuration...');
+
+    const { config: desired, errors: validationErrors } = await this.buildMcpConfigWithDiagnostics();
+    const failed: Record<string, string> = { ...validationErrors };
+
     try {
-      console.log('[ProcessManager] Reloading MCP configuration...');
-      
-      const mcpConfig = await this.buildMcpConfig();
-      
-      // Add each MCP server individually using the mcp.add() API
-      for (const [name, config] of Object.entries(mcpConfig)) {
+      const status = await this.instance.client.mcp.status({});
+      const current = status.data ? Object.keys(status.data) : [];
+
+      // Disconnect MCPs removed from config (best-effort; OpenCode has no remove API).
+      for (const name of current) {
+        if (name in desired) continue;
         try {
-          console.log(`[ProcessManager] Adding MCP server: ${name}`);
-          const result = await this.instance.client.mcp.add({
-            body: {
-              name,
-              config,
-            },
-          });
-          console.log(`[ProcessManager] MCP server ${name} add result:`, JSON.stringify(result.data, null, 2));
-        } catch (addError) {
-          console.error(`[ProcessManager] Failed to add MCP server ${name}:`, addError);
+          console.log(`[ProcessManager] Disconnecting MCP server: ${name}`);
+          await this.instance.client.mcp.disconnect({ path: { name } });
+        } catch (disconnectError) {
+          const message = disconnectError instanceof Error ? disconnectError.message : String(disconnectError);
+          console.warn(`[ProcessManager] Failed to disconnect MCP server ${name}: ${message}`);
         }
       }
-      
-      // Log final status
-      await this.logMcpStatus();
-      
-      console.log('[ProcessManager] MCP config reload complete');
-    } catch (error) {
-      console.error('[ProcessManager] Failed to reload MCP config:', error);
+    } catch (statusError) {
+      console.warn('[ProcessManager] Unable to read current MCP status before reload:', statusError);
     }
+
+    // Add each MCP server individually using the mcp.add() API
+    for (const [name, config] of Object.entries(desired)) {
+      try {
+        console.log(`[ProcessManager] Adding MCP server: ${name}`);
+        const result = await this.instance.client.mcp.add({
+          body: {
+            name,
+            config,
+          },
+        });
+        console.log(`[ProcessManager] MCP server ${name} add result:`, JSON.stringify(result.data?.[name] ?? result.data, null, 2));
+      } catch (addError) {
+        const message = addError instanceof Error ? addError.message : String(addError);
+        console.error(`[ProcessManager] Failed to add MCP server ${name}: ${message}`);
+        failed[name] = message;
+      }
+    }
+
+    await this.logMcpStatus();
+
+    const failedNames = Object.keys(failed);
+    if (failedNames.length > 0) {
+      const error = `Failed to load ${failedNames.length} MCP server(s): ${failedNames.join(', ')}`;
+      console.warn(`[ProcessManager] MCP config reload completed with errors: ${error}`);
+      return { success: false, error };
+    }
+
+    console.log('[ProcessManager] MCP config reload complete');
+    return { success: true };
   }
 
   /**
@@ -1437,8 +1960,8 @@ class ProcessManager {
     this.registerTaskSession(sessionId, content);
 
     try {
-      const result = await this.instance.client.session.prompt({
-        path: { id: sessionId },
+      const result = await this.promptWithReliabilityPolicy({
+        sessionId,
         body: {
           agent: this.defaultAgent,
           system: systemPrompt,
@@ -1459,7 +1982,7 @@ class ProcessManager {
         throw new Error('No data in prompt result');
       }
 
-      const parts = (result.data as { parts?: unknown[] }).parts ?? [];
+      const parts = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
       const textContent = (parts as Array<{ type?: string; text?: string }>)
         .filter((p) => p?.type === 'text')
         .map((p) => p.text || '')
@@ -1515,8 +2038,9 @@ class ProcessManager {
     }
 
     try {
-      const result = await this.instance.client.session.prompt({
-        path: { id: this.activeSessionId! },
+      const result = await this.promptWithReliabilityPolicy({
+        sessionId: this.activeSessionId!,
+        webContents,
         body: {
           agent: this.defaultAgent,
           system: systemPrompt,
@@ -1526,7 +2050,7 @@ class ProcessManager {
 
       console.log('[ProcessManager] Prompt result received:', result.data ? 'YES' : 'NO');
       if (result.error) {
-        console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
+        // promptWithReliabilityPolicy should throw before returning an error, but guard just in case.
         const errorPayload = buildOpenCodeError(result.error, {
           model: configStore.get()?.provider.default,
         });
@@ -1541,11 +2065,12 @@ class ProcessManager {
       }
 
       // Extract text content from parts
-      const parts = result.data?.parts ?? [];
+      const partsUnknown = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
+      const parts = partsUnknown as Array<{ type: string; text?: string }>;
       console.log('[ProcessManager] Response parts count:', parts.length);
       const textContent = parts
-        .filter((p: { type: string }) => p.type === 'text')
-        .map((p: { type: string; text?: string }) => p.text || '')
+        .filter((p) => p.type === 'text')
+        .map((p) => p.text || '')
         .join('') || '';
 
       console.log('[ProcessManager] Response text length:', textContent.length);
@@ -1617,8 +2142,9 @@ class ProcessManager {
     try {
       // Send the prompt
       console.log('[ProcessManager] Calling session.prompt()...');
-      const result = await this.instance.client.session.prompt({
-        path: { id: this.activeSessionId! },
+      const result = await this.promptWithReliabilityPolicy({
+        sessionId: this.activeSessionId!,
+        webContents,
         body: {
           agent: this.defaultAgent,
           system: systemPrompt,
@@ -1628,7 +2154,6 @@ class ProcessManager {
 
       console.log('[ProcessManager] session.prompt() returned:', result.data ? 'YES' : 'NO');
       if (result.error) {
-        console.error('[ProcessManager] Prompt error:', JSON.stringify(result.error, null, 2));
         const errorPayload = buildOpenCodeError(result.error, {
           model: configStore.get()?.provider.default,
         });
@@ -1643,11 +2168,12 @@ class ProcessManager {
       }
 
       // Extract text content from parts
-      const parts = result.data?.parts ?? [];
+      const partsUnknown = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
+      const parts = partsUnknown as Array<{ type: string; text?: string }>;
       console.log('[ProcessManager] Response parts count:', parts.length);
       const textContent = parts
-        .filter((p: { type: string }) => p.type === 'text')
-        .map((p: { type: string; text?: string }) => p.text || '')
+        .filter((p) => p.type === 'text')
+        .map((p) => p.text || '')
         .join('') || '';
 
       console.log('[ProcessManager] Response text length:', textContent.length);
@@ -1702,6 +2228,7 @@ class ProcessManager {
     }
 
     this.eventStreamAbortController = new AbortController();
+    this.eventStreamWebContents = webContents;
 
     console.log('Starting OpenCode event stream...');
 
@@ -1828,7 +2355,7 @@ class ProcessManager {
               sessionId
             );
             if (normalized) {
-              this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId);
+              this.handleTaskStoreFromNormalizedEvent(typedEvent.type, normalized, sessionId, webContents);
               const isApprovalEvent =
                 normalized.event.kind === 'approval_request' || normalized.event.kind === 'approval_response';
 
@@ -2004,7 +2531,7 @@ class ProcessManager {
         sessionId
       );
       if (promotion) {
-        this.handleTaskStoreFromNormalizedEvent('task.promoted', promotion, sessionId);
+        this.handleTaskStoreFromNormalizedEvent('task.promoted', promotion, sessionId, webContents);
         timelineStore.appendWithPayload({
           ...promotion.event,
           redacted: promotion.redacted,
@@ -2132,7 +2659,7 @@ class ProcessManager {
       sessionId
     );
     if (completion) {
-      this.handleTaskStoreFromNormalizedEvent('task.completed', completion, sessionId);
+      this.handleTaskStoreFromNormalizedEvent('task.completed', completion, sessionId, webContents);
       timelineStore.appendWithPayload({
         ...completion.event,
         redacted: completion.redacted,
@@ -2156,7 +2683,7 @@ class ProcessManager {
       sessionId
     );
     if (summary) {
-      this.handleTaskStoreFromNormalizedEvent('task.summary', summary, sessionId);
+      this.handleTaskStoreFromNormalizedEvent('task.summary', summary, sessionId, webContents);
       timelineStore.appendWithPayload({
         ...summary.event,
         redacted: summary.redacted,

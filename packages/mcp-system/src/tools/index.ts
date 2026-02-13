@@ -12,6 +12,17 @@ import {
 import * as macos from '../macos/index.js';
 import { userProfile } from '@flowstate/core';
 
+function envFlagEnabled(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (typeof value !== 'string') return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 // Tool definitions with MCP annotations for better LLM understanding
 const SYSTEM_TOOLS = [
   {
@@ -268,6 +279,17 @@ export function registerTools(server: Server): void {
 
     switch (name) {
       case 'system_notify':
+        if (!envFlagEnabled('FLOWSTATE_NOTIFY_SYSTEM_ENABLED', true)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'Notification skipped: disabled by FlowState notification preferences.',
+              },
+            ],
+          };
+        }
+
         await macos.sendNotification(
           args?.title as string,
           args?.message as string,

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import type { WebContents } from 'electron';
 import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { approvalPolicyStore } from './approval-policy-store.js';
 import { configStore } from './config-store.js';
@@ -30,6 +31,12 @@ const humanizeId = (id: string): string => {
     .filter(Boolean)
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(' ');
+};
+
+const escapeYamlString = (value: string): string => {
+  const singleLine = value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const escaped = singleLine.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
 };
 
 const serializeArguments = (input?: unknown): string => {
@@ -107,6 +114,69 @@ const parseFrontmatter = (
 };
 
 class WorkflowsRunner {
+  private async workflowIdExists(workflowId: string): Promise<boolean> {
+    if (workflowsStore.getDefinition(workflowId)) {
+      return true;
+    }
+
+    const directory = processManager.getProjectDirectory?.() ?? undefined;
+    const userDataDir = configStore.getDataDir();
+    const candidates: string[] = [];
+
+    if (userDataDir) {
+      candidates.push(path.join(userDataDir, 'workflows', workflowId, 'SKILL.md'));
+    }
+    if (directory) {
+      candidates.push(path.join(directory, 'workflows', workflowId, 'SKILL.md'));
+    }
+
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate);
+        return true;
+      } catch {
+        continue;
+      }
+    }
+
+    return false;
+  }
+
+  private async makeUniqueDuplicateId(baseId: string): Promise<string> {
+    const normalizedBase = ensureString(baseId) ?? `workflow-${Date.now().toString(36)}`;
+
+    if (!(await this.workflowIdExists(normalizedBase))) {
+      return normalizedBase;
+    }
+
+    for (let index = 2; index < 10_000; index += 1) {
+      const candidate = `${normalizedBase}-${index}`;
+      if (!(await this.workflowIdExists(candidate))) {
+        return candidate;
+      }
+    }
+
+    return `${normalizedBase}-${Date.now().toString(36)}`;
+  }
+
+  private makeUniqueDuplicateTitle(baseTitle: string): string {
+    const desired = ensureString(baseTitle) ?? 'Workflow Copy';
+    const existing = new Set(workflowsStore.listDefinitions().map((item) => item.title.trim().toLowerCase()));
+
+    if (!existing.has(desired.toLowerCase())) {
+      return desired;
+    }
+
+    for (let index = 2; index < 10_000; index += 1) {
+      const candidate = `${desired} (${index})`;
+      if (!existing.has(candidate.toLowerCase())) {
+        return candidate;
+      }
+    }
+
+    return `${desired} (${Date.now()})`;
+  }
+
   private async resolveWorkflowSkillPath(
     workflowId: string
   ): Promise<{ filePath: string; source: 'user' | 'project' } | null> {
@@ -267,6 +337,78 @@ class WorkflowsRunner {
     return { ok: true, data: { removed } };
   }
 
+  async duplicateWorkflow(
+    workflowId: string
+  ): Promise<
+    | { ok: true; data: { definition: WorkflowDefinition } }
+    | { ok: false; code: IpcErrorCode; message: string }
+  > {
+    const id = ensureString(workflowId);
+    if (!id || !isSafeWorkflowId(id)) {
+      return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a safe, non-empty string.' };
+    }
+
+    const resolved = await this.resolveWorkflowSkillPath(id);
+    if (!resolved) {
+      return { ok: false, code: 'UNAVAILABLE', message: 'Workflow file not found.' };
+    }
+
+    const userDataDir = configStore.getDataDir();
+    if (!userDataDir) {
+      return { ok: false, code: 'UNAVAILABLE', message: 'No writable workflow directory available.' };
+    }
+
+    let skillMarkdown = '';
+    try {
+      skillMarkdown = await fs.readFile(resolved.filePath, 'utf8');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, code: 'UNKNOWN', message: `Failed to read workflow: ${message}` };
+    }
+
+    const parsed = parseFrontmatter(skillMarkdown);
+    const sourceDefinition = workflowsStore.getDefinition(id);
+    const sourceTitle = parsed?.title ?? sourceDefinition?.title ?? humanizeId(id);
+    const sourceDescription = parsed?.description ?? sourceDefinition?.description ?? `Duplicate of ${sourceTitle}.`;
+    const sourceTemplate = parsed?.template ?? skillMarkdown.trim();
+
+    const duplicateId = await this.makeUniqueDuplicateId(`${id}-copy`);
+    const duplicateTitle = this.makeUniqueDuplicateTitle(`${sourceTitle} Copy`);
+
+    const duplicateContent = [
+      '---',
+      `name: ${duplicateId}`,
+      `title: ${escapeYamlString(duplicateTitle)}`,
+      `description: ${escapeYamlString(sourceDescription)}`,
+      '---',
+      '',
+      sourceTemplate,
+      '',
+    ].join('\n');
+
+    const targetDir = path.join(userDataDir, 'workflows', duplicateId);
+    const targetPath = path.join(targetDir, 'SKILL.md');
+
+    try {
+      await fs.mkdir(targetDir, { recursive: true });
+      await fs.writeFile(targetPath, duplicateContent, 'utf8');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { ok: false, code: 'UNKNOWN', message: `Failed to persist workflow duplicate: ${message}` };
+    }
+
+    const definition: WorkflowDefinition = {
+      id: duplicateId,
+      title: duplicateTitle,
+      description: sourceDescription,
+    };
+
+    workflowsStore.upsertTemplate({ id: duplicateId, template: sourceTemplate });
+    workflowsStore.upsertDefinition(definition);
+
+    return { ok: true, data: { definition } };
+  }
+
   private async loadWorkflowSkillsFromDir(baseDir: string): Promise<WorkflowDefinition[]> {
     const skillsDir = path.join(baseDir, 'workflows');
     const definitions: WorkflowDefinition[] = [];
@@ -357,7 +499,7 @@ class WorkflowsRunner {
     return { ok: true, data: definitions };
   }
 
-  async run(workflowId: string, input?: unknown): Promise<{ ok: true; data: WorkflowRun } | { ok: false; code: IpcErrorCode; message: string; details?: unknown }>{
+  async run(workflowId: string, input?: unknown, webContents?: WebContents): Promise<{ ok: true; data: WorkflowRun } | { ok: false; code: IpcErrorCode; message: string; details?: unknown }>{
     const id = ensureString(workflowId);
     if (!id) {
       return { ok: false, code: 'INVALID_REQUEST', message: 'workflowId must be a non-empty string.' };
@@ -494,6 +636,18 @@ class WorkflowsRunner {
           description: getTaskDescription(),
         });
 
+        processManager.notifyWorkflowRunStatus({
+          sessionId: workflowSessionId,
+          taskRunId,
+          startedAt,
+          webContents,
+          title: humanizeId(id),
+          summary: needsInput ? 'Needs response' : 'Task complete ✅',
+          detail: getTaskDescription(),
+          needsResponse: needsInput,
+          completed: !blocked && !needsInput,
+        });
+
         const completed = workflowsStore.updateRun(workflowRunId, {
           status: runStatus,
           ...(needsInput || blocked ? {} : { finishedAt }),
@@ -586,6 +740,18 @@ class WorkflowsRunner {
         progress: blocked || needsInput ? 50 : 100,
         updatedAt: finishedAt,
         description: getTaskDescription(),
+      });
+
+      processManager.notifyWorkflowRunStatus({
+        sessionId: workflowSessionId,
+        taskRunId,
+        startedAt,
+        webContents,
+        title: humanizeId(id),
+        summary: needsInput ? 'Needs response' : 'Task complete ✅',
+        detail: getTaskDescription(),
+        needsResponse: needsInput,
+        completed: !blocked && !needsInput,
       });
 
       const completed = workflowsStore.updateRun(workflowRunId, {

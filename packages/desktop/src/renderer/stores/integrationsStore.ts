@@ -23,8 +23,12 @@ export interface Integration {
   description: string;
   icon: string;
   status: 'connected' | 'disconnected' | 'connecting' | 'error';
+  healthStatus?: 'unverified' | 'verified' | 'needs_reconnect';
+  isCheckingHealth?: boolean;
   email?: string;
   lastSync?: Date;
+  lastCheckedAt?: Date;
+  healthMessage?: string;
   error?: string;
   isOfficial: boolean;
   authOptions: AuthOption[]; // Available auth methods for this integration
@@ -42,6 +46,7 @@ interface IntegrationsState {
   // OAuth flow
   connectingService: string | null;
   onboardingConnectId: string | null;
+  onboardingConnectNonce: number;
   
   // Actions
   setIntegrations: (integrations: Integration[]) => void;
@@ -130,6 +135,7 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
   isLoading: false,
   connectingService: null,
   onboardingConnectId: null,
+  onboardingConnectNonce: 0,
 
   // Actions
   setIntegrations: (integrations) => {
@@ -156,7 +162,13 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
   },
 
   setOnboardingConnect: (service) => {
-    set({ onboardingConnectId: service });
+    set((state) => ({
+      onboardingConnectId: service,
+      onboardingConnectNonce:
+        service === null
+          ? state.onboardingConnectNonce
+          : state.onboardingConnectNonce + 1,
+    }));
   },
 
   loadIntegrations: async () => {
@@ -170,13 +182,37 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
       set((state) => ({
         integrations: state.integrations.map((integration) => {
           const status = statuses.find((s: { service: string }) => s.service === integration.id);
+          const previouslyConnected = integration.status === 'connected';
+
           if (status) {
+            const isConnected = Boolean(status.connected);
+            const statusLastRefresh = status.lastRefresh
+              ? new Date(status.lastRefresh)
+              : undefined;
+            const nextLastSync =
+              integration.lastSync && statusLastRefresh
+                ? integration.lastSync > statusLastRefresh
+                  ? integration.lastSync
+                  : statusLastRefresh
+                : integration.lastSync ?? statusLastRefresh;
+
             return {
               ...integration,
-              status: status.connected ? 'connected' : 'disconnected',
-              email: status.email,
-              lastSync: status.lastRefresh ? new Date(status.lastRefresh) : undefined,
-              error: status.error,
+              status: isConnected ? 'connected' : 'disconnected',
+              healthStatus: isConnected
+                ? previouslyConnected
+                  ? integration.healthStatus ?? 'unverified'
+                  : 'unverified'
+                : undefined,
+              isCheckingHealth: integration.isCheckingHealth ?? false,
+              email: status.email ?? integration.email,
+              lastSync: nextLastSync,
+              lastCheckedAt: isConnected ? integration.lastCheckedAt : undefined,
+              healthMessage: isConnected ? integration.healthMessage : undefined,
+              error:
+                isConnected && integration.healthStatus === 'needs_reconnect'
+                  ? integration.error
+                  : status.error,
               activeAuthMethod: status.authMethod,
             };
           }
@@ -204,8 +240,12 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
       await window.flowstate.oauth.disconnect(service);
       updateIntegration(service, {
         status: 'disconnected',
+        healthStatus: undefined,
+        isCheckingHealth: false,
         email: undefined,
         lastSync: undefined,
+        lastCheckedAt: undefined,
+        healthMessage: undefined,
         error: undefined,
       });
     } catch (error) {

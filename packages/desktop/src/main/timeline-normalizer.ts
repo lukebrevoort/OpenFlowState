@@ -6,6 +6,8 @@ const SECRET_PATTERN = /(token|secret|key|password|credential|bearer)/i;
 
 const MAX_DETAIL_LENGTH = 120;
 
+let eventSequence = 0;
+
 // Approval payloads should NOT be truncated - users need full context to make
 // informed decisions. TimelineStore handles large payloads via inline/blob storage
 // (10KB inline, blob for larger). The UI (ApprovalCard) is responsible for
@@ -282,7 +284,8 @@ const buildBaseEvent = (
     toolName?: string;
   }
 ): Omit<TimelineEvent, 'payloadInline' | 'payloadRef'> => ({
-  id: `${input.kind}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+  // Deterministic within a process lifetime; avoids Math.random() nondeterminism.
+  id: `${input.kind}-${Date.now()}-${(eventSequence += 1)}`,
   sessionId: input.sessionId,
   taskId: input.taskId,
   timestamp: Date.now(),
@@ -291,6 +294,66 @@ const buildBaseEvent = (
   detail: input.detail,
   toolName: input.toolName,
 });
+
+const formatReliabilityRetryDetail = (data: OpenCodeEventPayload) => {
+  const attempt = typeof data.attempt === 'number' ? data.attempt : undefined;
+  const maxAttempts = typeof data.maxAttempts === 'number' ? data.maxAttempts : undefined;
+  const waitMs = typeof data.waitMs === 'number' ? data.waitMs : undefined;
+  const waitSeconds = typeof data.waitSeconds === 'number'
+    ? data.waitSeconds
+    : waitMs !== undefined
+      ? Math.max(1, Math.ceil(waitMs / 1000))
+      : undefined;
+  const reason = typeof data.reason === 'string' && data.reason.trim().length > 0
+    ? data.reason.trim()
+    : typeof data.error === 'string' && data.error.trim().length > 0
+      ? data.error.trim()
+      : typeof data.message === 'string' && data.message.trim().length > 0
+        ? data.message.trim()
+        : undefined;
+
+  const parts: string[] = [];
+  if (attempt && maxAttempts) {
+    parts.push(`Attempt ${attempt}/${maxAttempts}`);
+  } else if (attempt) {
+    parts.push(`Attempt ${attempt}`);
+  }
+
+  if (waitSeconds !== undefined) {
+    parts.push(`Retrying in ${waitSeconds}s`);
+  }
+
+  if (reason) {
+    parts.push(clampDetail(reason) ?? reason);
+  }
+
+  return parts.length > 0 ? clampDetail(parts.join(' - ')) : undefined;
+};
+
+const formatReliabilityFailureDetail = (data: OpenCodeEventPayload) => {
+  const attempt = typeof data.attempt === 'number' ? data.attempt : undefined;
+  const maxAttempts = typeof data.maxAttempts === 'number' ? data.maxAttempts : undefined;
+  const reason = typeof data.reason === 'string' && data.reason.trim().length > 0
+    ? data.reason.trim()
+    : typeof data.error === 'string' && data.error.trim().length > 0
+      ? data.error.trim()
+      : typeof data.message === 'string' && data.message.trim().length > 0
+        ? data.message.trim()
+        : undefined;
+  const action = typeof data.action === 'string' && data.action.trim().length > 0
+    ? data.action.trim()
+    : undefined;
+
+  const parts: string[] = [];
+  if (attempt && maxAttempts) {
+    parts.push(`Retry budget exhausted (${attempt}/${maxAttempts})`);
+  } else {
+    parts.push('Retry budget exhausted');
+  }
+  if (reason) parts.push(clampDetail(reason) ?? reason);
+  if (action) parts.push(clampDetail(action) ?? action);
+  return clampDetail(parts.join(' - '));
+};
 
 export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unknown }, sessionId: string): {
   event: Omit<TimelineEvent, 'payloadInline' | 'payloadRef'>;
@@ -303,6 +366,32 @@ export const normalizeOpenCodeEvent = (event: { type?: string; properties?: unkn
   const type = event.type ?? 'unknown';
   const toolName = sanitizedPayload ? extractToolName(sanitizedPayload) : undefined;
   const detail = sanitizedPayload ? extractDetail(sanitizedPayload) : undefined;
+
+  if (type === 'flowstate.reliability.retry') {
+    return {
+      event: buildBaseEvent({
+        sessionId,
+        kind: 'status',
+        title: 'Retrying integration',
+        detail: formatReliabilityRetryDetail(sanitizedPayload ?? {}) ?? detail ?? 'Retrying after integration failure',
+      }),
+      payload: sanitizedPayload ?? undefined,
+      redacted,
+    };
+  }
+
+  if (type === 'flowstate.reliability.failed') {
+    return {
+      event: buildBaseEvent({
+        sessionId,
+        kind: 'error',
+        title: 'Integration failed',
+        detail: formatReliabilityFailureDetail(sanitizedPayload ?? {}) ?? detail ?? 'Integration failure after retries',
+      }),
+      payload: sanitizedPayload ?? undefined,
+      redacted,
+    };
+  }
 
   if (type.startsWith('message.')) {
     return {

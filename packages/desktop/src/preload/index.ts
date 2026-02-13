@@ -12,7 +12,7 @@ import type {
   OpenCodeProgress,
   OpenCodeError,
   OpenCodeEvent,
-  TimelineEvent,
+  TimelineEventEnvelope,
   OAuthSuccessEvent,
   OAuthErrorEvent,
   ApiTokenSuccessEvent,
@@ -159,8 +159,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
       return () => ipcRenderer.removeListener('opencode:event', handler);
     },
 
-    onTimelineEvent: (callback: (event: TimelineEvent) => void): Unsubscribe => {
-      const handler = (_event: Electron.IpcRendererEvent, event: TimelineEvent) => callback(event);
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, event: TimelineEventEnvelope) => callback(event);
       ipcRenderer.on('timeline:event', handler);
       return () => ipcRenderer.removeListener('timeline:event', handler);
     },
@@ -249,8 +249,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
       return () => ipcRenderer.removeListener('opencode:event', handler);
     },
 
-    onTimelineEvent: (callback: (event: TimelineEvent) => void): Unsubscribe => {
-      const handler = (_event: Electron.IpcRendererEvent, event: TimelineEvent) => callback(event);
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, event: TimelineEventEnvelope) => callback(event);
       ipcRenderer.on('timeline:event', handler);
       return () => ipcRenderer.removeListener('timeline:event', handler);
     },
@@ -280,6 +280,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
     getSkillMarkdown: (workflowId: string) => ipcRenderer.invoke('workflows:skill:get', workflowId),
     saveSkillMarkdown: (workflowId: string, skillMarkdown: string) =>
       ipcRenderer.invoke('workflows:skill:save', workflowId, skillMarkdown),
+    duplicateWorkflow: (workflowId: string) => ipcRenderer.invoke('workflows:duplicate', workflowId),
     deleteWorkflow: (workflowId: string) => ipcRenderer.invoke('workflows:delete', workflowId),
 
     listRuns: (workflowId: string, limit?: number, offset?: number) =>
@@ -299,6 +300,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
     listAuthStatuses: () => ipcRenderer.invoke('integrations:listAuthStatuses'),
     getMcpStatus: () => ipcRenderer.invoke('integrations:getMcpStatus'),
     reloadMcp: () => ipcRenderer.invoke('integrations:reloadMcp'),
+    healthCheck: (service: string) => ipcRenderer.invoke('integrations:healthCheck', service),
+    healthCheckOAuthBatch: () => ipcRenderer.invoke('integrations:healthCheckOAuthBatch'),
 
     oauthStart: (service: string, clientId: string, clientSecret: string) =>
       ipcRenderer.invoke('integrations:oauthStart', service, clientId, clientSecret),

@@ -2,6 +2,7 @@ import type {
   IpcError,
   IpcResult,
   WorkflowDefinition,
+  WorkflowDuplicateResult,
   WorkflowGenerationResult,
   WorkflowRun,
   WorkflowSkillFile,
@@ -173,6 +174,19 @@ export const workflowsAdapter = {
       return await saveFn(workflowId, skillMarkdown);
     } catch (err) {
       return unavailable(err instanceof Error ? err.message : 'Failed to save workflow file.');
+    }
+  },
+
+  async duplicateWorkflow(workflowId: string): Promise<IpcResult<WorkflowDuplicateResult>> {
+    const duplicateFn = window.flowstate?.workflows?.duplicateWorkflow;
+    if (!duplicateFn) {
+      return unavailable('Workflow duplication is not available in this build.');
+    }
+
+    try {
+      return await duplicateFn(workflowId);
+    } catch (err) {
+      return unavailable(err instanceof Error ? err.message : 'Failed to duplicate workflow.');
     }
   },
 

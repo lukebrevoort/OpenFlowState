@@ -10,8 +10,15 @@ import { app } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 const ALGORITHM = 'aes-256-gcm';
+const SECURITY_BIN = '/usr/bin/security';
+const KEYCHAIN_ACCOUNT = 'flowstate-desktop';
+const TOKENS_KEYCHAIN_SERVICE = 'com.flowstate.auth.tokens';
+const CREDENTIALS_KEYCHAIN_SERVICE = 'com.flowstate.auth.credentials';
+const execFileAsync = promisify(execFile);
 
 export type AuthMethod = 'oauth' | 'api_token';
 
@@ -55,6 +62,7 @@ class AuthManager {
   private credentialsFile: string = '';
   private keyFile: string = '';
   private masterKey: Buffer | null = null;
+  private useKeychain = false;
   private initialized = false;
 
   /**
@@ -72,12 +80,77 @@ class AuthManager {
 
       await fs.mkdir(this.dataDir, { recursive: true });
       this.masterKey = await this.loadOrGenerateKey();
+
+      if (process.platform === 'darwin') {
+        this.useKeychain = await this.canUseKeychain();
+        if (this.useKeychain) {
+          await this.migrateLegacyEncryptedDataToKeychain();
+        }
+      }
+
       this.initialized = true;
       console.log(`[Auth] Initialized at ${this.dataDir}`);
     } catch (error) {
-      console.error('[Auth] Failed to initialize:', error);
+      const message = error instanceof Error ? error.message : 'unknown error';
+      console.error(`[Auth] Failed to initialize auth manager: ${message}`);
       throw error;
     }
+  }
+
+  private async canUseKeychain(): Promise<boolean> {
+    try {
+      await execFileAsync(SECURITY_BIN, ['list-keychains']);
+      return true;
+    } catch {
+      console.warn('[Auth] macOS Keychain unavailable; using encrypted file storage');
+      return false;
+    }
+  }
+
+  private disableKeychainFallback(reason: string): void {
+    if (!this.useKeychain) {
+      return;
+    }
+
+    this.useKeychain = false;
+    console.warn(`[Auth] ${reason}; using encrypted file storage`);
+  }
+
+  private isMissingKeychainItem(error: unknown): boolean {
+    const err = error as { code?: number; stderr?: string };
+    return err.code === 44 || err.stderr?.includes('could not be found') || false;
+  }
+
+  private async readKeychainValue(serviceName: string): Promise<string | null> {
+    try {
+      const { stdout } = await execFileAsync(SECURITY_BIN, [
+        'find-generic-password',
+        '-s',
+        serviceName,
+        '-a',
+        KEYCHAIN_ACCOUNT,
+        '-w',
+      ]);
+      return stdout.trim();
+    } catch (error) {
+      if (this.isMissingKeychainItem(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async writeKeychainValue(serviceName: string, value: string): Promise<void> {
+    await execFileAsync(SECURITY_BIN, [
+      'add-generic-password',
+      '-U',
+      '-s',
+      serviceName,
+      '-a',
+      KEYCHAIN_ACCOUNT,
+      '-w',
+      value,
+    ]);
   }
 
   private async loadOrGenerateKey(): Promise<Buffer> {
@@ -130,7 +203,7 @@ class AuthManager {
 
   // --- Token Management ---
 
-  private async loadTokens(): Promise<Record<string, AuthToken>> {
+  private async loadTokensFromFile(): Promise<Record<string, AuthToken>> {
     try {
       const fileContent = await fs.readFile(this.authFile, 'utf8');
       const encryptedData: EncryptedData = JSON.parse(fileContent);
@@ -139,17 +212,50 @@ class AuthManager {
     } catch (error: unknown) {
       const err = error as { code?: string };
       if (err.code === 'ENOENT') return {};
-      console.error('[Auth] Error loading tokens:', error);
+      console.error('[Auth] Error loading tokens from encrypted storage');
       return {};
     }
   }
 
-  private async saveTokens(tokens: Record<string, AuthToken>): Promise<void> {
+  private async saveTokensToFile(tokens: Record<string, AuthToken>): Promise<void> {
     const jsonStr = JSON.stringify(tokens);
     const encryptedData = this.encrypt(jsonStr);
     await fs.writeFile(this.authFile, JSON.stringify(encryptedData, null, 2), {
       mode: 0o600,
     });
+  }
+
+  private async loadTokensFromKeychain(): Promise<Record<string, AuthToken>> {
+    const value = await this.readKeychainValue(TOKENS_KEYCHAIN_SERVICE);
+    if (!value) return {};
+    return JSON.parse(value) as Record<string, AuthToken>;
+  }
+
+  private async saveTokensToKeychain(tokens: Record<string, AuthToken>): Promise<void> {
+    await this.writeKeychainValue(TOKENS_KEYCHAIN_SERVICE, JSON.stringify(tokens));
+  }
+
+  private async loadTokens(): Promise<Record<string, AuthToken>> {
+    if (this.useKeychain) {
+      try {
+        return await this.loadTokensFromKeychain();
+      } catch {
+        this.disableKeychainFallback('Keychain token read failed');
+      }
+    }
+    return this.loadTokensFromFile();
+  }
+
+  private async saveTokens(tokens: Record<string, AuthToken>): Promise<void> {
+    if (this.useKeychain) {
+      try {
+        await this.saveTokensToKeychain(tokens);
+        return;
+      } catch {
+        this.disableKeychainFallback('Keychain token write failed');
+      }
+    }
+    await this.saveTokensToFile(tokens);
   }
 
   async storeToken(token: AuthToken): Promise<void> {
@@ -184,7 +290,7 @@ class AuthManager {
 
   // --- Credentials Management ---
 
-  private async loadCredentials(): Promise<Record<string, ClientCredentials>> {
+  private async loadCredentialsFromFile(): Promise<Record<string, ClientCredentials>> {
     try {
       const fileContent = await fs.readFile(this.credentialsFile, 'utf8');
       const encryptedData: EncryptedData = JSON.parse(fileContent);
@@ -193,12 +299,12 @@ class AuthManager {
     } catch (error: unknown) {
       const err = error as { code?: string };
       if (err.code === 'ENOENT') return {};
-      console.error('[Auth] Error loading credentials:', error);
+      console.error('[Auth] Error loading credentials from encrypted storage');
       return {};
     }
   }
 
-  private async saveCredentials(
+  private async saveCredentialsToFile(
     creds: Record<string, ClientCredentials>
   ): Promise<void> {
     const jsonStr = JSON.stringify(creds);
@@ -208,6 +314,76 @@ class AuthManager {
       JSON.stringify(encryptedData, null, 2),
       { mode: 0o600 }
     );
+  }
+
+  private async loadCredentialsFromKeychain(): Promise<Record<string, ClientCredentials>> {
+    const value = await this.readKeychainValue(CREDENTIALS_KEYCHAIN_SERVICE);
+    if (!value) return {};
+    return JSON.parse(value) as Record<string, ClientCredentials>;
+  }
+
+  private async saveCredentialsToKeychain(
+    creds: Record<string, ClientCredentials>
+  ): Promise<void> {
+    await this.writeKeychainValue(CREDENTIALS_KEYCHAIN_SERVICE, JSON.stringify(creds));
+  }
+
+  private async loadCredentials(): Promise<Record<string, ClientCredentials>> {
+    if (this.useKeychain) {
+      try {
+        return await this.loadCredentialsFromKeychain();
+      } catch {
+        this.disableKeychainFallback('Keychain credential read failed');
+      }
+    }
+    return this.loadCredentialsFromFile();
+  }
+
+  private async saveCredentials(
+    creds: Record<string, ClientCredentials>
+  ): Promise<void> {
+    if (this.useKeychain) {
+      try {
+        await this.saveCredentialsToKeychain(creds);
+        return;
+      } catch {
+        this.disableKeychainFallback('Keychain credential write failed');
+      }
+    }
+    await this.saveCredentialsToFile(creds);
+  }
+
+  private async migrateLegacyEncryptedDataToKeychain(): Promise<void> {
+    try {
+      const [legacyTokens, legacyCredentials] = await Promise.all([
+        this.loadTokensFromFile(),
+        this.loadCredentialsFromFile(),
+      ]);
+
+      const hasLegacyTokens = Object.keys(legacyTokens).length > 0;
+      const hasLegacyCredentials = Object.keys(legacyCredentials).length > 0;
+
+      if (!hasLegacyTokens && !hasLegacyCredentials) {
+        return;
+      }
+
+      if (hasLegacyTokens) {
+        const existingTokens = await this.loadTokensFromKeychain();
+        await this.saveTokensToKeychain({ ...legacyTokens, ...existingTokens });
+      }
+
+      if (hasLegacyCredentials) {
+        const existingCredentials = await this.loadCredentialsFromKeychain();
+        await this.saveCredentialsToKeychain({
+          ...legacyCredentials,
+          ...existingCredentials,
+        });
+      }
+
+      console.log('[Auth] Migrated legacy encrypted auth data to macOS Keychain');
+    } catch {
+      console.warn('[Auth] Legacy auth migration skipped; encrypted fallback remains available');
+    }
   }
 
   async storeClientCredentials(

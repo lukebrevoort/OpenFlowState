@@ -10,7 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { runCanvasBrowserLogin } from './canvas-browser-login.js';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
@@ -36,10 +36,47 @@ import { toRendererTaskRun } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
 import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
 import { userProfile } from '@flowstate/core';
+import { runIntegrationHealthCheck, runOAuthBatchHealthCheck } from './integrations-health.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+const SAFE_PROVIDER_PATTERN = /^[A-Za-z0-9_-]+$/;
+const TERMINAL_COMMAND_PREFIX = 'opencode auth login';
+const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
+
+const parseSupportedTerminalCommand = (command: string): string => {
+  const trimmed = typeof command === 'string' ? command.trim() : '';
+  if (!trimmed) {
+    throw new Error('Unsupported terminal command. Allowed: "opencode auth login" or "opencode auth login <https-url>".');
+  }
+
+  if (trimmed === TERMINAL_COMMAND_PREFIX) {
+    return trimmed;
+  }
+
+  if (!trimmed.startsWith(`${TERMINAL_COMMAND_PREFIX} `)) {
+    throw new Error('Unsupported terminal command. Allowed: "opencode auth login" or "opencode auth login <https-url>".');
+  }
+
+  const urlCandidate = trimmed.slice(TERMINAL_COMMAND_PREFIX.length + 1).trim();
+  if (!urlCandidate || UNSAFE_SHELL_CHARS_PATTERN.test(urlCandidate)) {
+    throw new Error('Unsupported terminal command. URL contains unsupported characters.');
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(urlCandidate);
+  } catch {
+    throw new Error('Unsupported terminal command. URL must be valid HTTP/HTTPS.');
+  }
+
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('Unsupported terminal command. URL must use HTTP/HTTPS.');
+  }
+
+  return `${TERMINAL_COMMAND_PREFIX} ${urlCandidate}`;
+};
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
@@ -261,18 +298,27 @@ ipcMain.handle('canvas:browserLogin', async (_event, payload: {
 });
 
 ipcMain.handle('app:openTerminal', async (_event, command: string) => {
+  const safeCommand = parseSupportedTerminalCommand(command);
+
   try {
-    await shell.openExternal(`terminal://${encodeURIComponent(command)}`);
+    await shell.openExternal(`terminal://${encodeURIComponent(safeCommand)}`);
   } catch (error) {
     console.error('Failed to open terminal via URL scheme:', error);
   }
 
   try {
-    const { exec } = await import('node:child_process');
-    const escapedCommand = command.replace(/"/g, '\\"');
-    exec(`osascript -e 'tell application "Terminal" to do script "${escapedCommand}"'`);
+    await execFileAsync('osascript', [
+      '-e',
+      'on run argv',
+      '-e',
+      'tell application "Terminal" to do script (item 1 of argv)',
+      '-e',
+      'end run',
+      '--',
+      safeCommand,
+    ]);
   } catch (error) {
-    console.error('Failed to open terminal via exec:', error);
+    console.error('Failed to open terminal via execFile:', error);
     throw error;
   }
 });
@@ -810,12 +856,23 @@ ipcMain.handle('integrations:getMcpStatus', async () => {
 
 ipcMain.handle('integrations:reloadMcp', async () => {
   try {
-    await processManager.reloadMcpConfig();
-    return { success: true };
+    const result = await processManager.reloadMcpConfig();
+    if (result.success) {
+      return { success: true };
+    }
+    return { success: false, error: result.error ?? 'Failed to reload MCP config' };
   } catch (error) {
     console.error('[Integrations] Error reloading MCP config:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
+});
+
+ipcMain.handle('integrations:healthCheck', async (_event, service: string) => {
+  return await runIntegrationHealthCheck(service);
+});
+
+ipcMain.handle('integrations:healthCheckOAuthBatch', async () => {
+  return await runOAuthBatchHealthCheck();
 });
 
 ipcMain.handle(
@@ -1165,8 +1222,8 @@ ipcMain.handle('workflows:list', async () => {
   return ipcError<WorkflowDefinition[]>(result.code, result.message);
 });
 
-ipcMain.handle('workflows:run', async (_event, workflowId: string, input?: unknown) => {
-  const result = await workflowsRunner.run(workflowId, input);
+ipcMain.handle('workflows:run', async (event, workflowId: string, input?: unknown) => {
+  const result = await workflowsRunner.run(workflowId, input, event.sender);
   if (result.ok) {
     return ipcOk<WorkflowRun>(result.data);
   }
@@ -1307,6 +1364,14 @@ ipcMain.handle('workflows:skill:save', async (_event, workflowId: string, skillM
   return ipcError(result.code, result.message);
 });
 
+ipcMain.handle('workflows:duplicate', async (_event, workflowId: string) => {
+  const result = await workflowsRunner.duplicateWorkflow(workflowId);
+  if (result.ok) {
+    return ipcOk(result.data);
+  }
+  return ipcError(result.code, result.message);
+});
+
 ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
   const id = typeof workflowId === 'string' ? workflowId.trim() : '';
   const result = await workflowsRunner.deleteWorkflow(id);
@@ -1331,10 +1396,16 @@ ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
   try {
     const args = ['models'];
-    if (provider) {
-      args.push(provider);
+    if (typeof provider === 'string') {
+      const normalizedProvider = provider.trim();
+      if (normalizedProvider) {
+        if (!SAFE_PROVIDER_PATTERN.test(normalizedProvider)) {
+          return [];
+        }
+        args.push(normalizedProvider);
+      }
     }
-    const { stdout } = await execAsync(`opencode ${args.join(' ')}`);
+    const { stdout } = await execFileAsync('opencode', args);
     const models = stdout
       .split('\n')
       .map((line) => line.trim())

@@ -138,37 +138,37 @@ FlowState takes direct inspiration from [Claude Cowork](https://support.claude.c
 
 ## Decision Log
 
-| Date     | Decision                                | Rationale                                                             | Status   |
-| -------- | --------------------------------------- | --------------------------------------------------------------------- | -------- |
-| Jan 2026 | Build on top of OpenCode (not fork)     | Leverage their maintenance, MCP infra, and community                  | Approved |
-| Jan 2026 | MCP-first architecture                  | Pluggable integrations, can be used independently                     | Approved |
-| Jan 2026 | Progressive autonomy model              | Auto-read, approval-write for safety                                  | Approved |
-| Jan 2026 | Local-only auth storage                 | User privacy, no cloud dependency                                     | Approved |
-| Jan 2026 | TypeScript throughout                   | Consistency with OpenCode SDK                                         | Approved |
-| Jan 2026 | MIT License                             | Match OpenCode, give back to community                                | Approved |
-| Jan 2026 | Mac-first for MVP                       | Simplify scope, add Windows later                                     | Approved |
-| Jan 2026 | Default to OpenCode Zen                 | Free, zero-friction onboarding                                        | Approved |
-| Jan 2026 | **Desktop App (Electron)**              | TUI too complex for non-technical users, Cowork-style UX              | **New**  |
-| Jan 2026 | **Headless OpenCode**                   | Run OpenCode silently, control via SDK/API                            | **New**  |
-| Jan 2026 | **Four-Mode UI**                        | Chat, Tasks, Workflows, Integrations                                  | **New**  |
-| Jan 2026 | **Workflows as Curated Commands**       | Use OpenCode's .md-based command system; hide global commands by default | **New**  |
-| Jan 2026 | **Claude Desktop-style MCP Config**     | Local JSON file for MCP configuration                                 | **New**  |
-| Jan 2026 | **Fresh UI Design**                     | New React UI inspired by FlowState 1.0 aesthetic                      | **New**  |
-| Jan 2026 | **Model Provider Choice in Onboarding** | Ask user which provider, default to Zen                               | **New**  |
-| Jan 2026 | **Internet Required for MVP**           | Optimize for offline later                                            | **New**  |
-| Jan 2026 | **Unified Real-Time Timeline**          | Single chronological feed (no tabs) for tool calls, approvals, status | **New**  |
-| Jan 2026 | **Hybrid Timeline Storage**             | SQLite for metadata, disk blobs for payloads ≥10KB                    | **New**  |
-| Jan 2026 | **Smart Metadata Gmail Defaults**       | Return snippet + headers + labels by default, full body on-demand     | **New**  |
-| Jan 2026 | **Redact Secrets Even in Dev Mode**     | Always strip tokens/keys; export bundle requires explicit action      | **New**  |
-| Jan 2026 | **Hybrid Task Promotion**               | Agent-led promotion + heuristic escalation; no user override          | **New**  |
-| Jan 2026 | **Task Summary from Timeline**          | Final task summary auto-generated from timeline; last chat message    | **New**  |
-| Jan 2026 | **Workflow Runs in SQLite**             | Durable history + queryable run metadata                              | **New**  |
-| Jan 2026 | **WorkflowRun + TaskRun Linking**       | Separate workflowRunId; reference taskRunId + chat message/session    | **New**  |
-| Jan 2026 | **Workflow Auto-Route to Tasks**        | Starting a workflow always switches to Tasks                          | **New**  |
-| Feb 2026 | **User Profile JSON + System Tools**    | Persist user preferences + inject into system prompt                  | **New**  |
-| Feb 2026 | **Shared LRU Cache Module**             | Standardize caching across MCP servers                                | **New**  |
-| Feb 2026 | **Single-Session MVP, Multi-Stream Later** | Workflows parallel via detached sessions; full multi-stream for v1.1 | **New**  |
-| Feb 2026 | **Phase 5/5.5 Before Phase 6**          | Security + workflow persistence required before onboarding polish     | **New**  |
+| Date     | Decision                                   | Rationale                                                                | Status   |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------------ | -------- |
+| Jan 2026 | Build on top of OpenCode (not fork)        | Leverage their maintenance, MCP infra, and community                     | Approved |
+| Jan 2026 | MCP-first architecture                     | Pluggable integrations, can be used independently                        | Approved |
+| Jan 2026 | Progressive autonomy model                 | Auto-read, approval-write for safety                                     | Approved |
+| Jan 2026 | Local-only auth storage                    | User privacy, no cloud dependency                                        | Approved |
+| Jan 2026 | TypeScript throughout                      | Consistency with OpenCode SDK                                            | Approved |
+| Jan 2026 | MIT License                                | Match OpenCode, give back to community                                   | Approved |
+| Jan 2026 | Mac-first for MVP                          | Simplify scope, add Windows later                                        | Approved |
+| Jan 2026 | Default to OpenCode Zen                    | Free, zero-friction onboarding                                           | Approved |
+| Jan 2026 | **Desktop App (Electron)**                 | TUI too complex for non-technical users, Cowork-style UX                 | **New**  |
+| Jan 2026 | **Headless OpenCode**                      | Run OpenCode silently, control via SDK/API                               | **New**  |
+| Jan 2026 | **Four-Mode UI**                           | Chat, Tasks, Workflows, Integrations                                     | **New**  |
+| Jan 2026 | **Workflows as Curated Commands**          | Use OpenCode's .md-based command system; hide global commands by default | **New**  |
+| Jan 2026 | **Claude Desktop-style MCP Config**        | Local JSON file for MCP configuration                                    | **New**  |
+| Jan 2026 | **Fresh UI Design**                        | New React UI inspired by FlowState 1.0 aesthetic                         | **New**  |
+| Jan 2026 | **Model Provider Choice in Onboarding**    | Ask user which provider, default to Zen                                  | **New**  |
+| Jan 2026 | **Internet Required for MVP**              | Optimize for offline later                                               | **New**  |
+| Jan 2026 | **Unified Real-Time Timeline**             | Single chronological feed (no tabs) for tool calls, approvals, status    | **New**  |
+| Jan 2026 | **Hybrid Timeline Storage**                | SQLite for metadata, disk blobs for payloads ≥10KB                       | **New**  |
+| Jan 2026 | **Smart Metadata Gmail Defaults**          | Return snippet + headers + labels by default, full body on-demand        | **New**  |
+| Jan 2026 | **Redact Secrets Even in Dev Mode**        | Always strip tokens/keys; export bundle requires explicit action         | **New**  |
+| Jan 2026 | **Hybrid Task Promotion**                  | Agent-led promotion + heuristic escalation; no user override             | **New**  |
+| Jan 2026 | **Task Summary from Timeline**             | Final task summary auto-generated from timeline; last chat message       | **New**  |
+| Jan 2026 | **Workflow Runs in SQLite**                | Durable history + queryable run metadata                                 | **New**  |
+| Jan 2026 | **WorkflowRun + TaskRun Linking**          | Separate workflowRunId; reference taskRunId + chat message/session       | **New**  |
+| Jan 2026 | **Workflow Auto-Route to Tasks**           | Starting a workflow always switches to Tasks                             | **New**  |
+| Feb 2026 | **User Profile JSON + System Tools**       | Persist user preferences + inject into system prompt                     | **New**  |
+| Feb 2026 | **Shared LRU Cache Module**                | Standardize caching across MCP servers                                   | **New**  |
+| Feb 2026 | **Single-Session MVP, Multi-Stream Later** | Workflows parallel via detached sessions; full multi-stream for v1.1     | **New**  |
+| Feb 2026 | **Phase 5/5.5 Before Phase 6**             | Security + workflow persistence required before onboarding polish        | **New**  |
 
 ---
 
@@ -1011,16 +1011,16 @@ Use this when your desktop is cluttered and needs organization.
 - [x] ProcessManager starts OpenCode + streams events
 - [x] Chat mode streaming with session management
 
-### Phase 3: Integrations + Config Baseline - MOSTLY DONE
+### Phase 3: Integrations + Config Baseline - DONE
 
 Value: users can connect core services (Gmail/GCal/Notion/Canvas) and persist config.
 
 - [x] Config store persisted to disk
 - [x] Auth manager + OAuth server
 - [x] Integrations UI + connect/disconnect
-- [ ] Confirm OAuth end-to-end with real credentials across Gmail + GCal (and Notion OAuth if we keep it)
-- [ ] Decide + implement secrets storage policy: keep encrypted files vs move to macOS Keychain
-- [ ] Implement Custom MCP add/configure UI (currently placeholder)
+- [x] Confirm OAuth end-to-end with real credentials across Gmail + GCal (and Notion OAuth if we keep it)
+- [x] Decide + implement secrets storage policy: keep encrypted files vs move to macOS Keychain
+- [x] Implement Custom MCP add/configure UI (currently placeholder)
 
 ### Phase 4: Execution Core (Timeline + Approvals + Tasks)
 
@@ -1054,6 +1054,7 @@ Value: users can safely and consistently approve/deny agent actions across all m
 **Context**: Oracle deep-dive revealed that approvals work in TasksMode but are missing from ChatMode, payload truncation prevents informed decisions, XSS vulnerabilities exist, and tool classification is inconsistent across MCP servers.
 
 **Completed (12 PM tasks all SUCCESS)**:
+
 - [x] Security hardening: XSS sanitization in ChatMode, IPC validation for approvals:reply, audit logging
 - [x] Approval payload quality: Removed truncation, ApprovalCard handles large payloads with expand/collapse
 - [x] State machine correctness: waiting_approval → running transitions, state machine tests
@@ -1075,6 +1076,105 @@ Value: first-run success rate goes up and the product feels coherent (less "stub
 - [ ] Add missing UI wiring: workflow edit/duplicate/delete, custom MCP add, integration settings link
 - [ ] Notifications for approvals + task completion (macOS)
 - [ ] Reliability policy enforcement: retry/backoff + user messaging when MCP drops mid-task
+
+### Phase 6.5 Onboarding and Integrations Polish
+
+Value: integrations feel trustworthy (status reflects reality), connection UX feels polished, onboarding is shorter and more accurate.
+
+#### Connection Status + Health Checks
+
+Problem: current integrations status is largely “static” (token/session present) and can report “Connected” even when the integration is no longer usable (notably Canvas Playwright session expiry).
+
+Decision: keep the existing fast “configured/credential present” status, but add a manual **Health Check** that verifies the integration actually works. Only run health checks when the user explicitly clicks **Sync** (in Integrations mode) so we do not silently ping third-party services.
+
+UI semantics (per integration):
+- **Connected**: credentials exist AND last health check succeeded.
+- **Connected (Not verified yet)**: credentials exist but no successful health check has been run yet.
+- **Needs reconnect**: last health check failed; user should reconnect.
+- **Not connected**: no credentials.
+
+Required new IPC surface (preload + main):
+- `window.flowstate.integrations.healthCheck(service: string): Promise<{ ok: boolean; checkedAt: string; message?: string; email?: string }>`
+  - Runs a minimal “whoami/profile” style request per service and returns success/failure.
+  - Does not mutate tokens on failure (do not auto-remove credentials).
+
+Health check behavior by service (MVP):
+- Gmail / Google Calendar: use stored OAuth token, refresh if needed, then run a lightweight endpoint to confirm validity (and optionally return email).
+- Notion (API token): call Notion “me” style endpoint to confirm token validity.
+- Canvas:
+  - Token mode: call Canvas API `GET /api/v1/users/self/profile` using stored `canvasApiUrl`.
+  - Browser session mode (Playwright storage state): validate by performing an authenticated request using the stored state (same endpoint as above) and fail clearly when session is invalid/expired.
+
+Persistence:
+- Store per-integration `lastHealthCheckAt` + `lastHealthCheckOk` + `lastHealthCheckError` in config (or a small local store) so the UI can show “Not verified yet” vs “Needs reconnect” without background polling.
+
+Integrations UI updates:
+- **Sync** becomes “Run health check” for that integration (spinner per-card, not global).
+- On failure: card shows “Needs reconnect” state + short error message + Connect button.
+- On success: update “Last sync” to reflect the health check time.
+
+Acceptance criteria:
+- Canvas: if the Playwright session is expired, clicking **Sync** changes the card to “Needs reconnect” and shows a failure message (no false “Connected”).
+- Gmail/GCal/Notion: clicking **Sync** produces a definitive pass/fail based on an actual API request.
+- Health check is available and consistent in both Integrations mode and when launched from onboarding (same UI/components).
+
+#### Connection Modal UX Polish
+
+Problem: modal overlay is visually messy/too transparent and does not feel like it cleanly covers the app (notably near the top bar area).
+
+Changes:
+- Update modal overlay styling so the dim + blur feels intentional and covers the usable surface cleanly (acceptable to exclude the native title bar region, but the boundary must look deliberate).
+- Improve instruction blocks for OAuth/API token flows: clearer hierarchy, more legible callouts, and better “open console” affordances.
+
+Acceptance criteria:
+- Overlay appears uniform, sufficiently opaque, and visually consistent across all modes; no “leaking” UI at the top edge.
+- Instructions are more scannable (setup steps visible without hunting).
+
+#### Onboarding: Integrations Step Matches New UI
+
+Keep the current flow:
+- Onboarding “Connect” step shows only apps selected on the “Apps” step.
+- “Connect/Manage” navigates into IntegrationsMode in `onboardingMode`, uses the same ConnectionModal UI, and user returns via “Back to onboarding”.
+
+Changes:
+- Ensure onboarding uses the same polished connection modal and reflects updated status semantics.
+
+#### Onboarding: Provider Models from OpenCode
+
+Problem: onboarding provider models are hardcoded and drift from what OpenCode actually has configured.
+
+Decision:
+- Populate provider model options dynamically using `window.flowstate.opencode.listModels()` (same source of truth as Settings).
+- Keep model selection as a `<select>` (no free-text) for onboarding simplicity.
+
+Implementation notes:
+- Derive provider groups from model IDs (`<provider>/<model>`) and show provider cards based on discovered providers.
+- Use existing `providerDefinitions` only as display metadata/ordering hints; do not treat it as the authoritative model list.
+
+Acceptance criteria:
+- On first-run, provider step lists models that match the user’s actual `opencode models` output.
+- Selecting a provider limits the model dropdown to models for that provider.
+
+#### Remove “Wow Moment” From Onboarding
+
+Decision:
+- Replace the “Wow Moment” step with a simple final step that contains a single “Start FlowState” button.
+- Remove all related state and props (no dead code).
+
+Acceptance criteria:
+- Onboarding steps become: `welcome → apps → connect → provider → finish`.
+- No references remain to wow prompts, wow selection, or skip-wow actions in the renderer stores/components.
+
+Files likely touched (non-exhaustive):
+- `packages/desktop/src/renderer/modes/IntegrationsMode.tsx`
+- `packages/desktop/src/renderer/hooks/useIntegrations.ts`
+- `packages/desktop/src/renderer/stores/integrationsStore.ts`
+- `packages/desktop/src/renderer/components/OnboardingFlow.tsx`
+- `packages/desktop/src/renderer/stores/onboardingStore.ts`
+- `packages/desktop/src/renderer/data/providerData.ts`
+- `packages/desktop/src/renderer/styles/globals.css`
+- `packages/desktop/src/renderer/types/electron.d.ts`
+- Main/preload IPC: integrations + auth managers (new healthCheck IPC + implementation)
 
 ### Phase 7: Testing + Launch Prep
 
@@ -1268,18 +1368,21 @@ Canvas is already present in the codebase (Canvas MCP + integration surface). Re
 > **Decision (Feb 2026)**: Current single-active-session model is acceptable for MVP. Workflows already run in parallel via detached sessions. Full multi-stream support planned for post-launch.
 
 **Current Behavior:**
+
 - Workflows use detached sessions → run in parallel ✅
 - Chat has single `activeSessionId` → only one chat can actively stream at a time
 - User can switch between conversations, but only one processes at a time
 - Sending to a session with an active task is blocked
 
 **Target Behavior (Option B - Multi-Stream):**
+
 - Multiple chat conversations can process simultaneously
 - User can watch multiple conversations stream responses in real-time
 - Each conversation has independent `isProcessing` state
 - Sidebar shows which conversations are "thinking"
 
 **Implementation Scope:**
+
 1. Decouple event stream from single `activeSessionId`
 2. Route events to correct renderer context by sessionId
 3. Session switcher UI shows per-conversation processing state
@@ -1287,6 +1390,7 @@ Canvas is already present in the codebase (Canvas MCP + integration surface). Re
 5. Desktop notification when background conversation completes
 
 **Architecture Changes Required:**
+
 - `ProcessManager`: Support multiple active event streams
 - `chatStore`: Per-session processing state (not global `isLoading`)
 - IPC: Filter/route events by sessionId to correct store slice

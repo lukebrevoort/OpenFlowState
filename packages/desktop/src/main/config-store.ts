@@ -16,9 +16,22 @@ import path from 'path';
  * MCP Server configuration
  */
 export interface MCPServerConfig {
-  command: string[];
+  /** Local MCP server command (type=local). */
+  command?: string[];
+
+  /** Remote MCP server URL (type=remote). */
+  url?: string;
+
+  /** Remote MCP request headers (type=remote). */
+  headers?: Record<string, string>;
+
   enabled: boolean;
+
+  /** Local MCP env vars (type=local). */
   env?: Record<string, string>;
+
+  /** Optional tool-fetch timeout (ms). */
+  timeout?: number;
 }
 
 /**
@@ -188,7 +201,25 @@ class ConfigStore {
 
     try {
       const data = await fs.readFile(this.configPath, 'utf-8');
-      this.config = JSON.parse(data) as FlowStateConfig;
+      const loaded = JSON.parse(data) as FlowStateConfig;
+      // Deep-merge with defaults so upgraded configs with missing nested
+      // fields (e.g. notifications.taskComplete) inherit the correct defaults
+      this.config = {
+        ...DEFAULT_CONFIG,
+        ...loaded,
+        preferences: {
+          ...DEFAULT_CONFIG.preferences,
+          ...loaded.preferences,
+          notifications: {
+            ...DEFAULT_CONFIG.preferences.notifications,
+            ...loaded.preferences?.notifications,
+          },
+          workingHours: {
+            ...DEFAULT_CONFIG.preferences.workingHours,
+            ...loaded.preferences?.workingHours,
+          },
+        },
+      };
       return this.config;
     } catch (error) {
       // File doesn't exist or is invalid - create default config
@@ -365,13 +396,26 @@ class ConfigStore {
 
     const mcpConfig: Record<string, unknown> = {};
     for (const [name, config] of Object.entries(this.config.mcpServers)) {
-      if (config.enabled) {
+      if (!config.enabled) continue;
+
+      if (typeof config.url === 'string' && config.url.trim().length > 0) {
         mcpConfig[name] = {
-          type: 'local',
-          command: config.command,
-          env: config.env,
+          type: 'remote',
+          url: config.url.trim(),
+          headers: config.headers,
+          enabled: true,
+          timeout: config.timeout,
         };
+        continue;
       }
+
+      mcpConfig[name] = {
+        type: 'local',
+        command: config.command,
+        environment: config.env,
+        enabled: true,
+        timeout: config.timeout,
+      };
     }
 
     return {

@@ -588,7 +588,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
             </div>
           </div>
 
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div className="mb-3">
               <h2 className="text-xl text-foreground mb-1">Task Details</h2>
               <p className="text-sm text-muted-foreground">
@@ -728,7 +728,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                 </div>
 
                 {selectedWorkflow && (
-                  <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl">
+                  <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl overflow-hidden">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
                         <h3 className="text-sm font-semibold text-foreground">
@@ -781,7 +781,7 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
                       return (
                         <div
-                          className="mt-4 space-y-4"
+                          className="mt-4 space-y-4 overflow-hidden"
                           aria-busy={isLoadingArtifacts ? "true" : "false"}
                         >
                           {workflowArtifacts?.summary?.payloadText && (

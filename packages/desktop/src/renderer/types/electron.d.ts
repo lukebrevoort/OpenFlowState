@@ -87,6 +87,13 @@ export interface TimelineEvent {
   redacted?: boolean;
 }
 
+export type TimelineEventBatch = {
+  type: 'batch';
+  events: TimelineEvent[];
+};
+
+export type TimelineEventEnvelope = TimelineEvent | TimelineEventBatch;
+
 export interface TaskRun {
   id: string;
   sessionId: string;
@@ -159,6 +166,10 @@ export interface WorkflowSkillSaveResult {
   source: 'user' | 'project';
 }
 
+export interface WorkflowDuplicateResult {
+  definition: WorkflowDefinition;
+}
+
 export type ChatSendResult = {
   success?: boolean;
   error?: string;
@@ -225,6 +236,17 @@ export interface McpServerStatus {
   status: 'connected' | 'disabled' | 'failed' | 'needs_auth' | 'needs_client_registration';
   error?: string;
 }
+
+export interface IntegrationHealthCheckResult {
+  ok: boolean;
+  checkedAt: string;
+  message?: string;
+  email?: string;
+}
+
+export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion';
+
+export type OAuthBatchHealthCheckResult = Record<OAuthIntegrationService, IntegrationHealthCheckResult>;
 
 export interface GoogleCalendarListEntry {
   id: string;
@@ -316,7 +338,7 @@ export interface FlowstateAPI {
     onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
     onError: (callback: (error: OpenCodeError) => void) => () => void;
     onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
-    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void) => () => void;
 
     // Cleanup
     removeAllListeners: () => void;
@@ -369,7 +391,7 @@ export interface FlowstateAPI {
     onProgress: (callback: (progress: OpenCodeProgress) => void) => () => void;
     onError: (callback: (error: OpenCodeError) => void) => () => void;
     onEvent: (callback: (event: OpenCodeEvent) => void) => () => void;
-    onTimelineEvent: (callback: (event: TimelineEvent) => void) => () => void;
+    onTimelineEvent: (callback: (event: TimelineEventEnvelope) => void) => () => void;
     removeAllListeners: () => void;
   };
 
@@ -388,6 +410,7 @@ export interface FlowstateAPI {
     generateFromIntent: (intent: string) => Promise<IpcResult<WorkflowGenerationResult>>;
     getSkillMarkdown: (workflowId: string) => Promise<IpcResult<WorkflowSkillFile>>;
     saveSkillMarkdown: (workflowId: string, skillMarkdown: string) => Promise<IpcResult<WorkflowSkillSaveResult>>;
+    duplicateWorkflow: (workflowId: string) => Promise<IpcResult<WorkflowDuplicateResult>>;
     deleteWorkflow: (workflowId: string) => Promise<IpcResult<{ removed: boolean }>>;
 
     listRuns: (workflowId: string, limit?: number, offset?: number) => Promise<IpcResult<WorkflowRun[]>>;
@@ -408,6 +431,8 @@ export interface FlowstateAPI {
     listAuthStatuses: () => Promise<AuthStatus[]>;
     getMcpStatus: () => Promise<Record<string, McpServerStatus> | null>;
     reloadMcp: () => Promise<{ success: boolean; error?: string }>;
+    healthCheck: (service: string) => Promise<IntegrationHealthCheckResult>;
+    healthCheckOAuthBatch: () => Promise<OAuthBatchHealthCheckResult>;
 
     oauthStart: (service: string, clientId: string, clientSecret: string) => Promise<AuthToken>;
     oauthRefresh: (service: string) => Promise<AuthToken | null>;

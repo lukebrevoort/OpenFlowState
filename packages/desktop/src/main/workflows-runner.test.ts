@@ -132,4 +132,84 @@ describe('workflowsRunner title editing', () => {
     expect(found).toBeTruthy();
     expect(found?.title).toBe('Folder ID workflow');
   });
+
+  it('duplicates a workflow into user data with copied template content', async () => {
+    const sourceWorkflowDir = path.join(tmpDir, 'workflows', 'daily-plan');
+    await fs.mkdir(sourceWorkflowDir, { recursive: true });
+    await fs.writeFile(
+      path.join(sourceWorkflowDir, 'SKILL.md'),
+      [
+        '---',
+        'name: daily-plan',
+        'title: "Daily Plan"',
+        'description: "Plan my day."',
+        '---',
+        '',
+        '# Daily Plan',
+        '',
+        '## What you do',
+        '1. Build a plan.',
+      ].join('\n'),
+      'utf8'
+    );
+
+    await workflowsRunner.listDefinitions();
+    const duplicated = await workflowsRunner.duplicateWorkflow('daily-plan');
+    expect(duplicated.ok).toBe(true);
+    if (!duplicated.ok) return;
+
+    expect(duplicated.data.definition.id).toBe('daily-plan-copy');
+    expect(duplicated.data.definition.title).toBe('Daily Plan Copy');
+
+    const duplicatedSkill = await fs.readFile(
+      path.join(tmpDir, 'workflows', 'daily-plan-copy', 'SKILL.md'),
+      'utf8'
+    );
+    expect(duplicatedSkill).toContain('name: daily-plan-copy');
+    expect(duplicatedSkill).toContain('title: "Daily Plan Copy"');
+    expect(duplicatedSkill).toContain('1. Build a plan.');
+  });
+
+  it('creates incremented id/title when duplicate already exists', async () => {
+    const sourceWorkflowDir = path.join(tmpDir, 'workflows', 'nightly-review');
+    const existingDuplicateDir = path.join(tmpDir, 'workflows', 'nightly-review-copy');
+    await fs.mkdir(sourceWorkflowDir, { recursive: true });
+    await fs.mkdir(existingDuplicateDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(sourceWorkflowDir, 'SKILL.md'),
+      [
+        '---',
+        'name: nightly-review',
+        'title: "Nightly Review"',
+        'description: "Wrap up today."',
+        '---',
+        '',
+        '# Nightly Review',
+      ].join('\n'),
+      'utf8'
+    );
+
+    await fs.writeFile(
+      path.join(existingDuplicateDir, 'SKILL.md'),
+      [
+        '---',
+        'name: nightly-review-copy',
+        'title: "Nightly Review Copy"',
+        'description: "Wrap up today."',
+        '---',
+        '',
+        '# Existing duplicate',
+      ].join('\n'),
+      'utf8'
+    );
+
+    await workflowsRunner.listDefinitions();
+    const duplicated = await workflowsRunner.duplicateWorkflow('nightly-review');
+    expect(duplicated.ok).toBe(true);
+    if (!duplicated.ok) return;
+
+    expect(duplicated.data.definition.id).toBe('nightly-review-copy-2');
+    expect(duplicated.data.definition.title).toBe('Nightly Review Copy (2)');
+  });
 });

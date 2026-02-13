@@ -19,6 +19,7 @@ import {
   FileText,
   Save,
   Shield,
+  Copy,
 } from 'lucide-react';
 import { useWorkflowsStore } from '../stores/workflowsStore';
 import type { WorkflowDefinition, WorkflowRun } from '../types/electron';
@@ -111,9 +112,11 @@ function WorkflowCard({
   onRun,
   onOpenDetails,
   onDelete,
+  onDuplicate,
   lastRun,
   isStarting,
   isDeleting,
+  isDuplicating,
   deletePending,
 }: {
   workflow: Workflow;
@@ -121,9 +124,11 @@ function WorkflowCard({
   onRun: (id: string) => void;
   onOpenDetails: (id: string) => void;
   onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
   lastRun: WorkflowRun | null;
   isStarting: boolean;
   isDeleting: boolean;
+  isDuplicating: boolean;
   deletePending: boolean;
 }) {
   const runMeta = lastRun ? statusLabel(lastRun.status) : null;
@@ -150,6 +155,15 @@ function WorkflowCard({
           aria-label="Open workflow details"
         >
           <PanelRight className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onDuplicate(workflow.id)}
+          disabled={isDuplicating}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary hover:bg-secondary/80 text-foreground transition-all duration-200 disabled:opacity-60"
+          aria-label="Duplicate workflow"
+        >
+          {isDuplicating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
         </button>
         <button
           type="button"
@@ -247,6 +261,7 @@ function WorkflowDetailsDrawer({
   onToggleAlwaysApprove,
   onRun,
   onDelete,
+  onDuplicate,
   onSkillChange,
   onSaveSkill,
   onOpenTaskRun,
@@ -272,6 +287,7 @@ function WorkflowDetailsDrawer({
   onToggleAlwaysApprove: () => void;
   onRun: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onSkillChange: (next: string) => void;
   onSaveSkill: () => void;
   onOpenTaskRun: (taskRunId: string) => void;
@@ -308,14 +324,24 @@ function WorkflowDetailsDrawer({
             <p className="text-sm text-muted-foreground">{workflow.description ?? 'No description provided.'}</p>
 
             <div className="mt-5 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={onTogglePin}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/40"
-              >
-                <Star className={`h-4 w-4 ${pinned ? 'fill-current text-[#A5B574]' : ''}`} />
-                {pinned ? 'Pinned' : 'Pin'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onTogglePin}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/40"
+                >
+                  <Star className={`h-4 w-4 ${pinned ? 'fill-current text-[#A5B574]' : ''}`} />
+                  {pinned ? 'Pinned' : 'Pin'}
+                </button>
+                <button
+                  type="button"
+                  onClick={onDuplicate}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/40"
+                >
+                  <Copy className="h-4 w-4" />
+                  Duplicate
+                </button>
+              </div>
               {pinsError ? (
                 <p className="text-xs text-destructive">{pinsError}</p>
               ) : null}
@@ -530,6 +556,7 @@ function WorkflowsMode({
   const getSkillMarkdown = useWorkflowsStore((state) => state.getSkillMarkdown);
   const saveSkillMarkdown = useWorkflowsStore((state) => state.saveSkillMarkdown);
   const deleteWorkflow = useWorkflowsStore((state) => state.deleteWorkflow);
+  const duplicateWorkflow = useWorkflowsStore((state) => state.duplicateWorkflow);
   const pinnedIds = useWorkflowsStore((state) => state.pinnedIds);
   const loadPins = useWorkflowsStore((state) => state.loadPins);
   const setPinned = useWorkflowsStore((state) => state.setPinned);
@@ -552,6 +579,7 @@ function WorkflowsMode({
 
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingWorkflowId, setDeletingWorkflowId] = useState<string | null>(null);
+  const [duplicatingWorkflowId, setDuplicatingWorkflowId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [skillDraft, setSkillDraft] = useState('');
@@ -659,6 +687,24 @@ function WorkflowsMode({
 
     setStartToast({ message: 'Failed to start workflow', variant: 'error' });
     window.setTimeout(() => setStartToast(null), 2600);
+  };
+
+  const handleDuplicateWorkflow = async (id: string) => {
+    setDuplicatingWorkflowId(id);
+    setStartToast({ message: 'Duplicating workflow...', variant: 'loading' });
+
+    const result = await duplicateWorkflow(id);
+    setDuplicatingWorkflowId(null);
+
+    if (!result.ok || !result.data) {
+      setStartToast({ message: result.error ?? 'Failed to duplicate workflow', variant: 'error' });
+      window.setTimeout(() => setStartToast(null), 2600);
+      return;
+    }
+
+    setDrawerWorkflowId(result.data.definition.id);
+    setStartToast({ message: `Created ${result.data.definition.title}`, variant: 'success' });
+    window.setTimeout(() => setStartToast(null), 1700);
   };
 
   const handleGeneratePreview = async () => {
@@ -1018,10 +1064,12 @@ function WorkflowsMode({
                   onTogglePin={(id) => void handleTogglePin(id)}
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  onDuplicate={(id) => void handleDuplicateWorkflow(id)}
                   onDelete={(id) => void handleDeleteWorkflow(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                   isStarting={startingWorkflowId === workflow.id}
                   isDeleting={deletingWorkflowId === workflow.id}
+                  isDuplicating={duplicatingWorkflowId === workflow.id}
                   deletePending={pendingDeleteId === workflow.id}
                 />
               ))}
@@ -1040,10 +1088,12 @@ function WorkflowsMode({
                   onTogglePin={(id) => void handleTogglePin(id)}
                   onRun={(id) => void handleRun(id)}
                   onOpenDetails={(id) => setDrawerWorkflowId(id)}
+                  onDuplicate={(id) => void handleDuplicateWorkflow(id)}
                   onDelete={(id) => void handleDeleteWorkflow(id)}
                   lastRun={(runsByWorkflowId[workflow.id]?.[0] as WorkflowRun | undefined) ?? null}
                   isStarting={startingWorkflowId === workflow.id}
                   isDeleting={deletingWorkflowId === workflow.id}
+                  isDuplicating={duplicatingWorkflowId === workflow.id}
                   deletePending={pendingDeleteId === workflow.id}
                 />
               ))}
@@ -1074,6 +1124,7 @@ function WorkflowsMode({
           onTogglePin={() => void handleTogglePin(drawerWorkflow.id)}
           onToggleAlwaysApprove={() => void handleToggleAlwaysApprove()}
           onRun={() => void handleRun(drawerWorkflow.id)}
+          onDuplicate={() => void handleDuplicateWorkflow(drawerWorkflow.id)}
           onDelete={() => void handleDeleteWorkflow(drawerWorkflow.id)}
           onSkillChange={(next) => {
             setSkillDraft(next);
