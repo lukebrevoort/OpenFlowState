@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import {
   Check,
   X,
@@ -29,6 +30,11 @@ type GoogleCalendarListEntry = {
   timeZone?: string;
   backgroundColor?: string;
 };
+
+function ModalPortal({ children }: { children: JSX.Element }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
 
 /**
  * Auth Method Selector - Choose between OAuth and API Token
@@ -649,11 +655,12 @@ function ConnectionModal({
   );
 
   return (
-    <div
-      className="fs-modal-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="fs-modal">
+    <ModalPortal>
+      <div
+        className="fs-modal-overlay"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="fs-modal">
         {/* Header */}
         <div className="fs-modal-header">
           <div className="flex items-center gap-3">
@@ -722,8 +729,9 @@ function ConnectionModal({
             Cancel
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
 
@@ -856,11 +864,12 @@ function GcalCalendarsModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div
-      className="fs-modal-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="fs-modal">
+    <ModalPortal>
+      <div
+        className="fs-modal-overlay"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="fs-modal">
         <div className="fs-modal-header">
           <div className="flex items-center gap-3">
             <span className="text-2xl">📅</span>
@@ -1024,8 +1033,9 @@ function GcalCalendarsModal({ onClose }: { onClose: () => void }) {
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
 
@@ -1084,11 +1094,12 @@ function AddCustomMcpModal({
   };
 
   return (
-    <div
-      className="fs-modal-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="fs-modal">
+    <ModalPortal>
+      <div
+        className="fs-modal-overlay"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="fs-modal">
         <div className="fs-modal-header">
           <div className="flex items-center gap-3">
             <Plus className="w-5 h-5 text-primary" />
@@ -1166,8 +1177,9 @@ function AddCustomMcpModal({
             </button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
 
@@ -1205,11 +1217,12 @@ function ConfigureCustomMcpModal({
   };
 
   return (
-    <div
-      className="fs-modal-overlay"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-    >
-      <div className="fs-modal">
+    <ModalPortal>
+      <div
+        className="fs-modal-overlay"
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="fs-modal">
         <div className="fs-modal-header">
           <div className="flex items-center gap-3">
             <Settings className="w-5 h-5 text-primary" />
@@ -1299,8 +1312,9 @@ function ConfigureCustomMcpModal({
             </button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
 

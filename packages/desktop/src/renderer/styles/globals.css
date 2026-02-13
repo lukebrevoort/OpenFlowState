@@ -321,7 +321,7 @@ body,
     background-color: rgba(196, 91, 74, 0.1);
   }
 
-  /* Modal overlay - solid enough to be visible in Electron */
+  /* Modal overlay - aligned with Workflows drawer treatment */
   .fs-modal-overlay {
     position: fixed;
     inset: 0;
@@ -332,14 +332,9 @@ body,
     padding: clamp(1rem, 4vh, 2.75rem) 1.25rem 1.5rem;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    background:
-      linear-gradient(
-        to bottom,
-        color-mix(in srgb, var(--fs-zen-ink) 74%, transparent) 0%,
-        color-mix(in srgb, var(--fs-zen-ink) 60%, transparent) 16%,
-        color-mix(in srgb, var(--fs-zen-ink) 64%, transparent) 100%
-      );
-    backdrop-filter: blur(6px) saturate(1.08);
+    background-color: rgb(0 0 0 / 0.4);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
   }
 
   /* Modal card */
