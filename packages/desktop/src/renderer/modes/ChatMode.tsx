@@ -33,15 +33,20 @@ type ApprovalPayloadInline = {
 const isApprovalPayloadInline = (
   payload: unknown,
 ): payload is ApprovalPayloadInline => {
-  return Boolean(payload) && typeof payload === "object" && !Array.isArray(payload);
+  return (
+    Boolean(payload) && typeof payload === "object" && !Array.isArray(payload)
+  );
 };
 
 const approvalPayloadForEvent = (event: TimelineEvent) =>
-  isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+  isApprovalPayloadInline(event.payloadInline)
+    ? event.payloadInline
+    : undefined;
 
 const requestIdForEvent = (event: TimelineEvent) => {
   const payload = approvalPayloadForEvent(event);
-  return typeof payload?.requestId === "string" && payload.requestId.trim().length > 0
+  return typeof payload?.requestId === "string" &&
+    payload.requestId.trim().length > 0
     ? payload.requestId
     : null;
 };
@@ -251,7 +256,8 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
-  const { sendMessage, checkStatus, refreshTimeline, createSession } = useOpenCode();
+  const { sendMessage, checkStatus, refreshTimeline, createSession } =
+    useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
 
@@ -294,7 +300,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     mode: "once" | "always" | "deny",
   ): Promise<void> => {
     if (!window.flowstate?.approvals?.reply) {
-      throw new Error("Approvals bridge unavailable — restart FlowState to reload the preload API.");
+      throw new Error(
+        "Approvals bridge unavailable — restart FlowState to reload the preload API.",
+      );
     }
     if (approvalReplying) return;
 
@@ -505,19 +513,17 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           <Sparkles className="w-4 h-4 text-primary" />
           <span className="text-sm font-medium text-primary">FlowState</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex justify-center items-center text-xs text-muted-foreground">
           <span className="sr-only">Thinking</span>
 
-          <div className="flex justify-center items-center h-4 w-4">
-            <span
-              className="flex items-center justify-center  gap-1"
-              aria-hidden="true"
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.2s]" />
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.1s]" />
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
-            </span>
-          </div>
+          <span
+            className="flex items-center justify-center gap-1"
+            aria-hidden="true"
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.2s]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:-0.1s]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary animate-bounce" />
+          </span>
         </div>
       </div>
     </div>
@@ -580,26 +586,41 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                         onApprove={(event) => {
                           const requestId = requestIdForEvent(event);
                           if (!requestId) {
-                            console.warn("Approval request missing requestId", event);
+                            console.warn(
+                              "Approval request missing requestId",
+                              event,
+                            );
                             return;
                           }
-                          return approvalsAvailable ? replyToApproval(requestId, "once") : undefined;
+                          return approvalsAvailable
+                            ? replyToApproval(requestId, "once")
+                            : undefined;
                         }}
                         onAlwaysApprove={(event) => {
                           const requestId = requestIdForEvent(event);
                           if (!requestId) {
-                            console.warn("Approval request missing requestId", event);
+                            console.warn(
+                              "Approval request missing requestId",
+                              event,
+                            );
                             return;
                           }
-                          return approvalsAvailable ? replyToApproval(requestId, "always") : undefined;
+                          return approvalsAvailable
+                            ? replyToApproval(requestId, "always")
+                            : undefined;
                         }}
                         onDeny={(event) => {
                           const requestId = requestIdForEvent(event);
                           if (!requestId) {
-                            console.warn("Approval request missing requestId", event);
+                            console.warn(
+                              "Approval request missing requestId",
+                              event,
+                            );
                             return;
                           }
-                          return approvalsAvailable ? replyToApproval(requestId, "deny") : undefined;
+                          return approvalsAvailable
+                            ? replyToApproval(requestId, "deny")
+                            : undefined;
                         }}
                       />
                     ) : (
@@ -747,18 +768,24 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                     pendingApprovals.latest.detail ??
                     "This action requires your approval."
                   }
-                  body={approvalPayloadForEvent(pendingApprovals.latest)?.body ?? ""}
+                  body={
+                    approvalPayloadForEvent(pendingApprovals.latest)?.body ?? ""
+                  }
                   primaryActionLabel={
-                    approvalPayloadForEvent(pendingApprovals.latest)?.approveLabel
+                    approvalPayloadForEvent(pendingApprovals.latest)
+                      ?.approveLabel
                   }
                   alwaysApproveLabel={
-                    approvalPayloadForEvent(pendingApprovals.latest)?.alwaysApproveLabel
+                    approvalPayloadForEvent(pendingApprovals.latest)
+                      ?.alwaysApproveLabel
                   }
                   denyLabel={
                     approvalPayloadForEvent(pendingApprovals.latest)?.denyLabel
                   }
                   onApprove={() => {
-                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    const requestId = requestIdForEvent(
+                      pendingApprovals.latest!,
+                    );
                     if (!requestId) {
                       console.warn(
                         "Approval request missing requestId",
@@ -767,10 +794,14 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                       setActivityExpanded(true);
                       return;
                     }
-                    return approvalsAvailable ? replyToApproval(requestId, "once") : undefined;
+                    return approvalsAvailable
+                      ? replyToApproval(requestId, "once")
+                      : undefined;
                   }}
                   onAlwaysApprove={() => {
-                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    const requestId = requestIdForEvent(
+                      pendingApprovals.latest!,
+                    );
                     if (!requestId) {
                       console.warn(
                         "Approval request missing requestId",
@@ -779,10 +810,14 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                       setActivityExpanded(true);
                       return;
                     }
-                    return approvalsAvailable ? replyToApproval(requestId, "always") : undefined;
+                    return approvalsAvailable
+                      ? replyToApproval(requestId, "always")
+                      : undefined;
                   }}
                   onDeny={() => {
-                    const requestId = requestIdForEvent(pendingApprovals.latest!);
+                    const requestId = requestIdForEvent(
+                      pendingApprovals.latest!,
+                    );
                     if (!requestId) {
                       console.warn(
                         "Approval request missing requestId",
@@ -791,13 +826,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                       setActivityExpanded(true);
                       return;
                     }
-                    return approvalsAvailable ? replyToApproval(requestId, "deny") : undefined;
+                    return approvalsAvailable
+                      ? replyToApproval(requestId, "deny")
+                      : undefined;
                   }}
                 />
 
                 {!approvalsAvailable && (
                   <p className="mt-2 text-[11px] text-destructive">
-                    Approvals bridge unavailable — restart FlowState to reload the preload API.
+                    Approvals bridge unavailable — restart FlowState to reload
+                    the preload API.
                   </p>
                 )}
 
