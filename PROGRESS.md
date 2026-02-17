@@ -33,6 +33,17 @@
 
 ---
 
+## Tasks Completed (Feb 17, 2026 - Phase 7 Chat/Sidebar Reliability + Launch Prep)
+
+- ✅ Added cancellable chat generation flow end-to-end (renderer -> preload -> main -> ProcessManager) with session-scoped cancellation checks.
+- ✅ Improved ChatMode rendering reliability for large assistant responses by parsing response headers up front and skipping expensive animation/normalization paths when content is large.
+- ✅ Replaced Sidebar placeholder data with live sessions/pinned workflows/running tasks and added debounced refresh coalescing to reduce event-driven reload churn.
+- ✅ Added Phase 7 regression coverage (`phase7-happy-path.test.ts`, timeline normalization regressions, workflow ID immutability regression).
+- ✅ Hardened IPC boundaries: `app:openExternal` protocol allowlist and `app:ensureFile` path restrictions to app-owned or dialog-approved locations.
+- ✅ Added launch prep documentation for unsigned DMG packaging and repeatable beta demo capture (`docs/phase-7-launch-prep.md`).
+
+---
+
 ## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook Browser Session)
 
 - ✅ Added Playwright-based Outlook browser session flow in desktop main (`outlook-browser-session.ts`) for manual sign-in and local storage-state persistence.
