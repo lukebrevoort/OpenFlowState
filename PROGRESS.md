@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 7, 2026 (Canvas Browser Auth Fix)
+> **Last Updated**: February 17, 2026 (Phase 6.75 Outlook Browser Session)
 
 ---
 
@@ -33,6 +33,17 @@
 
 ---
 
+## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook Browser Session)
+
+- ✅ Added Playwright-based Outlook browser session flow in desktop main (`outlook-browser-session.ts`) for manual sign-in and local storage-state persistence.
+- ✅ Added IPC + preload API for Outlook browser login and inbox reads (`outlook:browserLogin`, `outlook:readInbox`).
+- ✅ Added Outlook Browser Session mode to Integrations UI with manual-login guardrails and confirmation step.
+- ✅ Updated Outlook health checks to support both OAuth and browser-session auth modes.
+- ✅ Updated ProcessManager to configure `flowstate-outlook` only for OAuth mode and skip MCP wiring for browser-session mode.
+- ✅ Verified desktop checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop build:main`, `pnpm --filter @flowstate/desktop build:renderer`).
+
+---
+
 ## Tasks Completed (Feb 12, 2026 - Phase 3 Integration Wrap-Up)
 
 - ✅ Added OAuth batch validation endpoint for Gmail/GCal/Notion (`integrations:healthCheckOAuthBatch`) with typed preload/renderer API.
@@ -40,6 +51,16 @@
 - ✅ Completed Custom MCP configure UX in Integrations mode (edit name/command/env/enabled + MCP reload handling).
 - ✅ Updated `PLAN.md` to mark remaining Phase 3 checklist items as complete.
 - ✅ Verified desktop package checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Custom MCP Removal in Integrations)
+
+- ✅ Added a `Remove` action for each custom MCP card in Integrations mode.
+- ✅ Wired custom MCP removal to `flowstate.config.json` updates via `window.flowstate.config.set`.
+- ✅ Reloaded MCP services after removal via `window.flowstate.mcp.reload()` and refreshed the custom MCP list in UI.
+- ✅ Added inline removal error handling and per-item loading state (`Removing...`) in the Custom MCP section.
+- ✅ Fixed desktop main-process TypeScript build blocker in Outlook browser session parsing (`TS2677` type predicate mismatch).
 
 ---
 

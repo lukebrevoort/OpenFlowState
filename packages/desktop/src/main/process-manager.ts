@@ -766,7 +766,7 @@ class ProcessManager {
       const normalized = candidate.toLowerCase().trim();
       if (!normalized) continue;
       const prefix = normalized.split(/[._\s-]/)[0];
-      if (prefix && ['gmail', 'gcal', 'notion', 'canvas'].includes(prefix)) {
+      if (prefix && ['gmail', 'gcal', 'notion', 'outlook', 'canvas'].includes(prefix)) {
         return prefix;
       }
     }
@@ -1588,6 +1588,29 @@ class ProcessManager {
         timeout: 10000,
       } satisfies McpLocalConfig;
       console.log('[ProcessManager] Notion MCP configured with token');
+    }
+
+    // Outlook MCP (OAuth mode only)
+    const outlookToken = await authManager.getToken('outlook');
+    if (outlookToken) {
+      const outlookAuthMode = outlookToken.additionalData?.outlookAuthMode;
+      const useBrowserAuth = outlookAuthMode === 'browser';
+
+      if (!useBrowserAuth && outlookToken.accessToken) {
+        mcpConfig['flowstate-outlook'] = {
+          type: 'local',
+          command: ['npx', '-y', '@softeria/ms-365-mcp-server', '--org-mode', '--preset', 'mail'],
+          environment: {
+            FLOWSTATE_DATA_DIR: flowstateDataDir,
+            MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
+          },
+          enabled: true,
+          timeout: 10000,
+        } satisfies McpLocalConfig;
+        console.log('[ProcessManager] Outlook MCP configured with OAuth token');
+      } else if (useBrowserAuth) {
+        console.log('[ProcessManager] Outlook connected via browser session; OAuth MCP server skipped');
+      }
     }
 
     // System MCP (no auth needed)
