@@ -113,6 +113,21 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
     ],
   },
   {
+    id: 'outlook',
+    name: 'Outlook',
+    description: 'Microsoft 365 mail and calendar workflows',
+    icon: '📨',
+    status: 'disconnected',
+    isOfficial: true,
+    authOptions: [
+      {
+        method: 'oauth',
+        label: 'Microsoft OAuth (Recommended)',
+        description: 'Official Microsoft 365 connection via Entra app credentials',
+      },
+    ],
+  },
+  {
     id: 'canvas',
     name: 'Canvas LMS',
     description: 'Assignments, grades, and course materials (token or browser login)',

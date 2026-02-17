@@ -766,7 +766,7 @@ class ProcessManager {
       const normalized = candidate.toLowerCase().trim();
       if (!normalized) continue;
       const prefix = normalized.split(/[._\s-]/)[0];
-      if (prefix && ['gmail', 'gcal', 'notion', 'canvas'].includes(prefix)) {
+      if (prefix && ['gmail', 'gcal', 'notion', 'outlook', 'canvas'].includes(prefix)) {
         return prefix;
       }
     }
@@ -1588,6 +1588,29 @@ class ProcessManager {
         timeout: 10000,
       } satisfies McpLocalConfig;
       console.log('[ProcessManager] Notion MCP configured with token');
+    }
+
+    // Outlook MCP (Microsoft 365 public package via npx)
+    const outlookToken = await authManager.getToken('outlook');
+    if (outlookToken) {
+      mcpConfig['flowstate-outlook'] = {
+        type: 'local',
+        command: [
+          'npx',
+          '-y',
+          '@softeria/ms-365-mcp-server',
+          '--org-mode',
+          '--preset',
+          'mail',
+        ],
+        environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
+          MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
+        },
+        enabled: true,
+        timeout: 10000,
+      } satisfies McpLocalConfig;
+      console.log('[ProcessManager] Outlook MCP configured with token');
     }
 
     // System MCP (no auth needed)

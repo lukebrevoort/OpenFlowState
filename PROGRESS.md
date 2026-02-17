@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 7, 2026 (Canvas Browser Auth Fix)
+> **Last Updated**: February 16, 2026 (Phase 6.75 Outlook Kickoff)
 
 ---
 
@@ -30,6 +30,17 @@
 - **Shared LRU cache with TTL for MCP servers**
 - **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 - **Canvas browser auth persistence via MCP-to-desktop pending auth files**
+
+---
+
+## Tasks Completed (Feb 16, 2026 - Phase 6.75 Outlook Kickoff)
+
+- ✅ Added Outlook OAuth backend support in desktop `oauth-server` (Microsoft identity v2 endpoints, Outlook scopes, token exchange/refresh, Graph `/me` email resolution).
+- ✅ Added Outlook into auth/status and health check flows (`AuthManager.getAllStatuses`, `integrations-health.ts` with Graph validation + refresh behavior).
+- ✅ Wired official Outlook MCP server in ProcessManager (`flowstate-outlook` via `@softeria/ms-365-mcp-server --org-mode --preset mail` with `MS365_MCP_OAUTH_TOKEN`).
+- ✅ Added Outlook as an official integration in renderer + onboarding surfaces (Integrations card, setup instructions, app-picker metadata).
+- ✅ Removed non-functional browser-session fallback UI for Outlook in this kickoff slice to keep behavior coherent and policy-safe until a full fallback implementation ships.
+- ✅ Verified desktop checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop build:main`, `pnpm --filter @flowstate/desktop build:renderer`).
 
 ---
 

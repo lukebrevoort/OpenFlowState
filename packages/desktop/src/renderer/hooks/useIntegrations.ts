@@ -134,8 +134,7 @@ export function useIntegrations(options: UseIntegrationsOptions = {}) {
       });
 
       try {
-        // For Canvas, pass additional data (like API URL)
-        if (service === 'canvas' && additionalData) {
+        if (additionalData) {
           await window.flowstate.auth.storeApiToken(service, apiToken, additionalData);
         } else {
           await window.flowstate.auth.storeApiToken(service, apiToken);

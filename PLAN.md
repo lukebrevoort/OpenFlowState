@@ -1176,6 +1176,81 @@ Files likely touched (non-exhaustive):
 - `packages/desktop/src/renderer/types/electron.d.ts`
 - Main/preload IPC: integrations + auth managers (new healthCheck IPC + implementation)
 
+### Phase 6.75: Official MCP Expansion (Outlook First)
+
+Value: expand FlowState's first-party integration surface with a repeatable "official MCP" pattern that works for both API-native providers and harder enterprise providers.
+
+#### Research Snapshot (Feb 2026)
+
+- `@softeria/ms-365-mcp-server` is a strong reference for Microsoft 365 MCP shape: broad tool coverage, `--org-mode`, cloud variants, and multiple auth paths (device code, auth code in HTTP mode, BYOT).
+- Microsoft Graph is still the canonical and supportable Outlook integration path (mail/calendar/contacts/tasks) via delegated OAuth scopes.
+- Microsoft Entra tenant policies can disable or restrict user consent; in school/work tenants this can block OAuth for custom apps without admin approval.
+- Because tenant policies are enforced server-side, FlowState should not attempt to bypass organizational controls. Any browser automation path must be user-authenticated and policy-compliant.
+
+#### Architecture Decision (for official MCPs)
+
+Build a shared "Official MCP Framework" with provider-specific adapters:
+
+- **Auth adapter**: OAuth/device-code/BYOT interfaces with common token lifecycle + health check contracts.
+- **API adapter**: primary path for stable, policy-compliant integrations (Graph for Outlook).
+- **Browser adapter (Playwright-assisted)**: optional fallback for user-initiated web interactions where API access is unavailable; defaults to read-only and requires explicit user confirmation.
+- **Tool safety metadata**: every tool tagged with `auto` vs `approval_required` and data sensitivity class.
+
+#### Outlook MCP Pseudo Plan
+
+1. **Create `@flowstate/mcp-outlook` package scaffold**
+   - Transport + tool registry + capability reporting (`authModes`, `supportsWrite`, `tenantType`, `health`).
+   - Tool namespaces aligned with existing FlowState conventions (`outlook_mail_*`, `outlook_calendar_*`).
+
+2. **Implement Graph-first auth and tools (official path)**
+   - Auth modes: device code + authorization code + BYOT (parity with current FlowState auth manager patterns).
+   - Initial scopes (least privilege): `User.Read`, `Mail.Read`, `Mail.ReadWrite` (optional), `Mail.Send` (approval-gated), `Calendars.Read`, `Calendars.ReadWrite`.
+   - Core tool set (MVP): list/read/search mail, draft/send mail, list/create/update calendar events.
+
+3. **Add Playwright-assisted Outlook Web mode (fallback path)**
+   - Launch user-visible browser session for manual login only.
+   - Persist storage state encrypted via desktop auth manager (same pattern as Canvas pending-auth flow).
+   - Restrict MVP fallback to read-only inbox/calendar extraction unless user explicitly enables write actions in settings.
+   - Add strict guardrails: no hidden login, no credential capture, no anti-bot/captcha circumvention, immediate "reconnect required" on session expiry.
+
+4. **Integrations UI + onboarding updates**
+   - Add Outlook card with auth mode selector: `Official OAuth` and `Browser Session`.
+   - Per-mode health checks and clear status messaging (`Connected`, `Not verified`, `Needs reconnect`).
+   - Show tenant-policy failure guidance ("Admin approval required") with next-step copy.
+
+5. **Workflow + routing support**
+   - Add Outlook variants of inbox-review and meeting-prep workflows.
+   - Provider routing policy: prefer API adapter; fallback to browser adapter only when API path unavailable and user has enabled fallback.
+
+6. **Quality + compliance hardening**
+   - Add integration tests for token refresh, consent failure, session expiry, and tool approval boundaries.
+   - Log auth mode in timeline events for observability and debugging.
+   - Security review gate before enabling write tools in browser mode.
+
+#### Generalized Official MCP Rollout (Post-Outlook)
+
+Use Outlook as the template and then apply the same framework to additional official MCPs:
+
+- Phase 6.75.A: Outlook MCP (mail + calendar)
+- Phase 6.75.B: Microsoft To Do / Planner MCP slice (or extension inside Outlook/365 MCP)
+- Phase 6.75.C: Slack official MCP
+- Phase 6.75.D: Drive/Files MCP (Google Drive + OneDrive convergence strategy)
+
+Each new official MCP must include:
+
+- Auth mode matrix (OAuth/device-code/token/browser where applicable)
+- Health check contract and reconnect UX
+- Tool autonomy classification
+- Minimum workflow coverage (at least one prebuilt workflow)
+
+#### Acceptance Criteria (Phase 6.75)
+
+- Outlook appears in Integrations with two explicit connection modes and clear guardrail copy.
+- Graph mode supports end-to-end read + draft flows; send/create actions are approval-gated.
+- Browser Session mode works for user-authenticated read flows and fails safely when session expires.
+- No claim or behavior in product/docs suggests bypassing tenant or school authorization policy.
+- Architecture artifacts (PLAN + AGENTS responsibilities) reflect the reusable official MCP framework.
+
 ### Phase 7: Testing + Launch Prep
 
 Value: repeatable builds, fewer regressions, and a shippable beta.

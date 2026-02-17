@@ -10,12 +10,12 @@ export type IntegrationHealthCheckResult = {
   email?: string;
 };
 
-export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion';
+export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion' | 'outlook';
 
 export type OAuthBatchHealthCheckResult = Record<OAuthIntegrationService, IntegrationHealthCheckResult>;
 
 const NOTION_VERSION = '2022-06-28';
-const OAUTH_SERVICES: readonly OAuthIntegrationService[] = ['gmail', 'gcal', 'notion'];
+const OAUTH_SERVICES: readonly OAuthIntegrationService[] = ['gmail', 'gcal', 'notion', 'outlook'];
 
 const done = (result: Omit<IntegrationHealthCheckResult, 'checkedAt'>): IntegrationHealthCheckResult => ({
   ...result,
@@ -95,6 +95,22 @@ const extractCanvasEmail = (payload: unknown): string | undefined => {
   return undefined;
 };
 
+const extractOutlookEmail = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const profile = payload as { mail?: unknown; userPrincipalName?: unknown };
+  if (typeof profile.mail === 'string' && profile.mail.length > 0) {
+    return profile.mail;
+  }
+  if (typeof profile.userPrincipalName === 'string' && profile.userPrincipalName.length > 0) {
+    return profile.userPrincipalName;
+  }
+
+  return undefined;
+};
+
 async function checkGoogle(service: 'gmail' | 'gcal'): Promise<IntegrationHealthCheckResult> {
   const token = await authManager.getToken(service);
   if (!token?.accessToken) {
@@ -163,6 +179,48 @@ async function checkNotion(): Promise<IntegrationHealthCheckResult> {
     return done({ ok: true, email: extractNotionEmail(payload) ?? token.email });
   } catch (error) {
     return fail(`Notion health check failed: ${extractErrorMessage(error)}`);
+  }
+}
+
+async function checkOutlook(): Promise<IntegrationHealthCheckResult> {
+  const token = await authManager.getToken('outlook');
+  if (!token?.accessToken) {
+    return fail('No Outlook token found. Connect this integration first.');
+  }
+
+  let accessToken = token.accessToken;
+  let storedEmail = token.email;
+
+  if (authManager.isTokenExpired(token)) {
+    if (!token.refreshToken) {
+      return fail('Outlook token expired and cannot be refreshed. Reconnect to continue.');
+    }
+
+    const refreshed = await oauthServer.refreshToken('outlook');
+    if (!refreshed?.accessToken) {
+      return fail('Outlook token refresh failed. Reconnect this integration.');
+    }
+
+    accessToken = refreshed.accessToken;
+    storedEmail = refreshed.email ?? storedEmail;
+  }
+
+  try {
+    const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      return fail(summarizeHttpFailure('Outlook', response.status));
+    }
+
+    const payload = await safeJson(response);
+    const email = extractOutlookEmail(payload) ?? storedEmail;
+    return done({ ok: true, message: 'Outlook is connected.', email });
+  } catch (error) {
+    return fail(`Outlook health check failed: ${extractErrorMessage(error)}`);
   }
 }
 
@@ -281,6 +339,8 @@ export async function runIntegrationHealthCheck(service: string): Promise<Integr
         return await checkGoogle(service);
       case 'notion':
         return await checkNotion();
+      case 'outlook':
+        return await checkOutlook();
       case 'canvas': {
         const token = await authManager.getToken('canvas');
         const mode = token?.additionalData?.canvasAuthMode;

@@ -128,6 +128,7 @@ function OAuthForm({
             "Copy the Client ID and Client Secret",
           ],
           link: "https://console.cloud.google.com/apis/credentials",
+          consoleName: "Google Cloud Console",
         };
       case "notion":
         return {
@@ -140,6 +141,21 @@ function OAuthForm({
             "Copy the OAuth Client ID and Secret",
           ],
           link: "https://www.notion.so/my-integrations",
+          consoleName: "Notion Integrations",
+        };
+      case "outlook":
+        return {
+          title: "Microsoft Entra App Registration Setup",
+          steps: [
+            "Go to portal.azure.com and open Microsoft Entra ID",
+            "Open App registrations and create or select an app",
+            "Under Authentication, add redirect URI: http://localhost:3847/callback",
+            "Under API permissions, grant Microsoft Graph mail/calendar scopes your org allows",
+            "Under Certificates & secrets, create a client secret",
+            "Copy the Application (client) ID and client secret",
+          ],
+          link: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+          consoleName: "Microsoft Entra",
         };
       default:
         return null;
@@ -167,7 +183,7 @@ function OAuthForm({
             onClick={() => window.flowstate.app.openExternal(instructions.link)}
           >
             <ExternalLink className="w-3 h-3" />
-            Open {service === "notion" ? "Notion" : "Google Cloud"} Console
+            Open {instructions.consoleName}
           </button>
         </div>
       )}
@@ -230,13 +246,13 @@ function OAuthForm({
 }
 
 /**
- * API Token Form (for Notion Internal Integration)
+ * API token / browser-session fallback form
  */
 function ApiTokenForm({
   onSubmit,
   isLoading,
 }: {
-  onSubmit: (apiToken: string) => void;
+  onSubmit: (apiToken: string, additionalData?: Record<string, string>) => void;
   isLoading: boolean;
 }) {
   const [apiToken, setApiToken] = useState("");
@@ -248,33 +264,36 @@ function ApiTokenForm({
     }
   };
 
+  const canSubmit = apiToken.length > 0;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Instructions for Notion Internal Integration */}
       <div className="fs-connection-instructions">
         <h3 className="text-sm font-medium text-foreground mb-2">
           Notion Internal Integration Setup
         </h3>
-        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
-          <li>Go to notion.so/my-integrations</li>
-          <li>Click "New integration"</li>
-          <li>Give it a name (e.g., "FlowState")</li>
-          <li>Select the workspace to connect</li>
-          <li>Copy the "Internal Integration Secret"</li>
-          <li>Share pages/databases with your integration in Notion</li>
-        </ol>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-2"
-          onClick={() =>
-            window.flowstate.app.openExternal(
-              "https://www.notion.so/my-integrations",
-            )
-          }
-        >
-          <ExternalLink className="w-3 h-3" />
-          Open Notion Integrations
-        </button>
+        <>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Go to notion.so/my-integrations</li>
+            <li>Click "New integration"</li>
+            <li>Give it a name (e.g., "FlowState")</li>
+            <li>Select the workspace to connect</li>
+            <li>Copy the "Internal Integration Secret"</li>
+            <li>Share pages/databases with your integration in Notion</li>
+          </ol>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-2"
+            onClick={() =>
+              window.flowstate.app.openExternal(
+                "https://www.notion.so/my-integrations",
+              )
+            }
+          >
+            <ExternalLink className="w-3 h-3" />
+            Open Notion Integrations
+          </button>
+        </>
       </div>
 
       <div>
@@ -301,7 +320,7 @@ function ApiTokenForm({
       <button
         type="submit"
         className="w-full fs-button-primary flex items-center justify-center gap-2"
-        disabled={isLoading || !apiToken}
+        disabled={isLoading || !canSubmit}
       >
         {isLoading ? (
           <>
@@ -709,8 +728,8 @@ function ConnectionModal({
 
           {selectedMethod === "api_token" && integration.id !== "canvas" && (
             <ApiTokenForm
-              onSubmit={(apiToken) => {
-                onApiTokenSubmit(integration.id, apiToken);
+              onSubmit={(apiToken, additionalData) => {
+                onApiTokenSubmit(integration.id, apiToken, additionalData);
                 onClose();
               }}
               isLoading={isLoading}
