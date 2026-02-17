@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 7, 2026 (Canvas Browser Auth Fix)
+> **Last Updated**: February 17, 2026 (Phase 6.75 Outlook Full-Body + Write Toggle)
 
 ---
 
@@ -33,6 +33,37 @@
 
 ---
 
+## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook Browser Session)
+
+- ✅ Added Playwright-based Outlook browser session flow in desktop main (`outlook-browser-session.ts`) for manual sign-in and local storage-state persistence.
+- ✅ Added IPC + preload API for Outlook browser login and inbox reads (`outlook:browserLogin`, `outlook:readInbox`).
+- ✅ Added Outlook Browser Session mode to Integrations UI with manual-login guardrails and confirmation step.
+- ✅ Updated Outlook health checks to support both OAuth and browser-session auth modes.
+- ✅ Updated ProcessManager to configure `flowstate-outlook` only for OAuth mode and skip MCP wiring for browser-session mode.
+- ✅ Verified desktop checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop build:main`, `pnpm --filter @flowstate/desktop build:renderer`).
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook MCP + Inbox Parsing Fixes)
+
+- ✅ Added `User.Read` to Outlook OAuth scopes to align Graph `/v1.0/me` usage with delegated consent requirements.
+- ✅ Added a desktop local MCP server for Outlook browser-session mode (`outlook-browser-mcp.ts`) so Outlook MCP appears and is runnable during startup when OAuth is not used.
+- ✅ Updated ProcessManager to configure `flowstate-outlook` for browser-session mode using local MCP stdio command and saved storage-state path.
+- ✅ Improved Outlook inbox extraction reliability (mailbox readiness wait + broader DOM/frame parsing + OWA API endpoint fallback).
+- ✅ Changed empty extraction result from hard failure to connected-with-guidance response so users can recover without false disconnect states.
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook Full-Body + Write Toggle)
+
+- ✅ Added full-message body extraction for Outlook browser-session mode (`readOutlookMessageBodyWithBrowserSession`) with message selection by inbox index or subject match.
+- ✅ Added browser-session compose capability (`composeOutlookMessageWithBrowserSession`) supporting draft-only and send-now modes.
+- ✅ Expanded local Outlook browser MCP tools with `outlook_browser_get_message_body` and `outlook_browser_compose_message`.
+- ✅ Added write-mode guardrail (`OUTLOOK_BROWSER_WRITE_ENABLED`) so compose/send tools are blocked unless explicitly enabled.
+- ✅ Added Integrations UI control to toggle Outlook browser mode between `Read-only` and `Read + Write`, persisted in auth additionalData and applied via MCP reload.
+
+---
+
 ## Tasks Completed (Feb 12, 2026 - Phase 3 Integration Wrap-Up)
 
 - ✅ Added OAuth batch validation endpoint for Gmail/GCal/Notion (`integrations:healthCheckOAuthBatch`) with typed preload/renderer API.
@@ -40,6 +71,16 @@
 - ✅ Completed Custom MCP configure UX in Integrations mode (edit name/command/env/enabled + MCP reload handling).
 - ✅ Updated `PLAN.md` to mark remaining Phase 3 checklist items as complete.
 - ✅ Verified desktop package checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Custom MCP Removal in Integrations)
+
+- ✅ Added a `Remove` action for each custom MCP card in Integrations mode.
+- ✅ Wired custom MCP removal to `flowstate.config.json` updates via `window.flowstate.config.set`.
+- ✅ Reloaded MCP services after removal via `window.flowstate.mcp.reload()` and refreshed the custom MCP list in UI.
+- ✅ Added inline removal error handling and per-item loading state (`Removing...`) in the Custom MCP section.
+- ✅ Fixed desktop main-process TypeScript build blocker in Outlook browser session parsing (`TS2677` type predicate mismatch).
 
 ---
 

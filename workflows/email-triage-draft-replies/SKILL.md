@@ -5,7 +5,7 @@ description: Review unread email, categorize it, and draft replies (no sending w
 
 ## What you do
 
-1. Use Gmail MCP to list unread messages (metadata/snippet by default).
+1. Use Gmail MCP and Outlook MCP to list unread messages (metadata/snippet by default).
 2. Categorize messages into:
    - High Priority (needs reply)
    - Low Priority (FYI)

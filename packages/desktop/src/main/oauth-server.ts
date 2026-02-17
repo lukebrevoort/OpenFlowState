@@ -34,6 +34,19 @@ const GOOGLE_SCOPES = {
 // Notion OAuth scopes
 const NOTION_SCOPES = ['read_content', 'update_content', 'insert_content'];
 
+const OUTLOOK_SCOPES = [
+  'offline_access',
+  'openid',
+  'profile',
+  'email',
+  'User.Read',
+  'Mail.Read',
+  'Mail.ReadWrite',
+  'Mail.Send',
+  'Calendars.Read',
+  'Calendars.ReadWrite',
+];
+
 interface OAuthConfig {
   clientId: string;
   clientSecret: string;
@@ -141,6 +154,15 @@ class OAuthServer {
           scopes: NOTION_SCOPES,
           service: 'notion',
         };
+      case 'outlook':
+        return {
+          clientId,
+          clientSecret,
+          authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+          tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+          scopes: OUTLOOK_SCOPES,
+          service: 'outlook',
+        };
       default:
         throw new Error(`Unknown service: ${service}`);
     }
@@ -167,6 +189,8 @@ class OAuthServer {
       params.delete('access_type');
       params.delete('prompt');
       params.set('owner', 'user');
+    } else if (config.service === 'outlook') {
+      params.delete('access_type');
     }
 
     return `${config.authUrl}?${params.toString()}`;
@@ -397,6 +421,8 @@ class OAuthServer {
     let email: string | undefined;
     if (config.service === 'gmail' || config.service === 'gcal') {
       email = await this.getGoogleUserEmail(data.access_token);
+    } else if (config.service === 'outlook') {
+      email = await this.getOutlookUserEmail(data.access_token);
     }
 
     return {
@@ -433,6 +459,30 @@ class OAuthServer {
     return undefined;
   }
 
+  private async getOutlookUserEmail(accessToken: string): Promise<string | undefined> {
+    try {
+      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (typeof data?.mail === 'string' && data.mail.length > 0) {
+          return data.mail;
+        }
+        if (typeof data?.userPrincipalName === 'string' && data.userPrincipalName.length > 0) {
+          return data.userPrincipalName;
+        }
+      }
+    } catch (error) {
+      console.error('[OAuth] Failed to get Outlook user email:', error);
+    }
+    return undefined;
+  }
+
   /**
    * Refresh an access token
    */
@@ -459,6 +509,10 @@ class OAuthServer {
         grant_type: 'refresh_token',
       });
 
+      if (service === 'outlook') {
+        body.set('scope', config.scopes.join(' '));
+      }
+
       const response = await fetch(config.tokenUrl, {
         method: 'POST',
         headers: {
@@ -477,10 +531,15 @@ class OAuthServer {
       const newToken: AuthToken = {
         ...token,
         accessToken: data.access_token,
+        refreshToken: data.refresh_token ?? token.refreshToken,
         expiresAt: data.expires_in
           ? new Date(Date.now() + data.expires_in * 1000).toISOString()
           : undefined,
       };
+
+      if (service === 'outlook') {
+        newToken.email = await this.getOutlookUserEmail(data.access_token);
+      }
 
       await authManager.storeToken(newToken);
       console.log(`[OAuth] Refreshed token for ${service}`);

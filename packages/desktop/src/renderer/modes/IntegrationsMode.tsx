@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Key,
   Shield,
+  Trash2,
 } from "lucide-react";
 import { useIntegrations } from "../hooks";
 import {
@@ -141,6 +142,19 @@ function OAuthForm({
           ],
           link: "https://www.notion.so/my-integrations",
         };
+      case "outlook":
+        return {
+          title: "Microsoft Entra App Registration Setup",
+          steps: [
+            "Go to portal.azure.com and open Microsoft Entra ID",
+            "Open App registrations and create (or select) your app",
+            "Under Authentication, add redirect URI: http://localhost:3847/callback",
+            "Under API permissions, add Microsoft Graph scopes your org permits",
+            "Under Certificates & secrets, create a client secret",
+            "Copy the Application (client) ID and client secret",
+          ],
+          link: "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+        };
       default:
         return null;
     }
@@ -167,7 +181,7 @@ function OAuthForm({
             onClick={() => window.flowstate.app.openExternal(instructions.link)}
           >
             <ExternalLink className="w-3 h-3" />
-            Open {service === "notion" ? "Notion" : "Google Cloud"} Console
+            Open {service === "notion" ? "Notion" : service === "outlook" ? "Microsoft Entra" : "Google Cloud"} Console
           </button>
         </div>
       )}
@@ -236,7 +250,7 @@ function ApiTokenForm({
   onSubmit,
   isLoading,
 }: {
-  onSubmit: (apiToken: string) => void;
+  onSubmit: (apiToken: string, additionalData?: Record<string, string>) => void;
   isLoading: boolean;
 }) {
   const [apiToken, setApiToken] = useState("");
@@ -312,6 +326,180 @@ function ApiTokenForm({
           <>
             <Key className="w-4 h-4" />
             Connect with Token
+          </>
+        )}
+      </button>
+    </form>
+  );
+}
+
+function OutlookBrowserSessionForm({
+  onSubmit,
+  isLoading,
+}: {
+  onSubmit: (apiToken: string, additionalData?: Record<string, string>) => void;
+  isLoading: boolean;
+}) {
+  const [storageStatePath, setStorageStatePath] = useState("");
+  const [enableWriteActions, setEnableWriteActions] = useState(false);
+  const [browserLoginRunning, setBrowserLoginRunning] = useState(false);
+  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
+  const [browserLoginConfirmPath, setBrowserLoginConfirmPath] = useState<string | null>(null);
+  const [browserLoginAwaitingConfirm, setBrowserLoginAwaitingConfirm] = useState(false);
+
+  const canSubmit = storageStatePath.trim().length > 0;
+
+  const handlePickStoragePath = async () => {
+    const picked = await window.flowstate.app.showSaveDialog({
+      title: "Choose Outlook session file",
+      defaultPath: "outlook-session.json",
+    });
+    if (picked) {
+      setStorageStatePath(picked);
+    }
+  };
+
+  const handlePickStorageFolder = async () => {
+    const picked = await window.flowstate.app.showOpenDialog({
+      title: "Choose folder for Outlook session file",
+    });
+    if (picked) {
+      const normalized = picked.replace(/\/+$/g, "");
+      setStorageStatePath(`${normalized}/outlook-session.json`);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+
+    setBrowserLoginRunning(true);
+    setBrowserLoginError(null);
+
+    const trimmedPath = storageStatePath.trim();
+    const ensureResult = await window.flowstate.app.ensureFile(trimmedPath);
+    if (!ensureResult.success) {
+      setBrowserLoginRunning(false);
+      setBrowserLoginError(ensureResult.error ?? "Failed to create storage file");
+      return;
+    }
+
+    const confirmPath = `${trimmedPath}.ready-${Date.now()}`;
+    setBrowserLoginConfirmPath(confirmPath);
+    setBrowserLoginAwaitingConfirm(true);
+
+    const result = await window.flowstate.outlook.browserLogin({
+      mailboxUrl: "https://outlook.office.com/mail/",
+      storageStatePath: trimmedPath,
+      confirmationFilePath: confirmPath,
+    });
+
+    setBrowserLoginRunning(false);
+    setBrowserLoginAwaitingConfirm(false);
+
+    if (!result.success) {
+      setBrowserLoginError(result.error ?? "Outlook browser login failed");
+      return;
+    }
+
+    const resolvedMailboxUrl = result.mailboxUrl?.trim() || "https://outlook.office.com/mail/";
+
+    onSubmit("browser_session", {
+      outlookAuthMode: "browser",
+      outlookStorageStatePath: trimmedPath,
+      outlookMailboxUrl: resolvedMailboxUrl,
+      outlookWriteEnabled: enableWriteActions ? "true" : "false",
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="fs-connection-instructions">
+        <h3 className="text-sm font-medium text-foreground mb-2">
+          Outlook Browser Session Setup
+        </h3>
+        <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+          <li>Choose where FlowState should save your Outlook session file</li>
+          <li>Click "Start Browser Login" to open Microsoft Outlook Web</li>
+          <li>Sign in manually (including MFA) in the opened browser window</li>
+          <li>Return here and confirm once your inbox is fully loaded</li>
+        </ol>
+        <p className="text-xs text-muted-foreground mt-2">
+          This mode is read-only by default and follows your organization policy.
+          You can optionally enable draft/send tools below.
+        </p>
+      </div>
+
+      <div>
+        <label htmlFor="outlookStorageStatePath" className="block text-sm font-medium text-foreground mb-1">
+          Storage State Path
+        </label>
+        <input
+          id="outlookStorageStatePath"
+          type="text"
+          value={storageStatePath}
+          onChange={(e) => setStorageStatePath(e.target.value)}
+          placeholder="/Users/you/Library/Application Support/FlowState/outlook-session.json"
+          className="fs-input font-mono text-sm"
+          required
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button type="button" onClick={handlePickStoragePath} className="fs-button-secondary text-xs">
+            Pick file location
+          </button>
+          <button type="button" onClick={handlePickStorageFolder} className="fs-button-secondary text-xs">
+            Pick folder
+          </button>
+        </div>
+      </div>
+
+      <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={enableWriteActions}
+          onChange={(e) => setEnableWriteActions(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          Enable write actions (draft/send) for Outlook browser MCP.
+          Keep this off for read-only mode.
+        </span>
+      </label>
+
+      {browserLoginAwaitingConfirm && browserLoginConfirmPath && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
+          <p>When you are on your Outlook inbox page, click below.</p>
+          <button
+            type="button"
+            onClick={async () => {
+              const result = await window.flowstate.app.ensureFile(browserLoginConfirmPath);
+              if (!result.success) {
+                setBrowserLoginError(result.error ?? "Failed to confirm Outlook login");
+              }
+            }}
+            className="fs-button-secondary text-xs"
+          >
+            I am on the inbox page
+          </button>
+        </div>
+      )}
+
+      {browserLoginError && <div className="text-xs text-destructive">{browserLoginError}</div>}
+
+      <button
+        type="submit"
+        className="w-full fs-button-primary flex items-center justify-center gap-2"
+        disabled={isLoading || browserLoginRunning || !canSubmit}
+      >
+        {isLoading || browserLoginRunning ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Opening browser...
+          </>
+        ) : (
+          <>
+            <Shield className="w-4 h-4" />
+            Start Browser Login
           </>
         )}
       </button>
@@ -707,10 +895,20 @@ function ConnectionModal({
             />
           )}
 
-          {selectedMethod === "api_token" && integration.id !== "canvas" && (
+          {selectedMethod === "api_token" && integration.id === "outlook" && (
+            <OutlookBrowserSessionForm
+              onSubmit={(apiToken, additionalData) => {
+                onApiTokenSubmit(integration.id, apiToken, additionalData);
+                onClose();
+              }}
+              isLoading={isLoading}
+            />
+          )}
+
+          {selectedMethod === "api_token" && integration.id !== "canvas" && integration.id !== "outlook" && (
             <ApiTokenForm
-              onSubmit={(apiToken) => {
-                onApiTokenSubmit(integration.id, apiToken);
+              onSubmit={(apiToken, additionalData) => {
+                onApiTokenSubmit(integration.id, apiToken, additionalData);
                 onClose();
               }}
               isLoading={isLoading}
@@ -1410,6 +1608,15 @@ function IntegrationsMode({
     null,
   );
   const [configureCustomMcpSaving, setConfigureCustomMcpSaving] = useState(false);
+  const [removeCustomMcpError, setRemoveCustomMcpError] = useState<string | null>(
+    null,
+  );
+  const [removingCustomMcpName, setRemovingCustomMcpName] = useState<string | null>(
+    null,
+  );
+  const [outlookBrowserMode, setOutlookBrowserMode] = useState(false);
+  const [outlookWriteEnabled, setOutlookWriteEnabled] = useState(false);
+  const [outlookWriteUpdating, setOutlookWriteUpdating] = useState(false);
 
   const loadCustomMcps = async () => {
     if (onboardingMode) return;
@@ -1426,6 +1633,19 @@ function IntegrationsMode({
       setCustomMcps(entries);
     } finally {
       setCustomMcpLoading(false);
+    }
+  };
+
+  const loadOutlookBrowserSettings = async () => {
+    try {
+      const token = await window.flowstate.auth.getToken("outlook");
+      const additionalData = token?.additionalData;
+      const isBrowserMode = additionalData?.outlookAuthMode === "browser";
+      setOutlookBrowserMode(isBrowserMode);
+      setOutlookWriteEnabled(isBrowserMode && additionalData?.outlookWriteEnabled === "true");
+    } catch {
+      setOutlookBrowserMode(false);
+      setOutlookWriteEnabled(false);
     }
   };
 
@@ -1459,6 +1679,13 @@ function IntegrationsMode({
     });
   }, [onboardingMode]);
 
+  useEffect(() => {
+    loadOutlookBrowserSettings().catch(() => {
+      setOutlookBrowserMode(false);
+      setOutlookWriteEnabled(false);
+    });
+  }, [integrations]);
+
   // Handlers
   const handleConnect = (integration: Integration) => {
     setSelectedIntegration(integration);
@@ -1482,6 +1709,7 @@ function IntegrationsMode({
   };
 
   const handleRefresh = () => {
+    setRemoveCustomMcpError(null);
     refresh();
     loadCustomMcps().catch(() => {
       setCustomMcps([]);
@@ -1491,6 +1719,69 @@ function IntegrationsMode({
 
   const handleSyncIntegration = async (service: string) => {
     await healthCheck(service);
+  };
+
+  const handleOutlookPreview = async () => {
+    const result = await window.flowstate.outlook.readInbox({ maxItems: 8 });
+    if (!result.ok) {
+      window.alert(result.message ?? "Unable to read Outlook inbox right now.");
+      return;
+    }
+
+    if (result.messages.length === 0) {
+      window.alert(result.message ?? "Connected to Outlook, but no inbox messages were returned.");
+      return;
+    }
+
+    const preview = result.messages
+      .map((item, index) => `${index + 1}. ${item.subject}${item.sender ? ` (from ${item.sender})` : ""}`)
+      .join("\n");
+
+    window.alert(preview.length > 0 ? preview : "No messages found.");
+  };
+
+  const handleToggleOutlookWriteMode = async () => {
+    setOutlookWriteUpdating(true);
+    try {
+      const token = await window.flowstate.auth.getToken("outlook");
+      if (!token || token.authMethod !== "api_token") {
+        throw new Error("Outlook browser session token not found.");
+      }
+
+      const additionalData = token.additionalData ?? {};
+      if (additionalData.outlookAuthMode !== "browser") {
+        throw new Error("Outlook is not connected in browser-session mode.");
+      }
+
+      const nextWriteEnabled = additionalData.outlookWriteEnabled !== "true";
+      const nextAdditionalData: Record<string, string> = {
+        ...additionalData,
+        outlookWriteEnabled: nextWriteEnabled ? "true" : "false",
+      };
+
+      await window.flowstate.auth.storeApiToken(
+        "outlook",
+        token.accessToken || "browser_session",
+        nextAdditionalData,
+      );
+
+      const reloadResult = await window.flowstate.mcp.reload();
+      if (!reloadResult.success) {
+        throw new Error(reloadResult.error ?? "Failed to reload Outlook MCP configuration.");
+      }
+
+      setOutlookWriteEnabled(nextWriteEnabled);
+      await refresh();
+      await loadOutlookBrowserSettings();
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to update Outlook write mode.",
+      );
+    } finally {
+      setOutlookWriteUpdating(false);
+    }
   };
 
   const handleAddCustomMcp = async ({
@@ -1678,6 +1969,55 @@ function IntegrationsMode({
     }
   };
 
+  const handleRemoveCustomMcp = async (name: string) => {
+    if (removingCustomMcpName) return;
+
+    const confirmed = window.confirm(
+      `Remove custom MCP "${name}"? This will delete it from your config.`,
+    );
+    if (!confirmed) return;
+
+    setRemoveCustomMcpError(null);
+    setRemovingCustomMcpName(name);
+
+    try {
+      const currentConfig = await window.flowstate.config.get();
+      const currentMcpServers = currentConfig.mcpServers ?? {};
+
+      if (!currentMcpServers[name]) {
+        setRemoveCustomMcpError(
+          "This MCP no longer exists in config. Refresh and try again.",
+        );
+        return;
+      }
+
+      const nextMcpServers: Record<string, MCPServerConfig> = {
+        ...currentMcpServers,
+      };
+      delete nextMcpServers[name];
+
+      await window.flowstate.config.set({
+        mcpServers: nextMcpServers,
+      });
+
+      const reloadResult = await window.flowstate.mcp.reload();
+      if (!reloadResult.success) {
+        throw new Error(reloadResult.error ?? "Failed to reload MCP servers");
+      }
+
+      await loadCustomMcps();
+      if (configureCustomMcpTarget?.name === name) {
+        setConfigureCustomMcpTarget(null);
+      }
+    } catch (error) {
+      setRemoveCustomMcpError(
+        error instanceof Error ? error.message : "Failed to remove custom MCP",
+      );
+    } finally {
+      setRemovingCustomMcpName(null);
+    }
+  };
+
   // Separate integrations
   const officialIntegrations = integrations.filter((i) => i.isOfficial);
 
@@ -1791,6 +2131,11 @@ function IntegrationsMode({
                       : "OAuth"}
                   </p>
                 )}
+                {integration.id === "outlook" && outlookBrowserMode && (
+                  <p className="text-xs text-muted-foreground">
+                    Browser mode: {outlookWriteEnabled ? "Read + Write" : "Read-only"}
+                  </p>
+                )}
                 {integration.lastCheckedAt && (
                   <p className="text-xs text-muted-foreground">
                     Last check: {formatLastSync(integration.lastCheckedAt)}
@@ -1847,6 +2192,36 @@ function IntegrationsMode({
                 >
                   <Settings className="w-3 h-3" />
                   Calendars
+                </button>
+              )}
+
+              {integration.id === "outlook" && outlookBrowserMode && (
+                <button
+                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => {
+                    void handleOutlookPreview();
+                  }}
+                  disabled={isLoading || isCheckingHealth}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Inbox Preview
+                </button>
+              )}
+
+              {integration.id === "outlook" && outlookBrowserMode && (
+                <button
+                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => {
+                    void handleToggleOutlookWriteMode();
+                  }}
+                  disabled={isLoading || isCheckingHealth || outlookWriteUpdating}
+                >
+                  <Shield className="w-3 h-3" />
+                  {outlookWriteUpdating
+                    ? "Updating..."
+                    : outlookWriteEnabled
+                      ? "Switch to Read-only"
+                      : "Enable Draft/Send"}
                 </button>
               )}
 
@@ -2000,50 +2375,69 @@ function IntegrationsMode({
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {customMcps.map(({ name, config }) => (
-                  <div key={name} className="fs-card">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-medium text-foreground truncate">
-                        {name}
-                      </h3>
-                      <span
-                        className={
-                          config.enabled
-                            ? "fs-badge-success"
-                            : "fs-badge bg-card text-muted-foreground"
-                        }
-                      >
-                        {config.enabled ? "Enabled" : "Disabled"}
-                      </span>
+              <div className="space-y-3">
+                {removeCustomMcpError && (
+                  <p className="text-sm text-semantic-denied">{removeCustomMcpError}</p>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {customMcps.map(({ name, config }) => (
+                    <div key={name} className="fs-card">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="font-medium text-foreground truncate">
+                          {name}
+                        </h3>
+                        <span
+                          className={
+                            config.enabled
+                              ? "fs-badge-success"
+                              : "fs-badge bg-card text-muted-foreground"
+                          }
+                        >
+                          {config.enabled ? "Enabled" : "Disabled"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">Command</p>
+                      <p className="text-xs font-mono text-foreground break-all mt-1">
+                        {config.command?.join(" ") ?? "-"}
+                      </p>
+                      {config.env && Object.keys(config.env).length > 0 && (
+                        <>
+                          <p className="text-xs text-muted-foreground mt-3">Environment</p>
+                          <p className="text-xs font-mono text-foreground break-all mt-1">
+                            {Object.keys(config.env).join(", ")}
+                          </p>
+                        </>
+                      )}
+                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
+                        <button
+                          type="button"
+                          className="fs-button-ghost text-sm py-1.5 flex items-center gap-1"
+                          onClick={() => {
+                            setConfigureCustomMcpError(null);
+                            setConfigureCustomMcpTarget({ name, config });
+                          }}
+                          disabled={Boolean(removingCustomMcpName)}
+                        >
+                          <Settings className="w-3 h-3" />
+                          Configure
+                        </button>
+                        <button
+                          type="button"
+                          className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 text-semantic-denied hover:text-semantic-denied"
+                          onClick={() => handleRemoveCustomMcp(name)}
+                          disabled={Boolean(removingCustomMcpName)}
+                        >
+                          {removingCustomMcpName === name ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-3 h-3" />
+                          )}
+                          {removingCustomMcpName === name ? "Removing..." : "Remove"}
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2">Command</p>
-                    <p className="text-xs font-mono text-foreground break-all mt-1">
-                      {config.command?.join(" ") ?? "-"}
-                    </p>
-                    {config.env && Object.keys(config.env).length > 0 && (
-                      <>
-                        <p className="text-xs text-muted-foreground mt-3">Environment</p>
-                        <p className="text-xs font-mono text-foreground break-all mt-1">
-                          {Object.keys(config.env).join(", ")}
-                        </p>
-                      </>
-                    )}
-                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-border">
-                      <button
-                        type="button"
-                        className="fs-button-ghost text-sm py-1.5 flex items-center gap-1"
-                        onClick={() => {
-                          setConfigureCustomMcpError(null);
-                          setConfigureCustomMcpTarget({ name, config });
-                        }}
-                      >
-                        <Settings className="w-3 h-3" />
-                        Configure
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </section>
