@@ -191,6 +191,7 @@ export interface AuthToken {
   scopes: string[];
   email?: string;
   authMethod: AuthMethod;
+  additionalData?: Record<string, string>;
 }
 
 export interface AuthStatus {
@@ -380,7 +381,7 @@ export interface FlowstateAPI {
       storageStatePath: string;
       confirmationFilePath?: string;
       timeoutSeconds?: number;
-    }) => Promise<{ success: boolean; error?: string; storageStatePath?: string }>;
+    }) => Promise<{ success: boolean; error?: string; storageStatePath?: string; mailboxUrl?: string }>;
     readInbox: (payload?: {
       maxItems?: number;
     }) => Promise<{

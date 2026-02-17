@@ -315,7 +315,11 @@ ipcMain.handle('outlook:browserLogin', async (_event, payload: {
       timeoutMs: payload.timeoutSeconds ? payload.timeoutSeconds * 1000 : undefined,
     });
 
-    return { success: true, storageStatePath: result.storageStatePath };
+    return {
+      success: true,
+      storageStatePath: result.storageStatePath,
+      mailboxUrl: result.mailboxUrl,
+    };
   } catch (error) {
     console.error('Outlook browser login failed:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };

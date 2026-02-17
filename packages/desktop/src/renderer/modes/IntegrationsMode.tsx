@@ -341,6 +341,7 @@ function OutlookBrowserSessionForm({
   isLoading: boolean;
 }) {
   const [storageStatePath, setStorageStatePath] = useState("");
+  const [enableWriteActions, setEnableWriteActions] = useState(false);
   const [browserLoginRunning, setBrowserLoginRunning] = useState(false);
   const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
   const [browserLoginConfirmPath, setBrowserLoginConfirmPath] = useState<string | null>(null);
@@ -401,10 +402,13 @@ function OutlookBrowserSessionForm({
       return;
     }
 
+    const resolvedMailboxUrl = result.mailboxUrl?.trim() || "https://outlook.office.com/mail/";
+
     onSubmit("browser_session", {
       outlookAuthMode: "browser",
       outlookStorageStatePath: trimmedPath,
-      outlookMailboxUrl: "https://outlook.office.com/mail/",
+      outlookMailboxUrl: resolvedMailboxUrl,
+      outlookWriteEnabled: enableWriteActions ? "true" : "false",
     });
   };
 
@@ -421,8 +425,8 @@ function OutlookBrowserSessionForm({
           <li>Return here and confirm once your inbox is fully loaded</li>
         </ol>
         <p className="text-xs text-muted-foreground mt-2">
-          This mode is read-only by default and follows your organization policy. It does not bypass
-          Microsoft authorization controls.
+          This mode is read-only by default and follows your organization policy.
+          You can optionally enable draft/send tools below.
         </p>
       </div>
 
@@ -448,6 +452,19 @@ function OutlookBrowserSessionForm({
           </button>
         </div>
       </div>
+
+      <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={enableWriteActions}
+          onChange={(e) => setEnableWriteActions(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          Enable write actions (draft/send) for Outlook browser MCP.
+          Keep this off for read-only mode.
+        </span>
+      </label>
 
       {browserLoginAwaitingConfirm && browserLoginConfirmPath && (
         <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground space-y-2">
@@ -1597,6 +1614,9 @@ function IntegrationsMode({
   const [removingCustomMcpName, setRemovingCustomMcpName] = useState<string | null>(
     null,
   );
+  const [outlookBrowserMode, setOutlookBrowserMode] = useState(false);
+  const [outlookWriteEnabled, setOutlookWriteEnabled] = useState(false);
+  const [outlookWriteUpdating, setOutlookWriteUpdating] = useState(false);
 
   const loadCustomMcps = async () => {
     if (onboardingMode) return;
@@ -1613,6 +1633,19 @@ function IntegrationsMode({
       setCustomMcps(entries);
     } finally {
       setCustomMcpLoading(false);
+    }
+  };
+
+  const loadOutlookBrowserSettings = async () => {
+    try {
+      const token = await window.flowstate.auth.getToken("outlook");
+      const additionalData = token?.additionalData;
+      const isBrowserMode = additionalData?.outlookAuthMode === "browser";
+      setOutlookBrowserMode(isBrowserMode);
+      setOutlookWriteEnabled(isBrowserMode && additionalData?.outlookWriteEnabled === "true");
+    } catch {
+      setOutlookBrowserMode(false);
+      setOutlookWriteEnabled(false);
     }
   };
 
@@ -1645,6 +1678,13 @@ function IntegrationsMode({
       setCustomMcpLoading(false);
     });
   }, [onboardingMode]);
+
+  useEffect(() => {
+    loadOutlookBrowserSettings().catch(() => {
+      setOutlookBrowserMode(false);
+      setOutlookWriteEnabled(false);
+    });
+  }, [integrations]);
 
   // Handlers
   const handleConnect = (integration: Integration) => {
@@ -1688,11 +1728,60 @@ function IntegrationsMode({
       return;
     }
 
+    if (result.messages.length === 0) {
+      window.alert(result.message ?? "Connected to Outlook, but no inbox messages were returned.");
+      return;
+    }
+
     const preview = result.messages
       .map((item, index) => `${index + 1}. ${item.subject}${item.sender ? ` (from ${item.sender})` : ""}`)
       .join("\n");
 
     window.alert(preview.length > 0 ? preview : "No messages found.");
+  };
+
+  const handleToggleOutlookWriteMode = async () => {
+    setOutlookWriteUpdating(true);
+    try {
+      const token = await window.flowstate.auth.getToken("outlook");
+      if (!token || token.authMethod !== "api_token") {
+        throw new Error("Outlook browser session token not found.");
+      }
+
+      const additionalData = token.additionalData ?? {};
+      if (additionalData.outlookAuthMode !== "browser") {
+        throw new Error("Outlook is not connected in browser-session mode.");
+      }
+
+      const nextWriteEnabled = additionalData.outlookWriteEnabled !== "true";
+      const nextAdditionalData: Record<string, string> = {
+        ...additionalData,
+        outlookWriteEnabled: nextWriteEnabled ? "true" : "false",
+      };
+
+      await window.flowstate.auth.storeApiToken(
+        "outlook",
+        token.accessToken || "browser_session",
+        nextAdditionalData,
+      );
+
+      const reloadResult = await window.flowstate.mcp.reload();
+      if (!reloadResult.success) {
+        throw new Error(reloadResult.error ?? "Failed to reload Outlook MCP configuration.");
+      }
+
+      setOutlookWriteEnabled(nextWriteEnabled);
+      await refresh();
+      await loadOutlookBrowserSettings();
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "Failed to update Outlook write mode.",
+      );
+    } finally {
+      setOutlookWriteUpdating(false);
+    }
   };
 
   const handleAddCustomMcp = async ({
@@ -2042,6 +2131,11 @@ function IntegrationsMode({
                       : "OAuth"}
                   </p>
                 )}
+                {integration.id === "outlook" && outlookBrowserMode && (
+                  <p className="text-xs text-muted-foreground">
+                    Browser mode: {outlookWriteEnabled ? "Read + Write" : "Read-only"}
+                  </p>
+                )}
                 {integration.lastCheckedAt && (
                   <p className="text-xs text-muted-foreground">
                     Last check: {formatLastSync(integration.lastCheckedAt)}
@@ -2101,7 +2195,7 @@ function IntegrationsMode({
                 </button>
               )}
 
-              {integration.id === "outlook" && (
+              {integration.id === "outlook" && outlookBrowserMode && (
                 <button
                   className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
                   onClick={() => {
@@ -2111,6 +2205,23 @@ function IntegrationsMode({
                 >
                   <ExternalLink className="w-3 h-3" />
                   Inbox Preview
+                </button>
+              )}
+
+              {integration.id === "outlook" && outlookBrowserMode && (
+                <button
+                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
+                  onClick={() => {
+                    void handleToggleOutlookWriteMode();
+                  }}
+                  disabled={isLoading || isCheckingHealth || outlookWriteUpdating}
+                >
+                  <Shield className="w-3 h-3" />
+                  {outlookWriteUpdating
+                    ? "Updating..."
+                    : outlookWriteEnabled
+                      ? "Switch to Read-only"
+                      : "Enable Draft/Send"}
                 </button>
               )}
 

@@ -128,7 +128,7 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
       {
         method: 'api_token',
         label: 'Browser Session (Manual Login)',
-        description: 'Manual sign-in with Playwright session storage (read-only inbox mode)',
+        description: 'Manual sign-in with Playwright session storage (read-only by default, optional draft/send)',
       },
     ],
   },

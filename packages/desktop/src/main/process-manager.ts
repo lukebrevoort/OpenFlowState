@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import { fileURLToPath } from 'url';
 import { createOpencode, McpLocalConfig, McpRemoteConfig } from '@opencode-ai/sdk';
 import { userProfile, type UserProfile } from '@flowstate/core';
 import { authManager } from './auth-manager.js';
@@ -33,6 +34,8 @@ import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle 
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
+
+const PROCESS_MANAGER_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 type OpenCodeErrorPayload = {
   error: string;
@@ -1590,7 +1593,7 @@ class ProcessManager {
       console.log('[ProcessManager] Notion MCP configured with token');
     }
 
-    // Outlook MCP (OAuth mode only)
+    // Outlook MCP (OAuth + browser-session mode)
     const outlookToken = await authManager.getToken('outlook');
     if (outlookToken) {
       const outlookAuthMode = outlookToken.additionalData?.outlookAuthMode;
@@ -1609,7 +1612,33 @@ class ProcessManager {
         } satisfies McpLocalConfig;
         console.log('[ProcessManager] Outlook MCP configured with OAuth token');
       } else if (useBrowserAuth) {
-        console.log('[ProcessManager] Outlook connected via browser session; OAuth MCP server skipped');
+        const outlookStorageStatePath = outlookToken.additionalData?.outlookStorageStatePath?.trim();
+        const outlookMailboxUrl = outlookToken.additionalData?.outlookMailboxUrl?.trim();
+        const outlookWriteEnabled = outlookToken.additionalData?.outlookWriteEnabled === 'true';
+        const outlookBrowserMcpPath = path.join(PROCESS_MANAGER_DIR, 'outlook-browser-mcp.js');
+
+        if (!outlookStorageStatePath) {
+          console.warn('[ProcessManager] Outlook browser mode missing storage state path; MCP not configured');
+        } else if (!fs.existsSync(outlookBrowserMcpPath)) {
+          console.warn('[ProcessManager] Outlook browser MCP executable missing; run desktop main build');
+        } else {
+          mcpConfig['flowstate-outlook'] = {
+            type: 'local',
+            command: ['node', outlookBrowserMcpPath],
+            environment: {
+              FLOWSTATE_DATA_DIR: flowstateDataDir,
+              OUTLOOK_AUTH_MODE: 'browser',
+              OUTLOOK_STORAGE_STATE_PATH: outlookStorageStatePath,
+              OUTLOOK_BROWSER_WRITE_ENABLED: outlookWriteEnabled ? 'true' : 'false',
+              ...(outlookMailboxUrl ? { OUTLOOK_MAILBOX_URL: outlookMailboxUrl } : {}),
+            },
+            enabled: true,
+            timeout: 10000,
+          } satisfies McpLocalConfig;
+          console.log(
+            `[ProcessManager] Outlook MCP configured with browser session (${outlookWriteEnabled ? 'write-enabled' : 'read-only'})`
+          );
+        }
       }
     }
 
