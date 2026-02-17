@@ -34,12 +34,12 @@ const GOOGLE_SCOPES = {
 // Notion OAuth scopes
 const NOTION_SCOPES = ['read_content', 'update_content', 'insert_content'];
 
-// Outlook OAuth scopes (Microsoft Graph)
 const OUTLOOK_SCOPES = [
   'offline_access',
   'openid',
   'profile',
   'email',
+  'User.Read',
   'Mail.Read',
   'Mail.ReadWrite',
   'Mail.Send',
@@ -189,10 +189,7 @@ class OAuthServer {
       params.delete('access_type');
       params.delete('prompt');
       params.set('owner', 'user');
-    }
-
-    // Outlook (Microsoft) does not use Google-specific parameters
-    if (config.service === 'outlook') {
+    } else if (config.service === 'outlook') {
       params.delete('access_type');
     }
 
@@ -425,7 +422,7 @@ class OAuthServer {
     if (config.service === 'gmail' || config.service === 'gcal') {
       email = await this.getGoogleUserEmail(data.access_token);
     } else if (config.service === 'outlook') {
-      email = await this.getMicrosoftUserEmail(data.access_token);
+      email = await this.getOutlookUserEmail(data.access_token);
     }
 
     return {
@@ -462,28 +459,26 @@ class OAuthServer {
     return undefined;
   }
 
-  private async getMicrosoftUserEmail(accessToken: string): Promise<string | undefined> {
+  private async getOutlookUserEmail(accessToken: string): Promise<string | undefined> {
     try {
       const response = await fetch('https://graph.microsoft.com/v1.0/me', {
         headers: {
           Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
         },
       });
 
       if (response.ok) {
         const data = await response.json();
-        if (typeof data.mail === 'string' && data.mail.length > 0) {
+        if (typeof data?.mail === 'string' && data.mail.length > 0) {
           return data.mail;
         }
-        if (
-          typeof data.userPrincipalName === 'string' &&
-          data.userPrincipalName.length > 0
-        ) {
+        if (typeof data?.userPrincipalName === 'string' && data.userPrincipalName.length > 0) {
           return data.userPrincipalName;
         }
       }
     } catch (error) {
-      console.error('[OAuth] Failed to get Microsoft user email:', error);
+      console.error('[OAuth] Failed to get Outlook user email:', error);
     }
     return undefined;
   }
@@ -536,10 +531,15 @@ class OAuthServer {
       const newToken: AuthToken = {
         ...token,
         accessToken: data.access_token,
+        refreshToken: data.refresh_token ?? token.refreshToken,
         expiresAt: data.expires_in
           ? new Date(Date.now() + data.expires_in * 1000).toISOString()
           : undefined,
       };
+
+      if (service === 'outlook') {
+        newToken.email = await this.getOutlookUserEmail(data.access_token);
+      }
 
       await authManager.storeToken(newToken);
       console.log(`[OAuth] Refreshed token for ${service}`);

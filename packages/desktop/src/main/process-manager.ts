@@ -1590,27 +1590,27 @@ class ProcessManager {
       console.log('[ProcessManager] Notion MCP configured with token');
     }
 
-    // Outlook MCP (Microsoft 365 public package via npx)
+    // Outlook MCP (OAuth mode only)
     const outlookToken = await authManager.getToken('outlook');
     if (outlookToken) {
-      mcpConfig['flowstate-outlook'] = {
-        type: 'local',
-        command: [
-          'npx',
-          '-y',
-          '@softeria/ms-365-mcp-server',
-          '--org-mode',
-          '--preset',
-          'mail',
-        ],
-        environment: {
-          FLOWSTATE_DATA_DIR: flowstateDataDir,
-          MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
-        },
-        enabled: true,
-        timeout: 10000,
-      } satisfies McpLocalConfig;
-      console.log('[ProcessManager] Outlook MCP configured with token');
+      const outlookAuthMode = outlookToken.additionalData?.outlookAuthMode;
+      const useBrowserAuth = outlookAuthMode === 'browser';
+
+      if (!useBrowserAuth && outlookToken.accessToken) {
+        mcpConfig['flowstate-outlook'] = {
+          type: 'local',
+          command: ['npx', '-y', '@softeria/ms-365-mcp-server', '--org-mode', '--preset', 'mail'],
+          environment: {
+            FLOWSTATE_DATA_DIR: flowstateDataDir,
+            MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
+          },
+          enabled: true,
+          timeout: 10000,
+        } satisfies McpLocalConfig;
+        console.log('[ProcessManager] Outlook MCP configured with OAuth token');
+      } else if (useBrowserAuth) {
+        console.log('[ProcessManager] Outlook connected via browser session; OAuth MCP server skipped');
+      }
     }
 
     // System MCP (no auth needed)

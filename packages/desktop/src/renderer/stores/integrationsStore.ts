@@ -115,7 +115,7 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
   {
     id: 'outlook',
     name: 'Outlook',
-    description: 'Microsoft 365 mail and calendar workflows',
+    description: 'Microsoft 365 inbox and calendar (OAuth or browser session)',
     icon: '📨',
     status: 'disconnected',
     isOfficial: true,
@@ -123,7 +123,12 @@ const DEFAULT_INTEGRATIONS: Integration[] = [
       {
         method: 'oauth',
         label: 'Microsoft OAuth (Recommended)',
-        description: 'Official Microsoft 365 connection via Entra app credentials',
+        description: 'Official Entra app flow for mail and calendar access',
+      },
+      {
+        method: 'api_token',
+        label: 'Browser Session (Manual Login)',
+        description: 'Manual sign-in with Playwright session storage (read-only inbox mode)',
       },
     ],
   },

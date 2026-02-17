@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 16, 2026 (Phase 6.75 Outlook Kickoff)
+> **Last Updated**: February 17, 2026 (Phase 6.75 Outlook Browser Session)
 
 ---
 
@@ -33,13 +33,13 @@
 
 ---
 
-## Tasks Completed (Feb 16, 2026 - Phase 6.75 Outlook Kickoff)
+## Tasks Completed (Feb 17, 2026 - Phase 6.75 Outlook Browser Session)
 
-- ✅ Added Outlook OAuth backend support in desktop `oauth-server` (Microsoft identity v2 endpoints, Outlook scopes, token exchange/refresh, Graph `/me` email resolution).
-- ✅ Added Outlook into auth/status and health check flows (`AuthManager.getAllStatuses`, `integrations-health.ts` with Graph validation + refresh behavior).
-- ✅ Wired official Outlook MCP server in ProcessManager (`flowstate-outlook` via `@softeria/ms-365-mcp-server --org-mode --preset mail` with `MS365_MCP_OAUTH_TOKEN`).
-- ✅ Added Outlook as an official integration in renderer + onboarding surfaces (Integrations card, setup instructions, app-picker metadata).
-- ✅ Removed non-functional browser-session fallback UI for Outlook in this kickoff slice to keep behavior coherent and policy-safe until a full fallback implementation ships.
+- ✅ Added Playwright-based Outlook browser session flow in desktop main (`outlook-browser-session.ts`) for manual sign-in and local storage-state persistence.
+- ✅ Added IPC + preload API for Outlook browser login and inbox reads (`outlook:browserLogin`, `outlook:readInbox`).
+- ✅ Added Outlook Browser Session mode to Integrations UI with manual-login guardrails and confirmation step.
+- ✅ Updated Outlook health checks to support both OAuth and browser-session auth modes.
+- ✅ Updated ProcessManager to configure `flowstate-outlook` only for OAuth mode and skip MCP wiring for browser-session mode.
 - ✅ Verified desktop checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop build:main`, `pnpm --filter @flowstate/desktop build:renderer`).
 
 ---
@@ -51,6 +51,16 @@
 - ✅ Completed Custom MCP configure UX in Integrations mode (edit name/command/env/enabled + MCP reload handling).
 - ✅ Updated `PLAN.md` to mark remaining Phase 3 checklist items as complete.
 - ✅ Verified desktop package checks pass (`pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Custom MCP Removal in Integrations)
+
+- ✅ Added a `Remove` action for each custom MCP card in Integrations mode.
+- ✅ Wired custom MCP removal to `flowstate.config.json` updates via `window.flowstate.config.set`.
+- ✅ Reloaded MCP services after removal via `window.flowstate.mcp.reload()` and refreshed the custom MCP list in UI.
+- ✅ Added inline removal error handling and per-item loading state (`Removing...`) in the Custom MCP section.
+- ✅ Fixed desktop main-process TypeScript build blocker in Outlook browser session parsing (`TS2677` type predicate mismatch).
 
 ---
 

@@ -244,7 +244,7 @@ export interface IntegrationHealthCheckResult {
   email?: string;
 }
 
-export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion';
+export type OAuthIntegrationService = 'gmail' | 'gcal' | 'notion' | 'outlook';
 
 export type OAuthBatchHealthCheckResult = Record<OAuthIntegrationService, IntegrationHealthCheckResult>;
 
@@ -372,6 +372,27 @@ export interface FlowstateAPI {
       confirmationFilePath?: string;
       timeoutSeconds?: number;
     }) => Promise<{ success: boolean; error?: string; storageStatePath?: string }>;
+  };
+
+  outlook: {
+    browserLogin: (payload: {
+      mailboxUrl?: string;
+      storageStatePath: string;
+      confirmationFilePath?: string;
+      timeoutSeconds?: number;
+    }) => Promise<{ success: boolean; error?: string; storageStatePath?: string }>;
+    readInbox: (payload?: {
+      maxItems?: number;
+    }) => Promise<{
+      ok: boolean;
+      message?: string;
+      messages: Array<{
+        subject: string;
+        sender?: string;
+        preview?: string;
+        receivedAt?: string;
+      }>;
+    }>;
   };
 
   // ============================================================================

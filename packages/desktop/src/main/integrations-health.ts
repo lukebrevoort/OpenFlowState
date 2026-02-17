@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import { createRequire } from 'node:module';
 import { authManager } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
+import { checkOutlookBrowserSession } from './outlook-browser-session.js';
 
 export type IntegrationHealthCheckResult = {
   ok: boolean;
@@ -182,10 +183,10 @@ async function checkNotion(): Promise<IntegrationHealthCheckResult> {
   }
 }
 
-async function checkOutlook(): Promise<IntegrationHealthCheckResult> {
+async function checkOutlookOAuth(): Promise<IntegrationHealthCheckResult> {
   const token = await authManager.getToken('outlook');
   if (!token?.accessToken) {
-    return fail('No Outlook token found. Connect this integration first.');
+    return fail('No Outlook OAuth token found. Connect this integration first.');
   }
 
   let accessToken = token.accessToken;
@@ -217,11 +218,43 @@ async function checkOutlook(): Promise<IntegrationHealthCheckResult> {
     }
 
     const payload = await safeJson(response);
-    const email = extractOutlookEmail(payload) ?? storedEmail;
-    return done({ ok: true, message: 'Outlook is connected.', email });
+    return done({
+      ok: true,
+      message: 'Outlook is connected.',
+      email: extractOutlookEmail(payload) ?? storedEmail,
+    });
   } catch (error) {
     return fail(`Outlook health check failed: ${extractErrorMessage(error)}`);
   }
+}
+
+async function checkOutlookBrowser(): Promise<IntegrationHealthCheckResult> {
+  const token = await authManager.getToken('outlook');
+  const storageStatePath = token?.additionalData?.outlookStorageStatePath;
+  const mailboxUrl = token?.additionalData?.outlookMailboxUrl;
+
+  if (!token) {
+    return fail('No Outlook credentials found. Connect this integration first.');
+  }
+
+  if (!storageStatePath || storageStatePath.trim().length === 0) {
+    return fail('Outlook browser session file path is missing. Reconnect Outlook browser session.');
+  }
+
+  const result = await checkOutlookBrowserSession({
+    storageStatePath,
+    mailboxUrl,
+  });
+
+  if (!result.ok) {
+    return fail(result.message ?? 'Outlook browser session check failed. Reconnect Outlook.');
+  }
+
+  return done({
+    ok: true,
+    message: result.message ?? 'Outlook browser session is connected.',
+    email: result.email ?? token.email,
+  });
 }
 
 async function checkCanvasToken(): Promise<IntegrationHealthCheckResult> {
@@ -339,8 +372,13 @@ export async function runIntegrationHealthCheck(service: string): Promise<Integr
         return await checkGoogle(service);
       case 'notion':
         return await checkNotion();
-      case 'outlook':
-        return await checkOutlook();
+      case 'outlook': {
+        const token = await authManager.getToken('outlook');
+        if (token?.additionalData?.outlookAuthMode === 'browser') {
+          return await checkOutlookBrowser();
+        }
+        return await checkOutlookOAuth();
+      }
       case 'canvas': {
         const token = await authManager.getToken('canvas');
         const mode = token?.additionalData?.canvasAuthMode;
