@@ -1681,20 +1681,6 @@ function IntegrationsMode({
     await healthCheck(service);
   };
 
-  const handleOutlookPreview = async () => {
-    const result = await window.flowstate.outlook.readInbox({ maxItems: 8 });
-    if (!result.ok) {
-      window.alert(result.message ?? "Unable to read Outlook inbox right now.");
-      return;
-    }
-
-    const preview = result.messages
-      .map((item, index) => `${index + 1}. ${item.subject}${item.sender ? ` (from ${item.sender})` : ""}`)
-      .join("\n");
-
-    window.alert(preview.length > 0 ? preview : "No messages found.");
-  };
-
   const handleAddCustomMcp = async ({
     name,
     commandInput,
@@ -2098,19 +2084,6 @@ function IntegrationsMode({
                 >
                   <Settings className="w-3 h-3" />
                   Calendars
-                </button>
-              )}
-
-              {integration.id === "outlook" && (
-                <button
-                  className="fs-button-ghost text-sm py-1.5 flex items-center gap-1 w-full sm:w-auto"
-                  onClick={() => {
-                    void handleOutlookPreview();
-                  }}
-                  disabled={isLoading || isCheckingHealth}
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  Inbox Preview
                 </button>
               )}
 
