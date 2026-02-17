@@ -10,10 +10,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { runCanvasBrowserLogin } from './canvas-browser-login.js';
-import {
-  readOutlookInboxWithBrowserSession,
-  runOutlookBrowserLogin,
-} from './outlook-browser-session.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { configStore } from './config-store.js';
@@ -298,57 +294,6 @@ ipcMain.handle('canvas:browserLogin', async (_event, payload: {
   } catch (error) {
     console.error('Canvas browser login failed:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-});
-
-ipcMain.handle('outlook:browserLogin', async (_event, payload: {
-  mailboxUrl?: string;
-  storageStatePath: string;
-  confirmationFilePath?: string;
-  timeoutSeconds?: number;
-}) => {
-  try {
-    const result = await runOutlookBrowserLogin({
-      mailboxUrl: payload.mailboxUrl,
-      storageStatePath: payload.storageStatePath,
-      confirmationFilePath: payload.confirmationFilePath,
-      timeoutMs: payload.timeoutSeconds ? payload.timeoutSeconds * 1000 : undefined,
-    });
-
-    return { success: true, storageStatePath: result.storageStatePath };
-  } catch (error) {
-    console.error('Outlook browser login failed:', error);
-    return { success: false, error: error instanceof Error ? error.message : String(error) };
-  }
-});
-
-ipcMain.handle('outlook:readInbox', async (_event, payload: {
-  maxItems?: number;
-}) => {
-  try {
-    const token = await authManager.getToken('outlook');
-    const storageStatePath = token?.additionalData?.outlookStorageStatePath;
-    const mailboxUrl = token?.additionalData?.outlookMailboxUrl;
-
-    if (!storageStatePath) {
-      return {
-        ok: false,
-        message: 'Outlook browser session is not configured. Connect Outlook using Browser Session mode.',
-        messages: [],
-      };
-    }
-
-    return await readOutlookInboxWithBrowserSession({
-      storageStatePath,
-      mailboxUrl,
-      maxItems: payload?.maxItems,
-    });
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : String(error),
-      messages: [],
-    };
   }
 });
 

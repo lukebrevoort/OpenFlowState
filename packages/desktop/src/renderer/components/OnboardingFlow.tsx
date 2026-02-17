@@ -57,7 +57,6 @@ const appHighlights: Record<string, string> = {
   notion: "Projects, tasks, and docs",
   gmail: "Email triage + drafts",
   gcal: "Scheduling and conflicts",
-  outlook: "School inbox and Microsoft 365 calendar",
   canvas: "Assignments and course deadlines",
 };
 
@@ -65,7 +64,6 @@ const appColors: Record<string, string> = {
   notion: "#C87137",
   gmail: "#3E2F27",
   gcal: "#A5B574",
-  outlook: "#2B579A",
   canvas: "#C45B4A",
 };
 

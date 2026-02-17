@@ -213,16 +213,6 @@ const flowstateAPI: FlowstateAPIDefinition = {
     }) => ipcRenderer.invoke('canvas:browserLogin', payload),
   },
 
-  outlook: {
-    browserLogin: (payload: {
-      mailboxUrl?: string;
-      storageStatePath: string;
-      confirmationFilePath?: string;
-      timeoutSeconds?: number;
-    }) => ipcRenderer.invoke('outlook:browserLogin', payload),
-    readInbox: (payload?: { maxItems?: number }) => ipcRenderer.invoke('outlook:readInbox', payload),
-  },
-
   // ============================================================================
   // Phase 3.5 - Typed feature surfaces
   // ============================================================================
