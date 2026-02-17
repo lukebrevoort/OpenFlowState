@@ -17,6 +17,7 @@ import { useIntegrationsStore } from './stores/integrationsStore';
 import { useOnboardingStore } from './stores/onboardingStore';
 import { useProviderStore } from './stores/providerStore';
 import { useTasksStore } from './stores/tasksStore';
+import { useWorkflowsStore } from './stores/workflowsStore';
 import { providerDefinitions } from './data/providerData';
 import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
@@ -81,6 +82,10 @@ function App() {
   const loadMessages = useChatStore((state) => state.loadMessages);
   const chatStatus = useChatStore((state) => state.status);
   const timeline = useChatStore((state) => state.timeline);
+  const reloadTaskRuns = useTasksStore((state) => state.reloadRuns);
+  const loadActiveTaskRun = useTasksStore((state) => state.loadActiveRun);
+  const reloadWorkflows = useWorkflowsStore((state) => state.reload);
+  const loadWorkflowPins = useWorkflowsStore((state) => state.loadPins);
 
   const config = useConfigStore((state) => state.config);
   const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -521,6 +526,65 @@ function App() {
       setCurrentPage('tasks');
     });
   }, [handleSelectConversation, isOnboarding]);
+
+  useEffect(() => {
+    if (isOnboarding) return;
+
+    const TIMELINE_REFRESH_DEBOUNCE_MS = 250;
+    let timelineDebounceTimer: number | null = null;
+    let refreshInFlight = false;
+    let refreshQueued = false;
+
+    const runSidebarRefresh = async () => {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+
+      refreshInFlight = true;
+      try {
+        await Promise.all([
+          loadActiveTaskRun({ silent: true }),
+          reloadTaskRuns({ silent: true }),
+          reloadWorkflows({ silent: true }),
+          loadWorkflowPins({ silent: true }),
+        ]);
+      } finally {
+        refreshInFlight = false;
+        if (refreshQueued) {
+          refreshQueued = false;
+          void runSidebarRefresh();
+        }
+      }
+    };
+
+    const queueTimelineRefresh = () => {
+      if (timelineDebounceTimer !== null) {
+        window.clearTimeout(timelineDebounceTimer);
+      }
+      timelineDebounceTimer = window.setTimeout(() => {
+        timelineDebounceTimer = null;
+        void runSidebarRefresh();
+      }, TIMELINE_REFRESH_DEBOUNCE_MS);
+    };
+
+    void runSidebarRefresh();
+
+    const interval = window.setInterval(() => {
+      void runSidebarRefresh();
+    }, 10_000);
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent(() => {
+      queueTimelineRefresh();
+    });
+
+    return () => {
+      window.clearInterval(interval);
+      if (timelineDebounceTimer !== null) {
+        window.clearTimeout(timelineDebounceTimer);
+      }
+      removeTimelineListener();
+    };
+  }, [isOnboarding, loadActiveTaskRun, loadWorkflowPins, reloadTaskRuns, reloadWorkflows]);
 
   return (
     <div className="size-full relative overflow-hidden">

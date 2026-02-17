@@ -48,6 +48,79 @@ const execFileAsync = promisify(execFile);
 const SAFE_PROVIDER_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TERMINAL_COMMAND_PREFIX = 'opencode auth login';
 const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+
+const approvedEnsureFilePaths = new Set<string>();
+const approvedEnsureFileDirectories = new Set<string>();
+
+const normalizeAbsolutePath = (value: string, fieldName: string): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) {
+    throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+  if (!path.isAbsolute(trimmed)) {
+    throw new Error(`${fieldName} must be an absolute path.`);
+  }
+  return path.normalize(path.resolve(trimmed));
+};
+
+const isPathWithin = (candidatePath: string, rootPath: string): boolean => {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const getAppOwnedRoots = (): string[] => {
+  return Array.from(new Set([app.getPath('userData'), configStore.getDataDir()].map((p) => path.normalize(path.resolve(p)))));
+};
+
+const markEnsureFilePathApproved = (filePath: string): void => {
+  approvedEnsureFilePaths.add(filePath);
+  approvedEnsureFileDirectories.add(path.dirname(filePath));
+};
+
+const markEnsureFileDirectoryApproved = (dirPath: string): void => {
+  approvedEnsureFileDirectories.add(dirPath);
+};
+
+const isEnsureFilePathAllowed = (filePath: string): boolean => {
+  if (approvedEnsureFilePaths.has(filePath)) {
+    return true;
+  }
+
+  for (const approvedDir of approvedEnsureFileDirectories) {
+    if (isPathWithin(filePath, approvedDir)) {
+      return true;
+    }
+  }
+
+  for (const root of getAppOwnedRoots()) {
+    if (isPathWithin(filePath, root)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const parseAllowedExternalUrl = (rawUrl: string): URL => {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) {
+    throw new Error('URL must be a non-empty string.');
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(trimmed);
+  } catch {
+    throw new Error('URL must be a valid absolute URL.');
+  }
+
+  if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsedUrl.protocol)) {
+    throw new Error(`Blocked URL protocol "${parsedUrl.protocol}". Allowed protocols: ${Array.from(ALLOWED_EXTERNAL_PROTOCOLS).join(', ')}.`);
+  }
+
+  return parsedUrl;
+};
 
 const parseSupportedTerminalCommand = (command: string): string => {
   const trimmed = typeof command === 'string' ? command.trim() : '';
@@ -128,7 +201,12 @@ function createWindow(): void {
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsedUrl = parseAllowedExternalUrl(url);
+      void shell.openExternal(parsedUrl.toString());
+    } catch (error) {
+      console.warn('[Security] Blocked unsafe external window URL:', error instanceof Error ? error.message : String(error));
+    }
     return { action: 'deny' };
   });
 
@@ -241,7 +319,8 @@ ipcMain.handle('app:getTheme', () => {
  * Open external URL in default browser
  */
 ipcMain.handle('app:openExternal', async (_event, url: string) => {
-  await shell.openExternal(url);
+  const parsedUrl = parseAllowedExternalUrl(url);
+  await shell.openExternal(parsedUrl.toString());
 });
 
 ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; defaultPath?: string }) => {
@@ -254,7 +333,15 @@ ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; 
   });
 
   if (result.canceled) return null;
-  return result.filePath ?? null;
+  const filePath = result.filePath ?? null;
+  if (filePath) {
+    try {
+      markEnsureFilePathApproved(normalizeAbsolutePath(filePath, 'filePath'));
+    } catch (error) {
+      console.warn('[Security] Failed to register save dialog approval:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return filePath;
 });
 
 ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }) => {
@@ -265,14 +352,31 @@ ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }
   });
 
   if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
+  const selectedPath = result.filePaths[0] ?? null;
+  if (selectedPath) {
+    try {
+      markEnsureFileDirectoryApproved(normalizeAbsolutePath(selectedPath, 'path'));
+    } catch (error) {
+      console.warn('[Security] Failed to register open dialog approval:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return selectedPath;
 });
 
 ipcMain.handle('app:ensureFile', async (_event, filePath: string) => {
   try {
-    const dir = path.dirname(filePath);
+    const normalizedFilePath = normalizeAbsolutePath(filePath, 'filePath');
+    if (!isEnsureFilePathAllowed(normalizedFilePath)) {
+      return {
+        success: false,
+        error:
+          'Refused to create file at an unapproved location. Choose a location using the app save/open dialog or use a path under app data.',
+      };
+    }
+
+    const dir = path.dirname(normalizedFilePath);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, '', { flag: 'a' });
+    await fs.writeFile(normalizedFilePath, '', { flag: 'a' });
     return { success: true };
   } catch (error) {
     console.error('Failed to ensure file exists:', error);
@@ -733,6 +837,16 @@ ipcMain.handle('opencode:sendAsync', async (event, message: string) => {
   }
 });
 
+ipcMain.handle('opencode:cancelGeneration', async (_event, context?: { expectedSessionId?: string | null }) => {
+  try {
+    const result = await processManager.cancelActiveGeneration(context?.expectedSessionId);
+    return { success: true, cancelled: result.cancelled };
+  } catch (error) {
+    console.error('[IPC] Error in opencode:cancelGeneration:', error);
+    return { success: false, cancelled: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 /**
  * Get OpenCode status
  */
@@ -1020,6 +1134,16 @@ ipcMain.handle('chat:sendMessage', async (event, message: string) => {
       content: message,
       errorDetails: opencodeError,
     };
+  }
+});
+
+ipcMain.handle('chat:cancelGeneration', async (_event, context?: { expectedSessionId?: string | null }) => {
+  try {
+    const result = await processManager.cancelActiveGeneration(context?.expectedSessionId);
+    return { success: true, cancelled: result.cancelled };
+  } catch (error) {
+    console.error('[IPC] Error in chat:cancelGeneration:', error);
+    return { success: false, cancelled: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 

@@ -27,8 +27,8 @@ interface WorkflowsState {
   isGenerating: boolean;
   generateError: string | null;
   lastGenerated: WorkflowGenerationResult | null;
-  reload: () => Promise<void>;
-  loadPins: () => Promise<void>;
+  reload: (opts?: { silent?: boolean }) => Promise<void>;
+  loadPins: (opts?: { silent?: boolean }) => Promise<void>;
   setPinned: (workflowId: string, pinned: boolean) => Promise<boolean>;
   ensureRunsLoaded: (workflowId: string, limit: number) => Promise<void>;
   run: (workflowId: string, input?: unknown) => Promise<WorkflowRun | null>;
@@ -71,8 +71,10 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
   isGenerating: false,
   generateError: null,
   lastGenerated: null,
-  reload: async () => {
-    set({ isLoading: true, error: null });
+  reload: async (opts) => {
+    if (!opts?.silent) {
+      set({ isLoading: true, error: null });
+    }
     const result = await workflowsAdapter.list();
     if (result.ok) {
       set({ workflows: result.data, isLoading: false, error: null });
@@ -81,8 +83,10 @@ export const useWorkflowsStore = create<WorkflowsState>((set) => ({
     set({ isLoading: false, error: result.error.message });
   },
 
-  loadPins: async () => {
-    set({ isLoadingPins: true, pinsError: null });
+  loadPins: async (opts) => {
+    if (!opts?.silent) {
+      set({ isLoadingPins: true, pinsError: null });
+    }
     const result = await workflowsAdapter.getPins();
     if (result.ok) {
       set({ pinnedIds: result.data, isLoadingPins: false, pinsError: null });

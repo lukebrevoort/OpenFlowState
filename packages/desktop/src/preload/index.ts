@@ -121,6 +121,9 @@ const flowstateAPI: FlowstateAPIDefinition = {
     // Fire-and-forget send (response streams via events)
     sendAsync: (message: string) => ipcRenderer.invoke('opencode:sendAsync', message),
 
+    cancelGeneration: (context?: { expectedSessionId?: string | null }) =>
+      ipcRenderer.invoke('opencode:cancelGeneration', context),
+
     // Get OpenCode status
     status: () => ipcRenderer.invoke('opencode:status'),
 
@@ -229,6 +232,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
 
   chat: {
     sendMessage: (message: string) => ipcRenderer.invoke('chat:sendMessage', message),
+    cancelGeneration: (context?: { expectedSessionId?: string | null }) =>
+      ipcRenderer.invoke('chat:cancelGeneration', context),
     getStatus: () => ipcRenderer.invoke('chat:getStatus'),
     newConversation: (title?: string) => ipcRenderer.invoke('chat:newConversation', title),
     listConversations: () => ipcRenderer.invoke('chat:listConversations'),

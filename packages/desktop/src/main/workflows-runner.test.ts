@@ -107,6 +107,26 @@ describe('workflowsRunner title editing', () => {
     expect(result.data.definition.title).toBe('Check project database page');
   });
 
+  it('rejects changing immutable workflow id via frontmatter name', async () => {
+    const result = await workflowsRunner.saveSkillMarkdown(
+      'immutable-workflow-id',
+      [
+        '---',
+        'name: renamed-workflow-id',
+        'title: "Renamed"',
+        'description: "Attempted rename"',
+        '---',
+        '',
+        '# Workflow',
+      ].join('\n')
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('INVALID_REQUEST');
+    expect(result.message).toContain('Frontmatter name must remain "immutable-workflow-id"');
+  });
+
   it('uses directory name as immutable workflow id when loading from disk', async () => {
     const workflowDir = path.join(tmpDir, 'workflows', 'folder-based-id');
     await fs.mkdir(workflowDir, { recursive: true });

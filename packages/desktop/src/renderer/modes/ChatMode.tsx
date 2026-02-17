@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { Send, Sparkles, AlertCircle, RefreshCw, Plus } from "lucide-react";
+import { Send, Sparkles, AlertCircle, RefreshCw, Plus, Square } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -10,6 +10,7 @@ import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
 import { useConfigStore } from "../stores/configStore";
 import type { McpServerStatus, TimelineEvent } from "../types/electron";
+import { parseResponseHeader } from "../lib/responseHeaders";
 import { TaskHandoffCard } from "../components/TaskHandoffCard";
 import { ActivityTimeline } from "../components/ActivityTimeline";
 import { ApprovalCard } from "../components/ApprovalCard";
@@ -72,6 +73,8 @@ const getTypingStepSize = (contentLength: number) => {
 };
 
 const MAX_INPUT_HEIGHT = 128;
+const MAX_TYPING_ANIMATION_CHARS = 12000;
+const MAX_MARKDOWN_NORMALIZE_CHARS = 200000;
 
 const assistantMarkdownComponents: Components = {
   p: ({ children }) => (
@@ -137,6 +140,15 @@ const assistantMarkdownClassName =
   "[&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_pre_code]:rounded-none [&_pre_code]:text-sm";
 
 const normalizeAssistantMarkdown = (content: string) => {
+  if (!content) return "";
+  if (content.length > MAX_MARKDOWN_NORMALIZE_CHARS) {
+    return content;
+  }
+
+  if (!content.includes("```") && content.includes("•")) {
+    return content.replace(/^\s*•\s+/gm, "- ");
+  }
+
   const parts = content.split(/(```[\s\S]*?```)/g);
 
   return parts
@@ -150,6 +162,11 @@ const normalizeAssistantMarkdown = (content: string) => {
 };
 
 const AssistantMarkdown = ({ content }: { content: string }) => {
+  const normalizedContent = useMemo(
+    () => normalizeAssistantMarkdown(content),
+    [content],
+  );
+
   return (
     <ReactMarkdown
       className={assistantMarkdownClassName}
@@ -158,44 +175,51 @@ const AssistantMarkdown = ({ content }: { content: string }) => {
       disallowedElements={["img"]}
       components={assistantMarkdownComponents}
     >
-      {normalizeAssistantMarkdown(content)}
+      {normalizedContent}
     </ReactMarkdown>
   );
 };
 
 const AssistantMessageContent = ({
-  message,
+  messageId,
+  content,
+  parts,
   animatedMessagesRef,
 }: {
-  message: Message;
+  messageId: string;
+  content: string;
+  parts?: Message["parts"];
   animatedMessagesRef: MutableRefObject<Set<string>>;
 }) => {
-  const shouldAnimate = !animatedMessagesRef.current.has(message.id);
+  const shouldAnimate =
+    !animatedMessagesRef.current.has(messageId) &&
+    content.length <= MAX_TYPING_ANIMATION_CHARS;
   const [visibleText, setVisibleText] = useState(
-    shouldAnimate ? "" : message.content,
+    shouldAnimate ? "" : content,
   );
   const [isComplete, setIsComplete] = useState(!shouldAnimate);
 
   useEffect(() => {
     if (!shouldAnimate) {
-      setVisibleText(message.content);
+      setVisibleText(content);
       setIsComplete(true);
+      animatedMessagesRef.current.add(messageId);
       return;
     }
 
     let currentIndex = 0;
-    const step = getTypingStepSize(message.content.length);
+    const step = getTypingStepSize(content.length);
     let timeoutId: number | null = null;
 
     const tick = () => {
-      currentIndex = Math.min(message.content.length, currentIndex + step);
-      setVisibleText(message.content.slice(0, currentIndex));
+      currentIndex = Math.min(content.length, currentIndex + step);
+      setVisibleText(content.slice(0, currentIndex));
 
-      if (currentIndex < message.content.length) {
+      if (currentIndex < content.length) {
         timeoutId = window.setTimeout(tick, 22);
       } else {
         setIsComplete(true);
-        animatedMessagesRef.current.add(message.id);
+        animatedMessagesRef.current.add(messageId);
       }
     };
 
@@ -206,7 +230,7 @@ const AssistantMessageContent = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [message.content, message.id, shouldAnimate, animatedMessagesRef]);
+  }, [content, messageId, shouldAnimate, animatedMessagesRef]);
 
   if (!isComplete) {
     return (
@@ -219,8 +243,8 @@ const AssistantMessageContent = ({
 
   return (
     <>
-      <AssistantMarkdown content={message.content} />
-      {renderMessageParts(message.parts)}
+      <AssistantMarkdown content={content} />
+      {renderMessageParts(parts)}
     </>
   );
 };
@@ -256,7 +280,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
-  const { sendMessage, checkStatus, refreshTimeline, createSession } =
+  const { sendMessage, cancelGeneration, checkStatus, refreshTimeline, createSession } =
     useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -294,6 +318,25 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
     return { latest, count: pending.length };
   }, [timeline]);
+
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((message) => {
+        if (message.role !== "assistant") {
+          return {
+            ...message,
+            renderedContent: message.content,
+          };
+        }
+
+        const parsed = parseResponseHeader(message.content);
+        return {
+          ...message,
+          renderedContent: parsed.content || " ",
+        };
+      }),
+    [messages],
+  );
 
   const replyToApproval = async (
     requestId: string,
@@ -470,6 +513,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     } catch (err) {
       console.error("Failed to create new chat session", err);
     }
+  };
+
+  const handleStopGeneration = async () => {
+    await cancelGeneration();
   };
 
   const statusLabel = statusLabels[status] ?? statusLabels.idle;
@@ -707,7 +754,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
           onScroll={updateStickToBottom}
           className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-4 pb-24 scroll-pb-24 scrollbar-hide"
         >
-          {messages.map((message) => (
+          {renderedMessages.map((message) => (
             <div
               key={message.id}
               className={`w-full flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
@@ -734,7 +781,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                     </span>
                   ) : (
                     <AssistantMessageContent
-                      message={message}
+                      messageId={message.id}
+                      content={message.renderedContent}
+                      parts={message.parts}
                       animatedMessagesRef={animatedMessagesRef}
                     />
                   )}
@@ -880,13 +929,24 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 overflow-y-auto disabled:opacity-50"
                 style={{ minHeight: "24px" }}
               />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
-                className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:opacity-50 flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
-              >
-                <Send className="w-5 h-5 text-primary-foreground" />
-              </button>
+              {showThinking ? (
+                <button
+                  type="button"
+                  onClick={handleStopGeneration}
+                  className="flex-shrink-0 w-10 h-10 rounded-xl bg-destructive/90 hover:bg-destructive text-destructive-foreground flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+                  aria-label="Stop generation"
+                >
+                  <Square className="w-4 h-4" fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:opacity-50 flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+                >
+                  <Send className="w-5 h-5 text-primary-foreground" />
+                </button>
+              )}
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">

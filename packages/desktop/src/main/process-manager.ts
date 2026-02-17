@@ -240,6 +240,41 @@ class ProcessManager {
     string,
     { requestId: string; attempt: number; startedAt: number; lastError?: OpenCodeErrorPayload }
   >();
+  private activePromptAbortController: AbortController | null = null;
+  private activePromptSessionId: string | null = null;
+
+  private createAbortError(message: string = 'Request cancelled'): Error {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+  }
+
+  private isAbortLikeError(error: unknown): boolean {
+    if (!error) return false;
+
+    if (error instanceof Error) {
+      const name = error.name.toLowerCase();
+      const message = error.message.toLowerCase();
+      if (name.includes('abort') || name.includes('cancel')) return true;
+      if (message.includes('abort') || message.includes('cancel')) return true;
+      if (message.includes('request superseded')) return true;
+    }
+
+    if (typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      const code = typeof record.code === 'string' ? record.code.toLowerCase() : '';
+      const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
+      if (code.includes('abort') || code.includes('cancel')) return true;
+      if (message.includes('abort') || message.includes('cancel')) return true;
+    }
+
+    if (typeof error === 'string') {
+      const text = error.toLowerCase();
+      return text.includes('abort') || text.includes('cancel') || text.includes('request superseded');
+    }
+
+    return false;
+  }
 
   private getTimelineWebContents(explicit?: Electron.WebContents): Electron.WebContents | null {
     const candidate = explicit ?? this.eventStreamWebContents;
@@ -342,15 +377,36 @@ class ProcessManager {
     }
   }
 
-  private async sleepReliability(ms: number): Promise<void> {
+  private async sleepReliability(ms: number, signal?: AbortSignal): Promise<void> {
     if (ms <= 0) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+    if (signal?.aborted) {
+      throw this.createAbortError();
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
+        resolve();
+      }, ms);
+
+      const onAbort = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        reject(this.createAbortError());
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
   }
 
   private async promptWithReliabilityPolicy(args: {
     sessionId: string;
     body: { agent: string; system?: string; parts: Array<{ type: 'text'; text: string }> };
     webContents?: Electron.WebContents;
+    signal?: AbortSignal;
   }): Promise<{ data?: unknown; error?: unknown }> {
     if (!this.instance?.client) {
       throw new Error('OpenCode not started');
@@ -362,19 +418,35 @@ class ProcessManager {
 
     try {
       for (let attempt = 1; attempt <= this.reliabilityMaxAttempts; attempt += 1) {
+        if (args.signal?.aborted) {
+          throw this.createAbortError();
+        }
+
         const state = this.reliabilityRetryState.get(args.sessionId);
         if (!state || state.requestId !== requestId) {
           // Another request superseded this one.
-          throw new Error('Request superseded');
+          throw this.createAbortError('Request superseded');
         }
 
         let result: { data?: unknown; error?: unknown };
         try {
-          result = (await this.instance.client.session.prompt({
+          const promptRequest: {
+            path: { id: string };
+            body: { agent: string; system?: string; parts: Array<{ type: 'text'; text: string }> };
+            signal?: AbortSignal;
+          } = {
             path: { id: args.sessionId },
             body: args.body,
+            ...(args.signal ? { signal: args.signal } : {}),
+          };
+          result = (await this.instance.client.session.prompt(promptRequest as unknown as {
+            path: { id: string };
+            body: { agent: string; system?: string; parts: Array<{ type: 'text'; text: string }> };
           })) as { data?: unknown; error?: unknown };
         } catch (error) {
+          if (args.signal?.aborted || this.isAbortLikeError(error)) {
+            throw this.createAbortError();
+          }
           result = { error };
         }
 
@@ -432,7 +504,7 @@ class ProcessManager {
           error: errorPayload,
           webContents: args.webContents,
         });
-        await this.sleepReliability(waitMs);
+        await this.sleepReliability(waitMs, args.signal);
       }
 
       // Should be unreachable.
@@ -1908,6 +1980,12 @@ class ProcessManager {
       this.eventStreamAbortController = null;
     }
 
+    if (this.activePromptAbortController) {
+      this.activePromptAbortController.abort();
+      this.activePromptAbortController = null;
+      this.activePromptSessionId = null;
+    }
+
     // Flush any remaining timeline events before shutdown.
     this.flushTimelineEvents();
 
@@ -2172,8 +2250,66 @@ class ProcessManager {
   }
 
   /**
-   * Send a message and stream the response to the renderer
+   * Cancel the active in-flight generation, if any
    */
+  async cancelActiveGeneration(expectedSessionId?: string | null): Promise<{ cancelled: boolean }> {
+    const activeGenerationSessionId = this.activePromptSessionId;
+    if (!activeGenerationSessionId) {
+      return { cancelled: false };
+    }
+
+    const normalizedExpectedSessionId =
+      typeof expectedSessionId === 'string' ? expectedSessionId.trim() : '';
+    if (normalizedExpectedSessionId && normalizedExpectedSessionId !== activeGenerationSessionId) {
+      return { cancelled: false };
+    }
+
+    let cancelled = false;
+
+    if (this.activePromptAbortController && !this.activePromptAbortController.signal.aborted) {
+      this.activePromptAbortController.abort();
+      cancelled = true;
+    }
+
+    this.reliabilityRetryState.delete(activeGenerationSessionId);
+
+    if (this.instance?.client) {
+      const client = this.instance.client as unknown as {
+        session?: {
+          abort?: (input: { path: { id: string } } | { body: { id: string } }) => Promise<{ error?: unknown }>;
+          cancel?: (input: { path: { id: string } } | { body: { id: string } }) => Promise<{ error?: unknown }>;
+          stop?: (input: { path: { id: string } } | { body: { id: string } }) => Promise<{ error?: unknown }>;
+        };
+      };
+
+      const handlers = [client.session?.abort, client.session?.cancel, client.session?.stop].filter(
+        (handler): handler is NonNullable<typeof handler> => typeof handler === 'function'
+      );
+
+      for (const handler of handlers) {
+        try {
+          const result = await handler({ path: { id: activeGenerationSessionId } });
+          if (!result?.error) {
+            cancelled = true;
+            break;
+          }
+        } catch {
+          try {
+            const result = await handler({ body: { id: activeGenerationSessionId } });
+            if (!result?.error) {
+              cancelled = true;
+              break;
+            }
+          } catch {
+            // Continue trying additional API signatures.
+          }
+        }
+      }
+    }
+
+    return { cancelled };
+  }
+
   async streamMessage(content: string, webContents: Electron.WebContents): Promise<void> {
     if (!this.instance?.client) {
       throw new Error('OpenCode not started');
@@ -2183,25 +2319,34 @@ class ProcessManager {
     if (!this.activeSessionId) {
       await this.createSession();
     }
+    const requestSessionId = this.activeSessionId!;
 
     const systemPrompt = await this.getSystemPrompt();
 
-    this.startTaskPromotionTracking(this.activeSessionId!, { message: content });
+    this.startTaskPromotionTracking(requestSessionId, { message: content });
+
+    if (this.activePromptAbortController && !this.activePromptAbortController.signal.aborted) {
+      this.activePromptAbortController.abort();
+    }
+    const promptAbortController = new AbortController();
+    this.activePromptAbortController = promptAbortController;
+    this.activePromptSessionId = requestSessionId;
 
     // Notify renderer that we're processing
-    webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
+    webContents.send('opencode:progress', { status: 'thinking', sessionId: requestSessionId });
 
     try {
       // Send the prompt
       console.log('[ProcessManager] Calling session.prompt()...');
       const result = await this.promptWithReliabilityPolicy({
-        sessionId: this.activeSessionId!,
+        sessionId: requestSessionId,
         webContents,
         body: {
           agent: this.defaultAgent,
           system: systemPrompt,
           parts: [{ type: 'text', text: content }],
         },
+        signal: promptAbortController.signal,
       });
 
       console.log('[ProcessManager] session.prompt() returned:', result.data ? 'YES' : 'NO');
@@ -2233,7 +2378,7 @@ class ProcessManager {
         console.log('[ProcessManager] Response preview:', textContent.substring(0, 100));
       }
 
-      this.finishTaskTracking(this.activeSessionId!, webContents, textContent);
+      this.finishTaskTracking(requestSessionId, webContents, textContent);
 
       // Send the complete message to renderer
       const assistantMessage = {
@@ -2244,21 +2389,32 @@ class ProcessManager {
         parts: parts,
       };
 
-      this.syncWorkflowRunFromAssistant(this.activeSessionId!, textContent, assistantMessage.id);
+      this.syncWorkflowRunFromAssistant(requestSessionId, textContent, assistantMessage.id);
 
       console.log('[ProcessManager] Sending message to renderer:', assistantMessage.id, 'content length:', assistantMessage.content.length);
       webContents.send('opencode:message', assistantMessage);
       console.log('[ProcessManager] Message sent to renderer successfully');
-      webContents.send('opencode:progress', { status: 'idle', sessionId: this.activeSessionId });
+      webContents.send('opencode:progress', { status: 'idle', sessionId: requestSessionId });
 
     } catch (error) {
+      if (this.isAbortLikeError(error) || promptAbortController.signal.aborted) {
+        this.clearTaskTracking(requestSessionId);
+        webContents.send('opencode:progress', { status: 'idle', sessionId: requestSessionId });
+        return;
+      }
+
       console.error('Error in streamMessage:', error);
       const errorPayload =
         (error as Error & { opencode?: OpenCodeErrorPayload }).opencode ??
         buildOpenCodeError(error, { model: configStore.get()?.provider.default });
       webContents.send('opencode:error', errorPayload);
-      webContents.send('opencode:progress', { status: 'error', sessionId: this.activeSessionId });
+      webContents.send('opencode:progress', { status: 'error', sessionId: requestSessionId });
       throw error;
+    } finally {
+      if (this.activePromptAbortController === promptAbortController) {
+        this.activePromptAbortController = null;
+        this.activePromptSessionId = null;
+      }
     }
   }
 

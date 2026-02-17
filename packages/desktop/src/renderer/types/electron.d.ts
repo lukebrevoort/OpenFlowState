@@ -177,6 +177,16 @@ export type ChatSendResult = {
   errorDetails?: OpenCodeError;
 };
 
+export type CancelGenerationResult = {
+  success: boolean;
+  cancelled: boolean;
+  error?: string;
+};
+
+export type CancelGenerationContext = {
+  expectedSessionId?: string | null;
+};
+
 // ============================================================================
 // Auth Types
 // ============================================================================
@@ -322,6 +332,7 @@ export interface FlowstateAPI {
 
     // Fire-and-forget send (response still streams via events)
     sendAsync: (message: string) => Promise<{ success?: boolean; error?: string; content?: string; errorDetails?: OpenCodeError }>;
+    cancelGeneration: (context?: CancelGenerationContext) => Promise<CancelGenerationResult>;
 
     // Get status
     status: () => Promise<OpenCodeStatus>;
@@ -402,6 +413,7 @@ export interface FlowstateAPI {
 
   chat: {
     sendMessage: (message: string) => Promise<ChatSendResult>;
+    cancelGeneration: (context?: CancelGenerationContext) => Promise<CancelGenerationResult>;
     getStatus: () => Promise<OpenCodeStatus>;
 
     newConversation: (title?: string) => Promise<{ sessionId: string }>;
