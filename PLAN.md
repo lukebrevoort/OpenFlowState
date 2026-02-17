@@ -1088,17 +1088,20 @@ Problem: current integrations status is largely “static” (token/session pres
 Decision: keep the existing fast “configured/credential present” status, but add a manual **Health Check** that verifies the integration actually works. Only run health checks when the user explicitly clicks **Sync** (in Integrations mode) so we do not silently ping third-party services.
 
 UI semantics (per integration):
+
 - **Connected**: credentials exist AND last health check succeeded.
 - **Connected (Not verified yet)**: credentials exist but no successful health check has been run yet.
 - **Needs reconnect**: last health check failed; user should reconnect.
 - **Not connected**: no credentials.
 
 Required new IPC surface (preload + main):
+
 - `window.flowstate.integrations.healthCheck(service: string): Promise<{ ok: boolean; checkedAt: string; message?: string; email?: string }>`
   - Runs a minimal “whoami/profile” style request per service and returns success/failure.
   - Does not mutate tokens on failure (do not auto-remove credentials).
 
 Health check behavior by service (MVP):
+
 - Gmail / Google Calendar: use stored OAuth token, refresh if needed, then run a lightweight endpoint to confirm validity (and optionally return email).
 - Notion (API token): call Notion “me” style endpoint to confirm token validity.
 - Canvas:
@@ -1106,14 +1109,17 @@ Health check behavior by service (MVP):
   - Browser session mode (Playwright storage state): validate by performing an authenticated request using the stored state (same endpoint as above) and fail clearly when session is invalid/expired.
 
 Persistence:
+
 - Store per-integration `lastHealthCheckAt` + `lastHealthCheckOk` + `lastHealthCheckError` in config (or a small local store) so the UI can show “Not verified yet” vs “Needs reconnect” without background polling.
 
 Integrations UI updates:
+
 - **Sync** becomes “Run health check” for that integration (spinner per-card, not global).
 - On failure: card shows “Needs reconnect” state + short error message + Connect button.
 - On success: update “Last sync” to reflect the health check time.
 
 Acceptance criteria:
+
 - Canvas: if the Playwright session is expired, clicking **Sync** changes the card to “Needs reconnect” and shows a failure message (no false “Connected”).
 - Gmail/GCal/Notion: clicking **Sync** produces a definitive pass/fail based on an actual API request.
 - Health check is available and consistent in both Integrations mode and when launched from onboarding (same UI/components).
@@ -1123,20 +1129,24 @@ Acceptance criteria:
 Problem: modal overlay is visually messy/too transparent and does not feel like it cleanly covers the app (notably near the top bar area).
 
 Changes:
+
 - Update modal overlay styling so the dim + blur feels intentional and covers the usable surface cleanly (acceptable to exclude the native title bar region, but the boundary must look deliberate).
 - Improve instruction blocks for OAuth/API token flows: clearer hierarchy, more legible callouts, and better “open console” affordances.
 
 Acceptance criteria:
+
 - Overlay appears uniform, sufficiently opaque, and visually consistent across all modes; no “leaking” UI at the top edge.
 - Instructions are more scannable (setup steps visible without hunting).
 
 #### Onboarding: Integrations Step Matches New UI
 
 Keep the current flow:
+
 - Onboarding “Connect” step shows only apps selected on the “Apps” step.
 - “Connect/Manage” navigates into IntegrationsMode in `onboardingMode`, uses the same ConnectionModal UI, and user returns via “Back to onboarding”.
 
 Changes:
+
 - Ensure onboarding uses the same polished connection modal and reflects updated status semantics.
 
 #### Onboarding: Provider Models from OpenCode
@@ -1144,28 +1154,34 @@ Changes:
 Problem: onboarding provider models are hardcoded and drift from what OpenCode actually has configured.
 
 Decision:
+
 - Populate provider model options dynamically using `window.flowstate.opencode.listModels()` (same source of truth as Settings).
 - Keep model selection as a `<select>` (no free-text) for onboarding simplicity.
 
 Implementation notes:
+
 - Derive provider groups from model IDs (`<provider>/<model>`) and show provider cards based on discovered providers.
 - Use existing `providerDefinitions` only as display metadata/ordering hints; do not treat it as the authoritative model list.
 
 Acceptance criteria:
+
 - On first-run, provider step lists models that match the user’s actual `opencode models` output.
 - Selecting a provider limits the model dropdown to models for that provider.
 
 #### Remove “Wow Moment” From Onboarding
 
 Decision:
+
 - Replace the “Wow Moment” step with a simple final step that contains a single “Start FlowState” button.
 - Remove all related state and props (no dead code).
 
 Acceptance criteria:
+
 - Onboarding steps become: `welcome → apps → connect → provider → finish`.
 - No references remain to wow prompts, wow selection, or skip-wow actions in the renderer stores/components.
 
 Files likely touched (non-exhaustive):
+
 - `packages/desktop/src/renderer/modes/IntegrationsMode.tsx`
 - `packages/desktop/src/renderer/hooks/useIntegrations.ts`
 - `packages/desktop/src/renderer/stores/integrationsStore.ts`
@@ -1259,6 +1275,10 @@ Value: repeatable builds, fewer regressions, and a shippable beta.
 - [ ] Add regression tests for timeline normalization + storage
 - [ ] Performance pass (timeline virtualization, memory usage, native module rebuild ergonomics)
 - [ ] Package unsigned DMG + docs + demo video
+- [ ] Improve ChatMode.tsx to better use Headers System for better performance and reliability (reduce re-renders, fix edge cases with large messages)
+- [ ] ChatMode.tsx should allow users to cancle message generation (currently no way to stop a runaway message stream); add a button that calls `session.cancel()` and properly handles UI state cleanup
+- [ ] Clean up Sidebar to use Real-Time Data (e.g. active workflow run, pending approvals) instead of stale session state
+- [ ] Clean Sidebar Clean and allow users to search for previous conversations / sessions
 
 #### Legacy Spec: Unified Real-Time Timeline
 

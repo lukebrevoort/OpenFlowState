@@ -933,7 +933,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 <button
                   type="button"
                   onClick={handleStopGeneration}
-                  className="flex-shrink-0 w-10 h-10 rounded-xl bg-destructive/90 hover:bg-destructive text-destructive-foreground flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+                  className="flex-shrink-0 w-10 h-10 rounded-xl border border-destructive/80 bg-destructive hover:bg-destructive/90 text-destructive-foreground flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
                   aria-label="Stop generation"
                 >
                   <Square className="w-4 h-4" fill="currentColor" />
