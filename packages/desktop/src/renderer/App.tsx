@@ -309,6 +309,37 @@ function App() {
       .map(([id]) => id);
   }, [recentlyConnectedAt]);
 
+  const handleSelectTaskRun = useCallback(
+    (taskRunId: string) => {
+      setCurrentPage('tasks');
+      if (!isDesktop) {
+        setIsSidebarOpen(false);
+      }
+
+      const tasks = useTasksStore.getState();
+      const sleep = (ms: number) =>
+        new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+      const focus = async () => {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          await tasks.loadActiveRun({ silent: true });
+          await tasks.reloadRuns({ silent: true });
+          await tasks.selectRun(taskRunId);
+
+          const latest = useTasksStore.getState().runs;
+          if (latest.some((run) => run.id === taskRunId)) {
+            return;
+          }
+
+          await sleep(250);
+        }
+      };
+
+      void focus();
+    },
+    [isDesktop],
+  );
+
   const renderPage = () => {
     switch (currentPage) {
       case 'chat':
@@ -318,28 +349,7 @@ function App() {
       case 'workflows':
         return (
           <WorkflowsMode
-            onOpenTaskRun={(taskRunId) => {
-              setCurrentPage('tasks');
-              const tasks = useTasksStore.getState();
-
-              const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-              const focus = async () => {
-                for (let attempt = 0; attempt < 8; attempt += 1) {
-                  await tasks.loadActiveRun({ silent: true });
-                  await tasks.reloadRuns({ silent: true });
-                  await tasks.selectRun(taskRunId);
-
-                  const latest = useTasksStore.getState().runs;
-                  if (latest.some((run) => run.id === taskRunId)) {
-                    return;
-                  }
-
-                  await sleep(250);
-                }
-              };
-
-              void focus();
-            }}
+            onOpenTaskRun={handleSelectTaskRun}
           />
         );
       case 'integrations':
@@ -495,26 +505,7 @@ function App() {
       const taskRunId = typeof event?.taskRunId === 'string' ? event.taskRunId : '';
 
       if (taskRunId) {
-        setCurrentPage('tasks');
-        const tasks = useTasksStore.getState();
-
-        const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-        const focus = async () => {
-          for (let attempt = 0; attempt < 8; attempt += 1) {
-            await tasks.loadActiveRun({ silent: true });
-            await tasks.reloadRuns({ silent: true });
-            await tasks.selectRun(taskRunId);
-
-            const latest = useTasksStore.getState().runs;
-            if (latest.some((run) => run.id === taskRunId)) {
-              return;
-            }
-
-            await sleep(250);
-          }
-        };
-
-        void focus();
+        handleSelectTaskRun(taskRunId);
         return;
       }
 
@@ -525,7 +516,7 @@ function App() {
 
       setCurrentPage('tasks');
     });
-  }, [handleSelectConversation, isOnboarding]);
+  }, [handleSelectConversation, handleSelectTaskRun, isOnboarding]);
 
   useEffect(() => {
     if (isOnboarding) return;
@@ -586,6 +577,21 @@ function App() {
     };
   }, [isOnboarding, loadActiveTaskRun, loadWorkflowPins, reloadTaskRuns, reloadWorkflows]);
 
+  const handleCloseSidebar = useCallback(() => {
+    setIsSidebarOpen(false);
+  }, []);
+
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarOpen((open) => !open);
+  }, []);
+
+  const handleNavigateHome = useCallback(() => {
+    setCurrentPage('home');
+    if (!isDesktop) {
+      setIsSidebarOpen(false);
+    }
+  }, [isDesktop]);
+
   return (
     <div className="size-full relative overflow-hidden">
       <div className="absolute inset-0 bg-background pointer-events-none" />
@@ -597,14 +603,17 @@ function App() {
         <>
           <Sidebar
             isOpen={isSidebarOpen}
-            onClose={() => setIsSidebarOpen(false)}
+            onClose={handleCloseSidebar}
+            onToggleSidebar={handleToggleSidebar}
+            onNavigateHome={handleNavigateHome}
+            onSelectTaskRun={handleSelectTaskRun}
             onSelectConversation={handleSelectConversation}
           />
 
           {isSidebarOpen && !isDesktop && (
             <div
               className="fixed inset-0 fs-overlay z-40 transition-opacity duration-300 ease-in-out"
-              onClick={() => setIsSidebarOpen(false)}
+              onClick={handleCloseSidebar}
             />
           )}
         </>
@@ -618,12 +627,9 @@ function App() {
         {showMainShell && (
           <TitleBar
             isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
+            onToggleSidebar={handleToggleSidebar}
             showHomeButton={currentPage !== 'home'}
-            onNavigateHome={() => {
-              setCurrentPage('home');
-              if (!isDesktop) setIsSidebarOpen(false);
-            }}
+            onNavigateHome={handleNavigateHome}
             onNavigateSettings={() => {
               setCurrentPage('settings');
               if (!isDesktop) setIsSidebarOpen(false);

@@ -12,13 +12,31 @@ import { useChatStore } from '../stores/chatStore';
 import { useWorkflowsStore } from '../stores/workflowsStore';
 import { isTaskRunActiveStatus, useTasksStore } from '../stores/tasksStore';
 
+const flowstateLogo = new URL(
+  '../../../assets/flowstate-main-logo.png',
+  import.meta.url,
+).toString();
+
+const TASK_RETENTION_DAYS = 10;
+const TASK_RETENTION_MS = TASK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  onToggleSidebar: () => void;
+  onNavigateHome: () => void;
+  onSelectTaskRun: (taskRunId: string) => void;
   onSelectConversation: (sessionId: string) => void;
 }
 
-function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
+function Sidebar({
+  isOpen,
+  onClose,
+  onToggleSidebar,
+  onNavigateHome,
+  onSelectTaskRun,
+  onSelectConversation,
+}: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const { sessions, currentSessionId, setSessions } = useChatStore();
   const workflows = useWorkflowsStore((state) => state.workflows);
@@ -129,8 +147,13 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
   }, [pinnedIds, workflows]);
 
   const runningTasks = useMemo(() => {
+    const cutoff = Date.now() - TASK_RETENTION_MS;
     return [...runs]
       .filter((run) => isTaskRunActiveStatus(run.status))
+      .filter((run) => {
+        const timestamp = run.updatedAt ?? run.startedAt ?? 0;
+        return timestamp >= cutoff;
+      })
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   }, [runs]);
 
@@ -172,8 +195,22 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
     >
       <div className="flex flex-col h-full">
         <div className="px-4 py-4 border-b border-sidebar-border">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="fs-icon-button"
+              aria-label="Close sidebar"
+            >
+              <X className="w-5 h-5 text-foreground" />
+            </button>
+
+            <button
+              type="button"
+              onClick={onNavigateHome}
+              className="flex items-center gap-3 text-left transition-opacity duration-300 ease-in-out hover:opacity-80"
+              aria-label="Go to Home"
+            >
               <div
                 className="w-10 h-10 rounded-2xl border flex items-center justify-center"
                 style={{
@@ -183,12 +220,12 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
                 }}
                 aria-hidden="true"
               >
-                <span
-                  className="text-base text-foreground"
+                <img
+                  src={flowstateLogo}
+                  alt="FlowState Logo"
+                  className="w-7 h-7 object-contain"
                   style={{ fontFamily: 'var(--fs-font-display)' }}
-                >
-                  F
-                </span>
+                />
               </div>
               <div>
                 <h2 id="fs-sidebar-title" className="text-base text-foreground">
@@ -196,15 +233,6 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
                 </h2>
                 <p className="text-xs text-muted-foreground">Your AI workspace</p>
               </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="fs-icon-button"
-              aria-label="Close sidebar"
-            >
-              <X className="w-5 h-5 text-foreground" />
             </button>
           </div>
 
@@ -289,10 +317,11 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
             <div className="space-y-0.5">
               {runningTasks.length > 0 ? (
                 runningTasks.map((task) => (
-                  <div
+                  <button
                     key={task.id}
-                  className="w-full group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-all duration-300 ease-in-out text-left hover:translate-x-1"
-
+                    type="button"
+                    onClick={() => onSelectTaskRun(task.id)}
+                    className="w-full group flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-all duration-300 ease-in-out text-left hover:translate-x-1"
                   >
                       {task.status === 'running' ? (
                         <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
@@ -302,7 +331,7 @@ function Sidebar({ isOpen, onClose, onSelectConversation }: SidebarProps) {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-foreground/90 truncate">{task.title}</div>
                     </div>
-                  </div>
+                  </button>
                 ))
               ) : (
                 <div className="px-3 py-2 text-xs text-muted-foreground">No active tasks</div>

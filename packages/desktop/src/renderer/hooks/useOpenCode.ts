@@ -358,8 +358,12 @@ export function useOpenCode() {
       const result = await window.flowstate.chat.cancelGeneration({
         expectedSessionId: currentSessionId,
       });
-      setStatus('idle');
-      setError(null);
+
+      if (result.success && result.cancelled) {
+        setStatus('idle');
+        setError(null);
+      }
+
       return result;
     } catch (err) {
       const formattedError = formatOpenCodeError(
