@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 17, 2026 (Phase 6.75 Outlook Full-Body + Write Toggle)
+> **Last Updated**: February 18, 2026 (ChatMode Live Updates + Stop-to-Cancel Sync)
 
 ---
 
@@ -30,6 +30,15 @@
 - **Shared LRU cache with TTL for MCP servers**
 - **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 - **Canvas browser auth persistence via MCP-to-desktop pending auth files**
+
+---
+
+## Tasks Completed (Feb 18, 2026 - ChatMode Live Updates + Stop-to-Cancel Sync)
+
+- ✅ Added timeline-driven message refresh fallback in `useOpenCode` so ChatMode receives incremental assistant updates during long-running promoted tasks without requiring a TasksMode round-trip.
+- ✅ Added a `Stop task` action in ChatMode header that cancels the active task run and syncs cancellation state into shared chat/task state.
+- ✅ Kept refresh behavior session-safe with debounced in-flight guards to avoid duplicate loads and cross-session message clobbering.
+- ✅ Validated desktop package checks in this branch (`pnpm --filter @flowstate/core build`, `pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
 
 ---
 

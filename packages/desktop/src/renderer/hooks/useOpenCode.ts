@@ -156,6 +156,48 @@ export function useOpenCode() {
       }
     };
 
+    let messageRefreshTimer: number | null = null;
+    const messageRefreshInFlightBySession = new Set<string>();
+    const messageRefreshQueuedBySession = new Set<string>();
+
+    const refreshMessagesIfCurrentSession = async (sessionId: string) => {
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+
+      if (messageRefreshInFlightBySession.has(sessionId)) {
+        messageRefreshQueuedBySession.add(sessionId);
+        return;
+      }
+
+      messageRefreshInFlightBySession.add(sessionId);
+      try {
+        const messages = await window.flowstate.opencode.getMessages();
+        const latestCurrentSession = useChatStore.getState().currentSessionId;
+        if (!latestCurrentSession || latestCurrentSession !== sessionId) return;
+        loadMessages(messages);
+      } catch (err) {
+        if (DEV) console.warn('Failed to refresh chat messages from timeline event:', err);
+      } finally {
+        messageRefreshInFlightBySession.delete(sessionId);
+        if (messageRefreshQueuedBySession.has(sessionId)) {
+          messageRefreshQueuedBySession.delete(sessionId);
+          void refreshMessagesIfCurrentSession(sessionId);
+        }
+      }
+    };
+
+    const scheduleMessageRefresh = (sessionId: string) => {
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+
+      if (messageRefreshTimer !== null) return;
+
+      messageRefreshTimer = window.setTimeout(() => {
+        messageRefreshTimer = null;
+        void refreshMessagesIfCurrentSession(sessionId);
+      }, 150);
+    };
+
     const applyTimelineEvent = (event: TimelineEvent) => {
       addTimelineEvent(event);
       if (event.kind === 'status' && event.title === 'Task promoted') {
@@ -205,6 +247,10 @@ export function useOpenCode() {
     const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload: TimelineEventEnvelope) => {
       const events = unwrapBatch<TimelineEvent>(payload);
       if (events.length === 0) return;
+
+      for (const event of events) {
+        scheduleMessageRefresh(event.sessionId);
+      }
 
       // Preserve existing behavior for single events.
       if (events.length === 1) {
@@ -268,6 +314,10 @@ export function useOpenCode() {
     // Cleanup on unmount
     return () => {
       if (DEV) console.log('Cleaning up OpenCode event listeners');
+      if (messageRefreshTimer !== null) {
+        window.clearTimeout(messageRefreshTimer);
+        messageRefreshTimer = null;
+      }
       removeMessageListener();
       removeProgressListener();
       removeErrorListener();
@@ -437,6 +487,34 @@ export function useOpenCode() {
     }
   }, [setOpenCodeStatus]);
 
+  const cancelActiveTask = useCallback(async () => {
+    if (!activeTask) {
+      return { success: false, error: 'No active task to cancel.' } as const;
+    }
+
+    try {
+      const result = await window.flowstate.tasks.cancelRun(activeTask.id);
+      if (!result.ok) {
+        const message = result.error?.message ?? 'Failed to cancel active task.';
+        setError(message);
+        return { success: false, error: message } as const;
+      }
+
+      updateActiveTask({
+        status: 'cancelled',
+        blockingReason: undefined,
+        description: 'Cancelled by user.',
+      });
+      setError(null);
+      setStatus('idle');
+      return { success: true } as const;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel active task.';
+      setError(message);
+      return { success: false, error: message } as const;
+    }
+  }, [activeTask, setError, setStatus, updateActiveTask]);
+
   return {
     // State
     isLoading,
@@ -452,6 +530,7 @@ export function useOpenCode() {
     refreshSessions,
     refreshTimeline,
     checkStatus,
+    cancelActiveTask,
   };
 }
 
