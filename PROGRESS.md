@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 17, 2026 (Phase 6.75 Outlook Full-Body + Write Toggle)
+> **Last Updated**: February 18, 2026 (Canvas Pull Skill + Agent Prompt Tightening)
 
 ---
 
@@ -30,6 +30,53 @@
 - **Shared LRU cache with TTL for MCP servers**
 - **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 - **Canvas browser auth persistence via MCP-to-desktop pending auth files**
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Canvas MCP Auth-Tool Removal + Refresh Guidance)
+
+- ✅ Removed `canvas_auth_browser_login` from exposed Canvas MCP tools to prevent agents from triggering browser sign-in flows.
+- ✅ Updated Canvas browser-auth error guidance to instruct users to refresh Canvas authentication in Integrations and retry.
+- ✅ Added regression validation to ensure `canvas_auth_browser_login` is not listed by tool discovery.
+- ✅ Updated Integrations UI copy to remove references to the removed MCP auth tool.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Canvas Pull Accuracy Guardrails)
+
+- ✅ Tightened `pull-canvas` skill with explicit file-ID resolution flow (`canvas_list_course_files` -> `canvas_read_file_text`).
+- ✅ Added hard guardrails against module-item-ID misuse for file text extraction.
+- ✅ Updated FlowState agent prompt to route Canvas pulls through `pull-canvas` guidance and avoid in-agent browser-login flows.
+- ✅ Clarified reauthentication path: user should reconnect from Integrations -> Canvas, then retry after lightweight tool health check.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Phase 8 Canvas External-Host Download Guidance)
+
+- ✅ Updated Canvas external-host download failures to avoid misleading reauthentication guidance when files are inaccessible via API mode.
+- ✅ Clarified user-facing fallback to direct upload or pasted text for externally hosted files.
+- ✅ Added regression coverage to ensure external-host 403 errors do not suggest `canvas_auth_browser_login` and preserve non-reauth guidance.
+- ✅ Re-validated modified packages (`@flowstate/mcp-canvas` and `@flowstate/desktop`) with passing typecheck + test runs.
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Phase 8 Kickoff: Canvas Ingestion + Study-Material Foundations)
+
+- ✅ Added the initial Canvas ingestion slice for Phase 8 so course/file inputs can be pulled into the study-pack pipeline foundation.
+- ✅ Added study-material store foundations for Phase 8 run data, source-document tracking, and artifact metadata persistence.
+- ✅ Added desktop IPC foundations to connect renderer-triggered Phase 8 study-material actions to main-process orchestration.
+- ✅ Captured kickoff status to anchor Phase 8 execution against the new Academic Intelligence plan scope.
+
+### Follow-Up (Remaining Phase 8 Checklist)
+- [ ] Complete Phase 8 schema + migrations for citations, extraction issues, and run diffs.
+- [ ] Finish Canvas source discovery UX (course-wide + explicit file-scoped picker) and local PDF/PPTX attach flow.
+- [ ] Implement robust PDF/PPTX parsing (including PPTX speaker notes) with extraction uncertainty detection.
+- [ ] Build generation orchestration for summary/practice exam/flashcards with inline per-section citations and source map rendering.
+- [ ] Add quality-gate evaluation with default block-on-fail behavior and explicit write-anyway approval path.
+- [ ] Implement destination routing for Notion hybrid writes, Obsidian direct vault writes, and local-folder output.
+- [ ] Add study-run versioning + diff summarization for rerun comparisons.
+- [ ] Add settings UI for external-knowledge toggle, concurrency cap, and retention/purge controls.
+- [ ] Add local metrics dashboard + JSON/CSV export and complete end-to-end Phase 8 test coverage.
 
 ---
 

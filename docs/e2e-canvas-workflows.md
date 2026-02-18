@@ -28,19 +28,17 @@ Expected:
 
 ## Test B: Connect Canvas (Browser Login / no token)
 
-This uses the Canvas MCP tool `canvas_auth_browser_login` to create a Playwright storage state file.
+This uses the Integrations browser-login flow to create a Playwright storage state file.
 
-1. Generate a storage state file by running the Canvas MCP tool:
-   - Tool: `canvas_auth_browser_login`
-   - Output: a storage state file path (must be absolute)
-2. Open the desktop app.
-3. Go to `Integrations`.
-4. Find `Canvas LMS` and click `Connect`.
-5. Choose `Browser Login (No token)`.
-6. Enter:
-   - Canvas Instance URL
-   - Storage State Path (absolute path from step 1)
-7. Submit.
+1. Open the desktop app.
+2. Go to `Integrations`.
+3. Find `Canvas LMS` and click `Connect`.
+4. Choose `Browser Login (No token)`.
+5. Enter:
+    - Canvas Instance URL
+    - Storage State Path (absolute path)
+6. Submit and complete login in the opened browser window.
+7. Click the confirmation button once you are on the Canvas dashboard.
 
 Expected:
 - Canvas shows `Connected`.
