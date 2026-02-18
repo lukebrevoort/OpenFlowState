@@ -156,7 +156,7 @@ export function useOpenCode() {
       }
     };
 
-    let messageRefreshTimer: number | null = null;
+    const messageRefreshTimerBySession = new Map<string, number>();
     const messageRefreshInFlightBySession = new Set<string>();
     const messageRefreshQueuedBySession = new Set<string>();
 
@@ -190,12 +190,13 @@ export function useOpenCode() {
       const currentSession = useChatStore.getState().currentSessionId;
       if (!currentSession || currentSession !== sessionId) return;
 
-      if (messageRefreshTimer !== null) return;
+      if (messageRefreshTimerBySession.has(sessionId)) return;
 
-      messageRefreshTimer = window.setTimeout(() => {
-        messageRefreshTimer = null;
+      const timer = window.setTimeout(() => {
+        messageRefreshTimerBySession.delete(sessionId);
         void refreshMessagesIfCurrentSession(sessionId);
       }, 150);
+      messageRefreshTimerBySession.set(sessionId, timer);
     };
 
     const applyTimelineEvent = (event: TimelineEvent) => {
@@ -314,10 +315,10 @@ export function useOpenCode() {
     // Cleanup on unmount
     return () => {
       if (DEV) console.log('Cleaning up OpenCode event listeners');
-      if (messageRefreshTimer !== null) {
-        window.clearTimeout(messageRefreshTimer);
-        messageRefreshTimer = null;
+      for (const timer of messageRefreshTimerBySession.values()) {
+        window.clearTimeout(timer);
       }
+      messageRefreshTimerBySession.clear();
       removeMessageListener();
       removeProgressListener();
       removeErrorListener();
@@ -490,6 +491,12 @@ export function useOpenCode() {
   const cancelActiveTask = useCallback(async () => {
     if (!activeTask) {
       return { success: false, error: 'No active task to cancel.' } as const;
+    }
+
+    // Prevent cancelling a task that belongs to a different session
+    const currentSession = useChatStore.getState().currentSessionId;
+    if (currentSession && activeTask.sessionId !== currentSession) {
+      return { success: false, error: 'Active task belongs to a different session.' } as const;
     }
 
     try {

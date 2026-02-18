@@ -475,6 +475,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
   const canStopActiveTask = Boolean(
     activeTask &&
+      activeTask.sessionId === currentSessionId &&
       (activeTask.status === "running" || activeTask.status === "waiting_approval"),
   );
 
