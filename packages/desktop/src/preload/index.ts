@@ -19,6 +19,8 @@ import type {
   FlowstateConfig,
   ClientCredentials,
   ApprovalNotificationClickEvent,
+  StudyMaterialArtifactCreateInput,
+  StudyMaterialRunCreateInput,
 } from '../renderer/types/electron';
 
 type Unsubscribe = () => void;
@@ -286,6 +288,16 @@ const flowstateAPI: FlowstateAPIDefinition = {
     removeRun: (taskRunId: string) => ipcRenderer.invoke('tasks:remove', taskRunId),
     markRunning: (taskRunId: string) => ipcRenderer.invoke('tasks:markRunning', taskRunId),
     markComplete: (taskRunId: string) => ipcRenderer.invoke('tasks:markComplete', taskRunId),
+  },
+
+  studyMaterials: {
+    createRun: (input: StudyMaterialRunCreateInput) => ipcRenderer.invoke('studyMaterials:runs:create', input),
+    listRuns: (query?: { courseId?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('studyMaterials:runs:list', query),
+    getRun: (studyRunId: string) => ipcRenderer.invoke('studyMaterials:runs:get', studyRunId),
+    createArtifact: (input: StudyMaterialArtifactCreateInput) =>
+      ipcRenderer.invoke('studyMaterials:artifacts:create', input),
+    listArtifacts: (studyRunId: string) => ipcRenderer.invoke('studyMaterials:artifacts:list', studyRunId),
   },
 
   workflows: {

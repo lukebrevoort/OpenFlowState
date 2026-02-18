@@ -149,6 +149,56 @@ export interface WorkflowArtifact {
   payloadText?: string;
 }
 
+export interface SourceDocument {
+  id: string;
+  courseId: string;
+  origin: 'canvas' | 'local' | (string & {});
+  fileType: string;
+  title: string;
+  sourceRef: string;
+  versionHash: string;
+  ingestedAt: number;
+}
+
+export interface StudyMaterialRun {
+  id: string;
+  courseId: string;
+  taskRunId?: string;
+  mode: 'conservative' | 'coaching' | (string & {});
+  destinationType: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | (string & {});
+  qualityScore?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StudyMaterialArtifact {
+  id: string;
+  studyRunId: string;
+  kind: 'summary' | 'practice_exam' | 'flashcards' | 'report' | (string & {});
+  pathOrBlobRef: string;
+  mime?: string;
+  createdAt: number;
+}
+
+export interface StudyMaterialRunCreateInput {
+  id: string;
+  courseId: string;
+  taskRunId?: string;
+  mode: 'conservative' | 'coaching' | (string & {});
+  destinationType: string;
+  status?: StudyMaterialRun['status'];
+  qualityScore?: number;
+}
+
+export interface StudyMaterialArtifactCreateInput {
+  id: string;
+  studyRunId: string;
+  kind: StudyMaterialArtifact['kind'];
+  pathOrBlobRef: string;
+  mime?: string;
+}
+
 export interface WorkflowGenerationResult {
   definition: WorkflowDefinition;
   skillMarkdown: string;
@@ -436,6 +486,14 @@ export interface FlowstateAPI {
     removeRun: (taskRunId: string) => Promise<IpcResult<{ removed: boolean }>>;
     markRunning: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
     markComplete: (taskRunId: string) => Promise<IpcResult<TaskRun>>;
+  };
+
+  studyMaterials: {
+    createRun: (input: StudyMaterialRunCreateInput) => Promise<IpcResult<StudyMaterialRun>>;
+    listRuns: (query?: { courseId?: string; limit?: number; offset?: number }) => Promise<IpcResult<StudyMaterialRun[]>>;
+    getRun: (studyRunId: string) => Promise<IpcResult<StudyMaterialRun | null>>;
+    createArtifact: (input: StudyMaterialArtifactCreateInput) => Promise<IpcResult<StudyMaterialArtifact>>;
+    listArtifacts: (studyRunId: string) => Promise<IpcResult<StudyMaterialArtifact[]>>;
   };
 
   workflows: {

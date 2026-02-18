@@ -6,6 +6,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import JSZip from 'jszip';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -37,6 +42,117 @@ const makeResponse = (
     text: async () => (typeof data === 'string' ? data : JSON.stringify(data)),
     arrayBuffer: async () => buffer,
   } as any;
+};
+
+const createMinimalPptxBuffer = async (slideText: string, notesText = ''): Promise<Buffer> => {
+  const zip = new JSZip();
+
+  zip.file(
+    'ppt/slides/slide1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:p><a:r><a:t>${slideText}</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`
+  );
+
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide1.xml"/>
+</Relationships>`
+  );
+
+  zip.file(
+    'ppt/notesSlides/notesSlide1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:p><a:r><a:t>${notesText}</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:notes>`
+  );
+
+  return zip.generateAsync({ type: 'nodebuffer' });
+};
+
+const createPptxWithNotesTarget = async (target: string): Promise<Buffer> => {
+  const zip = new JSZip();
+
+  zip.file(
+    'ppt/slides/slide1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Slide text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>`
+  );
+
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="${target}"/>
+</Relationships>`
+  );
+
+  return zip.generateAsync({ type: 'nodebuffer' });
+};
+
+const createPptxWithEntryCount = async (entryCount: number): Promise<Buffer> => {
+  const zip = new JSZip();
+  zip.file('ppt/slides/slide1.xml', '<p:sld xmlns:p="x" xmlns:a="x"><a:t>A</a:t></p:sld>');
+
+  for (let i = 0; i < entryCount; i += 1) {
+    zip.file(`ppt/media/chunk-${i}.bin`, 'x');
+  }
+
+  return zip.generateAsync({ type: 'nodebuffer' });
+};
+
+const createPptxWithOversizedSlideEntry = async (textLength: number): Promise<Buffer> => {
+  const zip = new JSZip();
+  const repeatedText = 'A'.repeat(textLength);
+
+  zip.file(
+    'ppt/slides/slide1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>${repeatedText}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>`
+  );
+
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+};
+
+const setupToolHandlers = async () => {
+  const handlers = new Map<object, (request?: any) => Promise<any>>();
+  const server = {
+    setRequestHandler: (schema: object, handler: (request?: any) => Promise<any>) => {
+      handlers.set(schema, handler);
+    },
+  } as any;
+
+  const { registerTools } = await import('../tools/index.js');
+  registerTools(server);
+
+  return {
+    callToolHandler: handlers.get(CallToolRequestSchema),
+    listToolsHandler: handlers.get(ListToolsRequestSchema),
+  };
 };
 
 afterEach(() => {
@@ -195,14 +311,13 @@ describe('Canvas auth mode selection', () => {
 
     const api = await import('../api/index.js');
     await expect(api.getUpcomingAssignments()).rejects.toThrow(/storage state/i);
-    await expect(api.getUpcomingAssignments()).rejects.toThrow(/canvas_auth_browser_login/);
+    await expect(api.getUpcomingAssignments()).rejects.toThrow(/refresh canvas authentication/i);
   });
 });
 
 describe('Tool Definition Validation', () => {
   it('lists the expected tool names (smoke test)', () => {
     const expectedTools = [
-      'canvas_auth_browser_login',
       'canvas_list_courses',
       'canvas_get_course',
       'canvas_list_assignments',
@@ -219,8 +334,15 @@ describe('Tool Definition Validation', () => {
       'canvas_read_file_text',
       'canvas_read_submission_attachment_text',
     ];
-    expect(expectedTools).toHaveLength(16);
+    expect(expectedTools).toHaveLength(15);
     for (const name of expectedTools) expect(name).toMatch(/^canvas_/);
+  });
+
+  it('does not expose canvas_auth_browser_login as an MCP tool', async () => {
+    const { listToolsHandler } = await setupToolHandlers();
+    const response = await listToolsHandler?.();
+    const names = (response?.tools ?? []).map((tool: { name: string }) => tool.name);
+    expect(names).not.toContain('canvas_auth_browser_login');
   });
 });
 
@@ -371,5 +493,335 @@ describe('Canvas file downloads', () => {
     const api = await import('../api/index.js');
     const downloaded = await api.downloadFileByUrl('https://files.example.com/resource');
     expect(downloaded.contentType).toBe('application/pdf');
+  });
+
+  it('returns non-reauth guidance for inaccessible external file URLs', async () => {
+    process.env.CANVAS_API_URL = 'https://canvas.example.com';
+    process.env.CANVAS_API_TOKEN = 'secret-token';
+
+    const fetchMock = vi.fn(async (_url: string, init?: any) => {
+      expect(init?.headers?.Authorization).toBeUndefined();
+      return makeResponse('forbidden', {
+        status: 403,
+        url: 'https://files.example.com/resource',
+        headers: { 'content-type': 'text/plain' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock as any);
+
+    const api = await import('../api/index.js');
+
+    await expect(api.downloadFileByUrl('https://files.example.com/resource')).rejects.toThrow(
+      /not directly accessible through the Canvas API/i
+    );
+    await expect(api.downloadFileByUrl('https://files.example.com/resource')).rejects.toThrow(
+      /upload the file directly or paste the relevant text/i
+    );
+    await expect(api.downloadFileByUrl('https://files.example.com/resource')).rejects.not.toThrow(
+      /canvas_auth_browser_login/i
+    );
+    await expect(api.downloadFileByUrl('https://files.example.com/resource')).rejects.not.toThrow(
+      /refresh canvas authentication/i
+    );
+  });
+});
+
+describe('Canvas source URL redaction', () => {
+  it('sanitizes source URL for canvas_read_file_text output', async () => {
+    const api = await import('../api/index.js');
+    const parsers = await import('../utils/documentParsers.js');
+
+    vi.spyOn(api, 'downloadFileById').mockResolvedValue({
+      file: {
+        id: 42,
+        display_name: 'secure.pdf',
+        filename: 'secure.pdf',
+        size: 512,
+      } as any,
+      buffer: Buffer.from('%PDF-1.4 fake'),
+      contentType: 'application/pdf',
+      finalUrl:
+        'https://canvas.example.com/files/42/download?download_frd=1&X-Amz-Signature=very-secret#frag',
+    });
+
+    vi.spyOn(parsers, 'extractDocumentText').mockResolvedValue({
+      text: 'Extracted text.',
+    } as any);
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 42 } },
+    });
+
+    const text = result?.content?.[0]?.text ?? '';
+    expect(result?.isError).toBeUndefined();
+    expect(text).toContain('Source: https://canvas.example.com/files/42/download');
+    expect(text).not.toContain('X-Amz-Signature');
+    expect(text).not.toContain('download_frd=1');
+    expect(text).not.toContain('#frag');
+  });
+
+  it('sanitizes source URL for canvas_read_submission_attachment_text output', async () => {
+    const api = await import('../api/index.js');
+    const parsers = await import('../utils/documentParsers.js');
+
+    vi.spyOn(api, 'getSubmissionDetailed').mockResolvedValue({
+      attachments: [
+        {
+          id: 88,
+          filename: 'submission.pdf',
+          size: 256,
+          content_type: 'application/pdf',
+          download_url: 'https://canvas.example.com/files/88/download',
+        },
+      ],
+    } as any);
+
+    vi.spyOn(api, 'downloadFileByUrl').mockResolvedValue({
+      buffer: Buffer.from('%PDF-1.4 fake'),
+      contentType: 'application/pdf',
+      finalUrl:
+        'https://files.instructure.com/files/88/download?verifier=top-secret&response-content-disposition=inline',
+    });
+
+    vi.spyOn(parsers, 'extractDocumentText').mockResolvedValue({
+      text: 'Submission extracted text.',
+    } as any);
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: {
+        name: 'canvas_read_submission_attachment_text',
+        arguments: { courseId: 1, assignmentId: 2, attachmentId: 88 },
+      },
+    });
+
+    const text = result?.content?.[0]?.text ?? '';
+    expect(result?.isError).toBeUndefined();
+    expect(text).toContain('Source: https://files.instructure.com/files/88/download');
+    expect(text).not.toContain('verifier=top-secret');
+    expect(text).not.toContain('response-content-disposition=inline');
+  });
+});
+
+describe('Canvas PPTX extraction', () => {
+  it('mentions PPTX in relevant tool descriptions', async () => {
+    const { listToolsHandler } = await setupToolHandlers();
+    const response = await listToolsHandler?.();
+    const tools = response?.tools ?? [];
+
+    const readFileTool = tools.find((tool: { name: string }) => tool.name === 'canvas_read_file_text');
+    const readAttachmentTool = tools.find(
+      (tool: { name: string }) => tool.name === 'canvas_read_submission_attachment_text'
+    );
+
+    expect(readFileTool?.description).toMatch(/PPTX/i);
+    expect(readAttachmentTool?.description).toMatch(/PPTX/i);
+  });
+
+  it('extracts slide text and speaker notes from a PPTX file', async () => {
+    const api = await import('../api/index.js');
+    const pptxBuffer = await createMinimalPptxBuffer(
+      'Intro slide text',
+      'These are speaker notes with additional detail so extraction is clearly non-sparse and should include notes content.'
+    );
+
+    vi.spyOn(api, 'downloadFileById').mockResolvedValue({
+      file: {
+        id: 1,
+        display_name: 'lecture.pptx',
+        filename: 'lecture.pptx',
+        size: pptxBuffer.length,
+      } as any,
+      buffer: pptxBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      finalUrl: 'https://canvas.example.com/files/1/download',
+    });
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 1 } },
+    });
+
+    const text = result?.content?.[0]?.text ?? '';
+    expect(result?.isError).toBeUndefined();
+    expect(text).toContain('Intro slide text');
+    expect(text).toContain('These are speaker notes with additional detail');
+  });
+
+  it('includes uncertainty messaging for sparse PPTX extraction output', async () => {
+    const api = await import('../api/index.js');
+    const pptxBuffer = await createMinimalPptxBuffer('Hi');
+
+    vi.spyOn(api, 'downloadFileById').mockResolvedValue({
+      file: {
+        id: 2,
+        display_name: 'sparse.pptx',
+        filename: 'sparse.pptx',
+        size: pptxBuffer.length,
+      } as any,
+      buffer: pptxBuffer,
+      contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      finalUrl: 'https://canvas.example.com/files/2/download',
+    });
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 2 } },
+    });
+
+    const text = result?.content?.[0]?.text ?? '';
+    expect(result?.isError).toBeUndefined();
+    expect(text).toContain('Hi');
+    expect(text).toContain('Uncertainty: PPTX text extraction may be incomplete');
+    expect(text).toContain('does not run OCR');
+  });
+
+  it('returns supported types including PPTX in unsupported file errors', async () => {
+    const api = await import('../api/index.js');
+
+    vi.spyOn(api, 'downloadFileById').mockResolvedValue({
+      file: {
+        id: 3,
+        display_name: 'notes.txt',
+        filename: 'notes.txt',
+        size: 12,
+      } as any,
+      buffer: Buffer.from('hello world'),
+      contentType: 'text/plain',
+      finalUrl: 'https://canvas.example.com/files/3/download',
+    });
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 3 } },
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.content?.[0]?.text).toContain('Supported: PDF, DOCX, PPTX.');
+  });
+
+  it('rejects unsafe PPTX notes relationship targets outside expected subpaths', async () => {
+    const { extractPptxText } = await import('../utils/documentParsers.js');
+    const unsafePptx = await createPptxWithNotesTarget('../../../docProps/core.xml');
+
+    await expect(extractPptxText(unsafePptx)).rejects.toThrow(/unsafe pptx archive/i);
+    await expect(extractPptxText(unsafePptx)).rejects.toThrow(/notes relationship target/i);
+  });
+
+  it('rejects PPTX archives that exceed zip entry bounds', async () => {
+    process.env.CANVAS_PPTX_MAX_ZIP_ENTRIES = '10';
+    const { extractPptxText } = await import('../utils/documentParsers.js');
+    const oversized = await createPptxWithEntryCount(12);
+
+    await expect(extractPptxText(oversized)).rejects.toThrow(/unsafe pptx archive/i);
+    await expect(extractPptxText(oversized)).rejects.toThrow(/zip entries/i);
+  });
+
+  it('rejects oversized uncompressed slide XML before opening inflate stream', async () => {
+    process.env.CANVAS_PPTX_MAX_XML_ENTRY_BYTES = '2048';
+    const oversized = await createPptxWithOversizedSlideEntry(12000);
+    const yauzlModule = await import('yauzl');
+    const openReadStreamSpy = vi.spyOn((yauzlModule as any).ZipFile.prototype, 'openReadStream');
+    const { extractPptxText } = await import('../utils/documentParsers.js');
+
+    await expect(extractPptxText(oversized)).rejects.toThrow(/unsafe pptx archive/i);
+    await expect(extractPptxText(oversized)).rejects.toThrow(/XML entry ppt\/slides\/slide1\.xml/i);
+    expect(openReadStreamSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('Canvas tool error redaction', () => {
+  it('redacts secret-like query parameters in tool errors', async () => {
+    const api = await import('../api/index.js');
+
+    vi.spyOn(api, 'downloadFileById').mockRejectedValue(
+      new Error(
+        'download failed: https://files.example.com/resource?token=abc123&signature=sig987&verifier=v55&key=k1&auth=letmein&X-Amz-Signature=aws-secret'
+      )
+    );
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 555 } },
+    });
+
+    const text = result?.content?.[0]?.text ?? '';
+    expect(result?.isError).toBe(true);
+    expect(text).toContain('token=[REDACTED]');
+    expect(text).toContain('signature=[REDACTED]');
+    expect(text).toContain('verifier=[REDACTED]');
+    expect(text).toContain('key=[REDACTED]');
+    expect(text).toContain('auth=[REDACTED]');
+    expect(text).toContain('X-Amz-Signature=[REDACTED]');
+    expect(text).not.toContain('abc123');
+    expect(text).not.toContain('sig987');
+    expect(text).not.toContain('v55');
+    expect(text).not.toContain('k1');
+    expect(text).not.toContain('letmein');
+    expect(text).not.toContain('aws-secret');
+  });
+});
+
+describe('Canvas downloaded byte-size enforcement', () => {
+  it('enforces downloaded file byte-size limit before extraction', async () => {
+    process.env.CANVAS_MAX_FILE_SIZE_MB = '1';
+    const api = await import('../api/index.js');
+    const buffer = Buffer.alloc(1024 * 1024 + 1, 1);
+
+    vi.spyOn(api, 'downloadFileById').mockResolvedValue({
+      file: {
+        id: 90,
+        display_name: 'misreported.pdf',
+        filename: 'misreported.pdf',
+        size: 128,
+      } as any,
+      buffer,
+      contentType: 'application/pdf',
+      finalUrl: 'https://canvas.example.com/files/90/download',
+    });
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: { name: 'canvas_read_file_text', arguments: { fileId: 90 } },
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.content?.[0]?.text).toContain('Downloaded file too large');
+  });
+
+  it('enforces downloaded attachment byte-size limit before extraction', async () => {
+    process.env.CANVAS_MAX_FILE_SIZE_MB = '1';
+    const api = await import('../api/index.js');
+    const buffer = Buffer.alloc(1024 * 1024 + 1, 2);
+
+    vi.spyOn(api, 'getSubmissionDetailed').mockResolvedValue({
+      attachments: [
+        {
+          id: 77,
+          filename: 'submission.pdf',
+          size: 10,
+          content_type: 'application/pdf',
+          download_url: 'https://canvas.example.com/files/77/download',
+        },
+      ],
+    } as any);
+
+    vi.spyOn(api, 'downloadFileByUrl').mockResolvedValue({
+      buffer,
+      contentType: 'application/pdf',
+      finalUrl: 'https://canvas.example.com/files/77/download',
+    });
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: {
+        name: 'canvas_read_submission_attachment_text',
+        arguments: { courseId: 1, assignmentId: 2, attachmentId: 77 },
+      },
+    });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.content?.[0]?.text).toContain('Downloaded attachment too large');
   });
 });

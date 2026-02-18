@@ -14,6 +14,7 @@ import * as canvasApi from '../api/index.js';
 import {
   CANVAS_MAX_FILE_SIZE_BYTES,
   CANVAS_MAX_REDIRECTS,
+  SUPPORTED_DOCUMENT_TYPE_LABEL,
   SUPPORTED_DOCUMENT_TYPES,
 } from '../utils/constants.js';
 import { extractDocumentText } from '../utils/documentParsers.js';
@@ -21,7 +22,15 @@ import { extractDocumentText } from '../utils/documentParsers.js';
 const redactSecretsFromString = (input: string): string => {
   return input
     .replace(/\bBearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
-    .replace(/\b(canvas_session|_csrf_token|csrf_token|session)=[^;\s]+/gi, '$1=[REDACTED]');
+    .replace(/\b(canvas_session|_csrf_token|csrf_token|session)=[^;\s]+/gi, '$1=[REDACTED]')
+    .replace(
+      /([?&])((?:x-amz-[a-z\d-]+|access_token|id_token|refresh_token|token|signature|sig|verifier|api[_-]?key|key|auth(?:orization)?|credential|password|secret))=([^&#\s]*)/gi,
+      '$1$2=[REDACTED]'
+    )
+    .replace(
+      /\b((?:x-amz-[a-z\d-]+|access_token|id_token|refresh_token|token|signature|sig|verifier|api[_-]?key|key|auth(?:orization)?|credential|password|secret))=([^&\s]+)/gi,
+      '$1=[REDACTED]'
+    );
 };
 
 const redactSecretsDeep = (value: unknown): unknown => {
@@ -72,6 +81,15 @@ const normalizeContentType = (contentType: string | undefined | null) => {
   return contentType.split(';')[0].trim().toLowerCase();
 };
 
+const sanitizeSourceUrl = (rawUrl: string): string => {
+  try {
+    const parsed = new URL(rawUrl);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return '[unavailable]';
+  }
+};
+
 // Helper to format dates for display
 const formatDate = (dateStr: string | null): string => {
   if (!dateStr) return 'No date set';
@@ -88,49 +106,6 @@ const formatDate = (dateStr: string | null): string => {
 
 // Tool definitions with annotations for better LLM understanding
 const CANVAS_TOOLS = [
-  {
-    name: 'canvas_auth_browser_login',
-    description:
-      'Open a browser to log into Canvas and save a Playwright storage state file (for schools that disallow API tokens)',
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        canvasApiUrl: {
-          type: 'string',
-          description: 'Canvas instance URL (overrides CANVAS_API_URL for this login run)',
-        },
-        storageStatePath: {
-          type: 'string',
-          description:
-            'Where to save the Playwright storage state JSON (defaults to CANVAS_STORAGE_STATE_PATH)',
-        },
-        confirmationFilePath: {
-          type: 'string',
-          description:
-            'Optional file path to wait for before saving storage state (created when user confirms login)',
-        },
-        loginUrl: {
-          type: 'string',
-          description:
-            'Optional override for the login URL (defaults to CANVAS_LOGIN_URL or {CANVAS_API_URL}/login)',
-        },
-        timeoutSeconds: {
-          type: 'number',
-          description: 'Max time to wait for login before failing (default: 300 seconds)',
-        },
-        headless: {
-          type: 'boolean',
-          description: 'Run the browser headless (default: false)',
-        },
-      },
-    },
-  },
   // ========== READ OPERATIONS (All read-only, safe to auto-execute) ==========
   {
     name: 'canvas_list_courses',
@@ -384,7 +359,7 @@ const CANVAS_TOOLS = [
   },
   {
     name: 'canvas_list_course_files',
-    description: 'List files available in a Canvas course (PDF/DOCX/etc.)',
+    description: 'List files available in a Canvas course (PDF/DOCX/PPTX/etc.)',
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -425,7 +400,7 @@ const CANVAS_TOOLS = [
   {
     name: 'canvas_read_file_text',
     description:
-      'Download a Canvas file and extract its text for the assistant (supports PDF and DOCX).',
+      'Download a Canvas file and extract its text for the assistant (supports PDF, DOCX, and PPTX).',
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -446,7 +421,7 @@ const CANVAS_TOOLS = [
   {
     name: 'canvas_read_submission_attachment_text',
     description:
-      'Download and extract text from your assignment submission attachment (PDF/DOCX).',
+      'Download and extract text from your assignment submission attachment (PDF/DOCX/PPTX).',
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -491,37 +466,6 @@ export function registerTools(server: Server): void {
 
     try {
       switch (name) {
-        case 'canvas_auth_browser_login': {
-          const result = await canvasApi.browserLoginWithPlaywright({
-            canvasApiUrl: args?.canvasApiUrl as string | undefined,
-            storageStatePath: args?.storageStatePath as string | undefined,
-            confirmationFilePath: args?.confirmationFilePath as string | undefined,
-            loginUrl: args?.loginUrl as string | undefined,
-            timeoutMs:
-              typeof args?.timeoutSeconds === 'number'
-                ? Math.max(1, Math.floor(args.timeoutSeconds)) * 1000
-                : undefined,
-            headless: args?.headless as boolean | undefined,
-          });
-
-          const userPart =
-            result.userName || result.userId
-              ? `Logged in as ${result.userName ?? `user ${result.userId}`}. `
-              : '';
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text:
-                  `${userPart}Saved Canvas session to: ${result.storageStatePath}\n` +
-                  `FlowState will automatically persist this authentication and reload MCPs. ` +
-                  `Canvas tools should work within a few seconds.`,
-              },
-            ],
-          };
-        }
-
         case 'canvas_list_courses': {
           const courses = await canvasApi.getCourses({
             enrollmentState: args?.enrollmentState as 'active' | 'completed' | 'all' | undefined,
@@ -893,6 +837,7 @@ export function registerTools(server: Server): void {
           const fileId = args?.fileId as number;
           const downloaded = await canvasApi.downloadFileById(fileId);
           const contentType = normalizeContentType(downloaded.contentType);
+          const downloadedBytes = downloaded.buffer.length;
 
           if (downloaded.file.size > CANVAS_MAX_FILE_SIZE_BYTES) {
             throw new Error(
@@ -900,8 +845,14 @@ export function registerTools(server: Server): void {
             );
           }
 
+          if (downloadedBytes > CANVAS_MAX_FILE_SIZE_BYTES) {
+            throw new Error(
+              `Downloaded file too large (${formatBytes(downloadedBytes)}). Limit is ${formatBytes(CANVAS_MAX_FILE_SIZE_BYTES)}.`
+            );
+          }
+
           if (!SUPPORTED_DOCUMENT_TYPES.has(contentType)) {
-            throw new Error(`Unsupported file type: ${contentType}. Supported: PDF, DOCX.`);
+            throw new Error(`Unsupported file type: ${contentType}. Supported: ${SUPPORTED_DOCUMENT_TYPE_LABEL}.`);
           }
 
           const extracted = await extractDocumentText(downloaded.buffer, contentType);
@@ -912,7 +863,7 @@ export function registerTools(server: Server): void {
                 type: 'text',
                 text:
                   `File: ${downloaded.file.display_name} (${formatBytes(downloaded.file.size)}, ${contentType})\n` +
-                  `Source: ${downloaded.finalUrl}\n\n` +
+                  `Source: ${sanitizeSourceUrl(downloaded.finalUrl)}\n\n` +
                   extracted.text,
               },
             ],
@@ -951,12 +902,19 @@ export function registerTools(server: Server): void {
           }
 
           const downloaded = await canvasApi.downloadFileByUrl(url, { maxRedirects: CANVAS_MAX_REDIRECTS });
+          const downloadedBytes = downloaded.buffer.length;
           const contentType = normalizeContentType(
             attachment.content_type ?? attachment['content-type'] ?? downloaded.contentType
           );
 
+          if (downloadedBytes > CANVAS_MAX_FILE_SIZE_BYTES) {
+            throw new Error(
+              `Downloaded attachment too large (${formatBytes(downloadedBytes)}). Limit is ${formatBytes(CANVAS_MAX_FILE_SIZE_BYTES)}.`
+            );
+          }
+
           if (!SUPPORTED_DOCUMENT_TYPES.has(contentType)) {
-            throw new Error(`Unsupported attachment type: ${contentType}. Supported: PDF, DOCX.`);
+            throw new Error(`Unsupported attachment type: ${contentType}. Supported: ${SUPPORTED_DOCUMENT_TYPE_LABEL}.`);
           }
 
           const extracted = await extractDocumentText(downloaded.buffer, contentType);
@@ -967,7 +925,7 @@ export function registerTools(server: Server): void {
                 type: 'text',
                 text:
                   `Submission Attachment: ${attachment.filename} (${size ? formatBytes(size) : 'size unknown'}, ${contentType})\n` +
-                  `Source: ${downloaded.finalUrl}\n\n` +
+                  `Source: ${sanitizeSourceUrl(downloaded.finalUrl)}\n\n` +
                   extracted.text,
               },
             ],

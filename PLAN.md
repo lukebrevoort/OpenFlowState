@@ -1280,6 +1280,210 @@ Value: repeatable builds, fewer regressions, and a shippable beta.
 - [ ] Clean up Sidebar to use Real-Time Data (e.g. active workflow run, pending approvals) instead of stale session state
 - [ ] Clean Sidebar Clean and allow users to search for previous conversations / sessions
 
+### Phase 8: Academic Intelligence - Canvas Document Study Pack Engine
+
+Value: FlowState can pull Canvas course files (PDF + PPTX), interpret them with source-grounded reasoning, and generate high-quality study materials with citation traceability.
+
+#### Phase 8 Product Goal
+
+Enable users to ask:
+
+- "Build study materials for my next exam from Canvas"
+- "Use my latest slides and make a practice exam"
+- "Refresh my study pack because new lecture files were uploaded"
+
+And FlowState should:
+
+1. Pull scoped source docs from Canvas (and local attachments in MVP).
+2. Parse PDFs + PPTX slide text + speaker notes.
+3. Merge context at course level.
+4. Generate study outputs with per-section inline citations.
+5. Save outputs to user-selected destination (ask every run).
+
+#### Confirmed Phase 8 Decisions (Interview Locked)
+
+- Destination selection is asked every run; if unknown, suggest local file fallback (Downloads).
+- Destination options include Notion, Obsidian vault write, and local files.
+- MVP output bundle: quiz/practice exam + summary sheet/exam review + flashcards (if possible).
+- Citation model: per-section citations with inline tags.
+- Extraction failures are non-blocking: continue with uncertainty markers and recovery guidance.
+- Two-tier reasoning mode: Conservative (source-grounded) and Coaching (light inference), but practice content remains strictly source-derived.
+- Context scope is course-level merged context.
+- Output is versioned on reruns; include summary diff.
+- Refresh policy is event-driven suggestion + one-click regenerate (also when exam proximity signals urgency).
+- Autonomy policy: auto for read/extract/compose; approval required for external writes.
+- Canvas scope is strict explicit course scope first.
+- PPTX MVP extraction includes slide text + speaker notes only.
+- OCR is out of MVP; image-only/scanned sections are flagged.
+- Stable internal schema is required in Phase 8.
+- Notion destination uses hybrid model (DB row + rich page).
+- Personalization uses user profile with transparency notice.
+- Learning science defaults are lightweight and on by default.
+- Quality gate runs before write; failed gate produces draft preview + explicit "write anyway" approval.
+- Task summary order: succeeded -> gaps -> next actions.
+- Storage is local durable with user-controlled purge and per-course retention.
+- Concurrency defaults to 2, configurable up to 3.
+- External knowledge retrieval is allowlist-based + explicit user toggle.
+- Metrics are local-only with export (JSON/CSV).
+
+#### User Experience Flow (Phase 8 MVP)
+
+1. User prompt in Chat or Workflow: "Create study materials for [Course]".
+2. FlowState prompts for destination (Notion / Obsidian / Local).
+3. FlowState prompts source scope mode:
+   - Course-wide recent files, or
+   - Explicit file selection.
+4. FlowState creates a TaskRun and routes to Tasks mode.
+5. Pipeline runs: discover -> extract -> normalize -> generate -> validate -> preview.
+6. User sees draft preview + quality summary + extraction gaps.
+7. If quality gate passes, user approves write destination action.
+8. Outputs saved and versioned; run summary includes diff vs previous run.
+
+#### Destinations and Output Format
+
+Destination is user-selected per run.
+
+- Notion (hybrid):
+  - one DB row per study material run (metadata),
+  - linked page with full outputs, citations, and extraction warnings,
+  - optional attached artifacts.
+- Obsidian:
+  - direct vault write (path selected/approved by user),
+  - markdown files + flashcards CSV artifact.
+- Local fallback:
+  - folder output in Downloads by default,
+  - `summary.md`, `practice-exam.md`, `flashcards.csv`, `run-metadata.json`.
+
+#### Source Ingestion Scope (MVP)
+
+Supported sources:
+
+- Canvas course files (strict explicit course scope).
+- Local file attach (manual upload path).
+
+Supported file types:
+
+- PDF (text extraction).
+- PPTX (slide text + speaker notes).
+
+Out of MVP:
+
+- OCR for scanned/image-only content.
+- Non-PDF/non-PPTX academic format expansion.
+
+#### Generation and Guardrails
+
+Generation outputs:
+
+- Summary Sheet / Exam Review.
+- Practice Exam / Quiz.
+- Flashcards (Anki-friendly CSV first).
+
+Grounding and creativity policy:
+
+- Practice questions are strictly source-derived.
+- Per-section inline citations are required in generated outputs.
+- External knowledge augmentation is configurable via settings and constrained to allowlisted domains.
+
+Quality gate checks before write:
+
+- Citation coverage threshold (default 80%).
+- Duplicate question threshold (default <10%).
+- Source coverage requirement (selected files represented).
+- Parsing uncertainty report attached to run.
+
+If quality gate fails:
+
+- Show draft preview + issues.
+- Require explicit "write anyway" approval to persist externally.
+
+#### Data Model Additions (Phase 8)
+
+Add durable local entities (SQLite + file artifacts):
+
+- `SourceDocument`
+  - `id`, `courseId`, `origin` (`canvas` | `local`), `fileType`, `title`, `sourceRef`, `versionHash`, `ingestedAt`.
+- `StudyMaterialRun`
+  - `id`, `courseId`, `taskRunId`, `mode` (`conservative` | `coaching`), `destinationType`, `status`, `qualityScore`, `createdAt`, `updatedAt`.
+- `StudyMaterialArtifact`
+  - `id`, `studyRunId`, `kind` (`summary` | `practice_exam` | `flashcards` | `report`), `pathOrBlobRef`, `mime`, `createdAt`.
+- `CitationSpan`
+  - `id`, `studyRunId`, `artifactId`, `sectionId`, `sourceDocumentId`, `sourceLocator` (`page`/`slide`/`note`), `confidence`.
+- `ExtractionIssue`
+  - `id`, `studyRunId`, `sourceDocumentId`, `kind`, `detail`, `severity`.
+- `StudyRunDiff`
+  - `id`, `studyRunId`, `previousStudyRunId`, `summary`.
+
+#### Settings Additions (Phase 8)
+
+New settings in Integrations/Agent/Storage surfaces:
+
+- External knowledge mode toggle (allowlisted domains only).
+- Generation mode default (Conservative vs Coaching).
+- Max concurrent study runs (default 2, max 3).
+- Retention + purge controls:
+  - per-course,
+  - per-source-file,
+  - cache class,
+  - global TTL override.
+- Destination preferences (optional suggestions only; destination still asked each run).
+
+#### Task and Timeline Behavior
+
+- Any study-material generation request is promoted to Tasks mode.
+- Timeline emits explicit stages:
+  - source discovery,
+  - extraction,
+  - uncertainty detection,
+  - generation,
+  - quality gate,
+  - destination write.
+- Summary ordering in task completion:
+  - what succeeded,
+  - what gaps remain,
+  - recommended next actions.
+
+#### Metrics (Local Only)
+
+Track locally and expose in dashboard/export:
+
+- Citation coverage.
+- Rerun frequency.
+- User acceptance/edit rate.
+
+Export formats:
+
+- JSON.
+- CSV.
+
+#### Phase 8 Acceptance Criteria
+
+- User can select a Canvas course (or local files), generate a study pack, and save to selected destination.
+- Generated summary + practice exam include inline per-section citations.
+- PPTX speaker notes are included when present.
+- Extraction uncertainty is surfaced clearly when OCR-like limitations occur.
+- Failed quality gate blocks write by default and requires explicit "write anyway" approval.
+- Runs are versioned; reruns include a summary diff.
+- Notion hybrid write path and Obsidian direct vault write both function end-to-end.
+- Concurrency honors default 2 and configurable cap up to 3.
+- Metrics are available locally and exportable with no telemetry.
+
+#### Phase 8 Implementation Checklist
+
+- [ ] Add Phase 8 schema + migrations for source docs, study runs, artifacts, citations, extraction issues, and run diffs
+- [ ] Implement Canvas source discovery + explicit file picker flow (course-wide + file-scoped)
+- [ ] Implement local file attach flow for PDF/PPTX
+- [ ] Implement PDF parser and PPTX parser (slide text + speaker notes)
+- [ ] Add extraction uncertainty detector and issue model
+- [ ] Build generation orchestrator for summary + practice exam + flashcards
+- [ ] Add per-section inline citation formatter and source map rendering
+- [ ] Add quality gate evaluator and draft-only failure path
+- [ ] Add destination router (Notion hybrid, Obsidian direct vault, local folder output)
+- [ ] Add study run versioning + diff summarizer
+- [ ] Add settings UI for external knowledge toggle, concurrency, and retention/purge controls
+- [ ] Add local metrics dashboard + JSON/CSV export
+- [ ] Add e2e tests: Canvas scope -> generate -> quality gate -> destination write -> rerun diff
+
 #### Legacy Spec: Unified Real-Time Timeline
 
 > Goal: show users what FlowState is doing _in real time_ via a single, chronological activity feed. No tabs—just a live stream of steps, tool calls, and approvals that auto-scrolls as work progresses.

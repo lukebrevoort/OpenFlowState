@@ -29,6 +29,10 @@ import { startPendingAuthWatcher, stopPendingAuthWatcher } from './pending-auth-
 import type {
   IpcError,
   IpcResult,
+  StudyMaterialArtifact,
+  StudyMaterialArtifactCreateInput,
+  StudyMaterialRun,
+  StudyMaterialRunCreateInput,
   TaskRun,
   WorkflowArtifact,
   WorkflowDefinition,
@@ -38,6 +42,7 @@ import { workflowsRunner } from './workflows-runner.js';
 import { workflowsGenerator } from './workflows-generator.js';
 import { toRendererTaskRun } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
+import { studyMaterialStore } from './study-material-store.js';
 import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
 import { userProfile } from '@flowstate/core';
 import { runIntegrationHealthCheck, runOAuthBatchHealthCheck } from './integrations-health.js';
@@ -899,6 +904,15 @@ const ipcError = <T>(code: IpcError['code'], message: string, details?: unknown)
 
 const ipcOk = <T>(data: T): IpcResult<T> => ({ ok: true, data });
 
+const STUDY_MATERIAL_RUN_MODES = new Set(['conservative', 'coaching']);
+const STUDY_MATERIAL_RUN_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'cancelled']);
+const STUDY_MATERIAL_ARTIFACT_KINDS = new Set(['summary', 'practice_exam', 'flashcards', 'report']);
+const STUDY_MATERIAL_MAX_LIMIT = 200;
+
+const isFiniteInteger = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
+};
+
 const DEFAULT_CONVERSATION_TITLE = 'New Conversation';
 
 const normalizeConversationTitle = (title: string): string => {
@@ -969,6 +983,11 @@ const configureTaskStore = (): void => {
 const configureWorkflowRunStore = (): void => {
   // Keep workflow run history persisted in memory.db.
   workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureStudyMaterialStore = (): void => {
+  // Keep study material run history persisted in memory.db.
+  studyMaterialStore.configure({ dataDir: configStore.getDataDir() });
 };
 
 const configureWorkflowsPinsStore = (): void => {
@@ -1394,6 +1413,170 @@ ipcMain.handle('tasks:remove', async (_event, taskRunId: string) => {
   } catch (error) {
     console.warn('[IPC] Failed to remove task run:', error);
     return ipcError<{ removed: boolean }>('UNKNOWN', 'Failed to remove task run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:create', async (_event, input: StudyMaterialRunCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const courseId = typeof input?.courseId === 'string' ? input.courseId.trim() : '';
+  const mode = typeof input?.mode === 'string' ? input.mode.trim() : '';
+  const destinationType = typeof input?.destinationType === 'string' ? input.destinationType.trim() : '';
+
+  if (!id || !courseId || !mode || !destinationType) {
+    return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'id, courseId, mode, and destinationType are required.');
+  }
+
+  if (!STUDY_MATERIAL_RUN_MODES.has(mode)) {
+    return ipcError<StudyMaterialRun>(
+      'INVALID_REQUEST',
+      `mode must be one of: ${Array.from(STUDY_MATERIAL_RUN_MODES).join(', ')}.`,
+    );
+  }
+
+  const status = input?.status ?? 'queued';
+  if (!STUDY_MATERIAL_RUN_STATUSES.has(status)) {
+    return ipcError<StudyMaterialRun>(
+      'INVALID_REQUEST',
+      `status must be one of: ${Array.from(STUDY_MATERIAL_RUN_STATUSES).join(', ')}.`,
+    );
+  }
+
+  if (input?.qualityScore !== undefined) {
+    if (typeof input.qualityScore !== 'number' || !Number.isFinite(input.qualityScore)) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be a finite number between 0 and 1.');
+    }
+
+    if (input.qualityScore < 0 || input.qualityScore > 1) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be between 0 and 1.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const now = Date.now();
+    const run = studyMaterialStore.createRun({
+      id,
+      courseId,
+      ...(typeof input.taskRunId === 'string' && input.taskRunId.trim().length > 0
+        ? { taskRunId: input.taskRunId.trim() }
+        : {}),
+      mode: mode as StudyMaterialRun['mode'],
+      destinationType,
+      status: status as StudyMaterialRun['status'],
+      ...(typeof input.qualityScore === 'number' && Number.isFinite(input.qualityScore)
+        ? { qualityScore: input.qualityScore }
+        : {}),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return ipcOk<StudyMaterialRun>(run);
+  } catch (error) {
+    console.warn('[IPC] Failed to create study material run:', error);
+    return ipcError<StudyMaterialRun>('UNKNOWN', 'Failed to create study material run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:list', async (_event, query?: { courseId?: string; limit?: number; offset?: number }) => {
+  if (query?.limit !== undefined) {
+    if (!isFiniteInteger(query.limit)) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'limit must be a finite integer between 1 and 200.');
+    }
+
+    if (query.limit < 1 || query.limit > STUDY_MATERIAL_MAX_LIMIT) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'limit must be between 1 and 200.');
+    }
+  }
+
+  if (query?.offset !== undefined) {
+    if (!isFiniteInteger(query.offset)) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'offset must be a finite integer greater than or equal to 0.');
+    }
+
+    if (query.offset < 0) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'offset must be greater than or equal to 0.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const runs = studyMaterialStore.listRuns({
+      ...(typeof query?.courseId === 'string' && query.courseId.trim().length > 0
+        ? { courseId: query.courseId.trim() }
+        : {}),
+      ...(typeof query?.limit === 'number' ? { limit: query.limit } : {}),
+      ...(typeof query?.offset === 'number' ? { offset: query.offset } : {}),
+    }) as unknown as StudyMaterialRun[];
+    return ipcOk<StudyMaterialRun[]>(runs);
+  } catch (error) {
+    console.warn('[IPC] Failed to list study material runs:', error);
+    return ipcError<StudyMaterialRun[]>('UNKNOWN', 'Failed to list study material runs.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:get', async (_event, studyRunId: string) => {
+  const id = typeof studyRunId === 'string' ? studyRunId.trim() : '';
+  if (!id) {
+    return ipcError<StudyMaterialRun | null>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const run = studyMaterialStore.getRun(id) as StudyMaterialRun | null;
+    return ipcOk<StudyMaterialRun | null>(run);
+  } catch (error) {
+    console.warn('[IPC] Failed to get study material run:', error);
+    return ipcError<StudyMaterialRun | null>('UNKNOWN', 'Failed to get study material run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:artifacts:create', async (_event, input: StudyMaterialArtifactCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const kind = typeof input?.kind === 'string' ? input.kind.trim() : '';
+  const pathOrBlobRef = typeof input?.pathOrBlobRef === 'string' ? input.pathOrBlobRef.trim() : '';
+
+  if (!id || !studyRunId || !kind || !pathOrBlobRef) {
+    return ipcError<StudyMaterialArtifact>('INVALID_REQUEST', 'id, studyRunId, kind, and pathOrBlobRef are required.');
+  }
+
+  if (!STUDY_MATERIAL_ARTIFACT_KINDS.has(kind)) {
+    return ipcError<StudyMaterialArtifact>(
+      'INVALID_REQUEST',
+      `kind must be one of: ${Array.from(STUDY_MATERIAL_ARTIFACT_KINDS).join(', ')}.`,
+    );
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const artifact = studyMaterialStore.createArtifact({
+      id,
+      studyRunId,
+      kind: kind as StudyMaterialArtifact['kind'],
+      pathOrBlobRef,
+      ...(typeof input.mime === 'string' && input.mime.trim().length > 0 ? { mime: input.mime.trim() } : {}),
+      createdAt: Date.now(),
+    });
+    return ipcOk<StudyMaterialArtifact>(artifact);
+  } catch (error) {
+    console.warn('[IPC] Failed to create study material artifact:', error);
+    return ipcError<StudyMaterialArtifact>('UNKNOWN', 'Failed to create study material artifact.');
+  }
+});
+
+ipcMain.handle('studyMaterials:artifacts:list', async (_event, studyRunId: string) => {
+  const id = typeof studyRunId === 'string' ? studyRunId.trim() : '';
+  if (!id) {
+    return ipcError<StudyMaterialArtifact[]>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const artifacts = studyMaterialStore.listArtifactsByRun(id) as unknown as StudyMaterialArtifact[];
+    return ipcOk<StudyMaterialArtifact[]>(artifacts);
+  } catch (error) {
+    console.warn('[IPC] Failed to list study material artifacts:', error);
+    return ipcError<StudyMaterialArtifact[]>('UNKNOWN', 'Failed to list study material artifacts.');
   }
 });
 
