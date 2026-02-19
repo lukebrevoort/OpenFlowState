@@ -10,6 +10,17 @@ export interface AppInfo {
   isDev: boolean;
 }
 
+export interface FileDialogFilter {
+  name: string;
+  extensions: string[];
+}
+
+export interface OpenFilesDialogOptions {
+  title?: string;
+  filters?: FileDialogFilter[];
+  multiSelect?: boolean;
+}
+
 export interface OpenCodeStatus {
   running: boolean;
   sessionId: string | null;
@@ -166,7 +177,15 @@ export interface StudyMaterialRun {
   taskRunId?: string;
   mode: 'conservative' | 'coaching' | (string & {});
   destinationType: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | (string & {});
+  status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'awaiting_destination'
+    | 'awaiting_quality_override'
+    | (string & {});
   qualityScore?: number;
   createdAt: number;
   updatedAt: number;
@@ -179,6 +198,32 @@ export interface StudyMaterialArtifact {
   pathOrBlobRef: string;
   mime?: string;
   createdAt: number;
+}
+
+export interface CitationSpan {
+  id: string;
+  studyRunId: string;
+  artifactId: string;
+  sectionId: string;
+  sourceDocumentId: string;
+  sourceLocator: string;
+  confidence?: number;
+}
+
+export interface ExtractionIssue {
+  id: string;
+  studyRunId: string;
+  sourceDocumentId: string;
+  kind: string;
+  detail: string;
+  severity: string;
+}
+
+export interface StudyRunDiff {
+  id: string;
+  studyRunId: string;
+  previousStudyRunId: string;
+  summary: string;
 }
 
 export interface StudyMaterialRunCreateInput {
@@ -197,6 +242,157 @@ export interface StudyMaterialArtifactCreateInput {
   kind: StudyMaterialArtifact['kind'];
   pathOrBlobRef: string;
   mime?: string;
+}
+
+export interface CitationSpanCreateInput {
+  id: string;
+  studyRunId: string;
+  artifactId: string;
+  sectionId: string;
+  sourceDocumentId: string;
+  sourceLocator: string;
+  confidence?: number;
+}
+
+export interface CitationSpanListQuery {
+  studyRunId: string;
+  artifactId?: string;
+}
+
+export interface ExtractionIssueCreateInput {
+  id: string;
+  studyRunId: string;
+  sourceDocumentId: string;
+  kind: string;
+  detail: string;
+  severity: string;
+}
+
+export interface ExtractionIssueListQuery {
+  studyRunId: string;
+  sourceDocumentId?: string;
+}
+
+export interface StudyRunDiffCreateInput {
+  id: string;
+  studyRunId: string;
+  previousStudyRunId: string;
+  summary: string;
+}
+
+export interface StudyMaterialRunConfirmDestinationInput {
+  studyRunId: string;
+  destinationType: string;
+  status?: StudyMaterialRun['status'];
+  qualityScore?: number;
+}
+
+export type StudyMaterialFallbackClassification =
+  | 'auth_expired'
+  | 'external_host'
+  | 'inaccessible'
+  | 'timeout'
+  | 'unknown';
+
+export interface StudyMaterialFallbackClassificationInput {
+  message?: string;
+  status?: number | string;
+  code?: string;
+  url?: string;
+}
+
+export interface StudyMaterialFallbackClassificationResult {
+  classification: StudyMaterialFallbackClassification;
+  recommendation: string;
+  localUploadPrimaryAction: boolean;
+}
+
+export interface StudyMaterialQualityGateThresholds {
+  minCitationCoverage: number;
+  maxDuplicateQuestionRatio: number;
+  minSourceCoverageRatio: number;
+}
+
+export interface StudyMaterialQualityGateThresholdOverrides {
+  minCitationCoverage?: number;
+  maxDuplicateQuestionRatio?: number;
+  minSourceCoverageRatio?: number;
+}
+
+export interface StudyMaterialQualityGateEvaluateInput {
+  citationCoverage: number;
+  duplicateQuestionRatio: number;
+  sourceCoverageRatio: number;
+  extractionIssueCount: number;
+  writeAnywayRequested: boolean;
+  thresholds?: StudyMaterialQualityGateThresholdOverrides;
+}
+
+export interface StudyMaterialQualityGateCheck {
+  metric: 'citationCoverage' | 'duplicateQuestionRatio' | 'sourceCoverageRatio' | 'extractionIssueCount';
+  comparator: '>=' | '<=';
+  threshold: number;
+  value: number;
+  passed: boolean;
+}
+
+export interface StudyMaterialQualityGateEvaluateResult {
+  passed: boolean;
+  blocked: boolean;
+  score: number;
+  checks: StudyMaterialQualityGateCheck[];
+  summary: string;
+}
+
+export interface SourceDocumentCreateInput {
+  id: string;
+  courseId: string;
+  origin: SourceDocument['origin'];
+  fileType: string;
+  title: string;
+  sourceRef: string;
+  versionHash: string;
+  ingestedAt?: number;
+}
+
+export interface SourceDocumentListQuery {
+  courseId?: string;
+  origin?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export type StudyMaterialLocalSourceIssueCode =
+  | 'INVALID_PATH'
+  | 'NOT_ABSOLUTE_PATH'
+  | 'NOT_FOUND'
+  | 'NOT_FILE'
+  | 'UNSUPPORTED_EXTENSION'
+  | 'FILE_TOO_LARGE'
+  | 'SIGNATURE_MISMATCH'
+  | 'READ_FAILED'
+  | 'INVALID_SIZE_LIMIT';
+
+export interface StudyMaterialLocalSourceValidationIssue {
+  code: StudyMaterialLocalSourceIssueCode;
+  message: string;
+}
+
+export interface StudyMaterialLocalSourceValidationInput {
+  filePath: string;
+  maxBytes?: number;
+}
+
+export interface StudyMaterialLocalSourceValidationResult {
+  ok: boolean;
+  normalizedPath: string | null;
+  fileName: string | null;
+  extension: '.pdf' | '.pptx' | null;
+  fileType: 'pdf' | 'pptx' | null;
+  sizeBytes: number | null;
+  versionHash: string | null;
+  detectedMime: string | null;
+  issue: StudyMaterialLocalSourceValidationIssue | null;
 }
 
 export interface WorkflowGenerationResult {
@@ -327,6 +523,7 @@ export interface FlowstateAPI {
     openTerminal: (command: string) => Promise<void>;
     showSaveDialog: (options?: { title?: string; defaultPath?: string }) => Promise<string | null>;
     showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
+    showOpenFilesDialog: (options?: OpenFilesDialogOptions) => Promise<string[] | null>;
     ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
   };
 
@@ -492,8 +689,27 @@ export interface FlowstateAPI {
     createRun: (input: StudyMaterialRunCreateInput) => Promise<IpcResult<StudyMaterialRun>>;
     listRuns: (query?: { courseId?: string; limit?: number; offset?: number }) => Promise<IpcResult<StudyMaterialRun[]>>;
     getRun: (studyRunId: string) => Promise<IpcResult<StudyMaterialRun | null>>;
+    confirmDestination: (input: StudyMaterialRunConfirmDestinationInput) => Promise<IpcResult<StudyMaterialRun>>;
+    classifyFallback: (
+      input?: StudyMaterialFallbackClassificationInput
+    ) => Promise<IpcResult<StudyMaterialFallbackClassificationResult>>;
+    evaluateQuality: (
+      input: StudyMaterialQualityGateEvaluateInput
+    ) => Promise<IpcResult<StudyMaterialQualityGateEvaluateResult>>;
+    createSource: (input: SourceDocumentCreateInput) => Promise<IpcResult<SourceDocument>>;
+    validateLocalSource: (
+      input: StudyMaterialLocalSourceValidationInput
+    ) => Promise<IpcResult<StudyMaterialLocalSourceValidationResult>>;
+    getSource: (sourceId: string) => Promise<IpcResult<SourceDocument | null>>;
+    listSources: (query?: SourceDocumentListQuery) => Promise<IpcResult<SourceDocument[]>>;
     createArtifact: (input: StudyMaterialArtifactCreateInput) => Promise<IpcResult<StudyMaterialArtifact>>;
     listArtifacts: (studyRunId: string) => Promise<IpcResult<StudyMaterialArtifact[]>>;
+    createCitation: (input: CitationSpanCreateInput) => Promise<IpcResult<CitationSpan>>;
+    listCitations: (query: CitationSpanListQuery) => Promise<IpcResult<CitationSpan[]>>;
+    createIssue: (input: ExtractionIssueCreateInput) => Promise<IpcResult<ExtractionIssue>>;
+    listIssues: (query: ExtractionIssueListQuery) => Promise<IpcResult<ExtractionIssue[]>>;
+    createDiff: (input: StudyRunDiffCreateInput) => Promise<IpcResult<StudyRunDiff>>;
+    getDiff: (studyRunId: string) => Promise<IpcResult<StudyRunDiff | null>>;
   };
 
   workflows: {
@@ -582,6 +798,16 @@ export interface FlowstateConfig {
      * When undefined, the renderer should default to 'animated'.
      */
     backgroundMotion?: 'animated' | 'static';
+
+    studyMaterials?: {
+      externalKnowledgeAllowlistEnabled?: boolean;
+      defaultGenerationMode?: 'conservative' | 'coaching';
+      maxConcurrentRuns?: number;
+      retention?: {
+        globalRetentionDays?: number;
+        perCourseRetentionEnabled?: boolean;
+      };
+    };
   };
   integrations?: {
     gcal?: {

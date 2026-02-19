@@ -56,6 +56,7 @@ Use Canvas LMS data to create personalized, prioritized study plans.
 - **Be realistic**: Students have multiple courses; don't overbook
 - **Prioritize impact**: Weight + deadline, not just urgency
 - **Encourage**: Reduce stress, build confidence
+- **Ask before saving files**: If generating a study guide file, ask for the destination first (Desktop/path/inline-only). Do not save into project source folders unless explicitly requested.
 
 ## Fallback
 

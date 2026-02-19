@@ -24,7 +24,15 @@ export type StudyMaterialRunRecord = {
   taskRunId?: string;
   mode: 'conservative' | 'coaching' | (string & {});
   destinationType: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | (string & {});
+  status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'awaiting_destination'
+    | 'awaiting_quality_override'
+    | (string & {});
   qualityScore?: number;
   createdAt: number;
   updatedAt: number;
@@ -39,16 +47,59 @@ export type StudyMaterialArtifactRecord = {
   createdAt: number;
 };
 
+export type CitationSpanRecord = {
+  id: string;
+  studyRunId: string;
+  artifactId: string;
+  sectionId: string;
+  sourceDocumentId: string;
+  sourceLocator: string;
+  confidence?: number;
+};
+
+export type ExtractionIssueRecord = {
+  id: string;
+  studyRunId: string;
+  sourceDocumentId: string;
+  kind: string;
+  detail: string;
+  severity: string;
+};
+
+export type StudyRunDiffRecord = {
+  id: string;
+  studyRunId: string;
+  previousStudyRunId: string;
+  summary: string;
+};
+
 export type StudyMaterialRunListQuery = {
   courseId?: string;
   limit?: number;
   offset?: number;
 };
 
+export type SourceDocumentListQuery = {
+  courseId?: string;
+  origin?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type StudyMaterialRunPatch = {
+  destinationType?: string;
+  status?: StudyMaterialRunRecord['status'];
+  updatedAt?: number;
+  qualityScore?: number | null;
+};
+
 type StudyMaterialStoreMigration = {
   version: number;
   up: (db: Database.Database) => void;
 };
+
+const STUDY_MATERIAL_MIGRATIONS_TABLE = 'study_material_store_migrations';
+const STUDY_MATERIAL_MIGRATION_SCOPE = 'study_material_store';
 
 const STUDY_MATERIAL_STORE_MIGRATIONS: StudyMaterialStoreMigration[] = [
   {
@@ -210,6 +261,32 @@ type StudyMaterialArtifactRow = {
   created_at: number;
 };
 
+type CitationSpanRow = {
+  id: string;
+  study_run_id: string;
+  artifact_id: string;
+  section_id: string;
+  source_document_id: string;
+  source_locator: string;
+  confidence: number | null;
+};
+
+type ExtractionIssueRow = {
+  id: string;
+  study_run_id: string;
+  source_document_id: string;
+  kind: string;
+  detail: string;
+  severity: string;
+};
+
+type StudyRunDiffRow = {
+  id: string;
+  study_run_id: string;
+  previous_study_run_id: string;
+  summary: string;
+};
+
 const rowToRunRecord = (row: StudyMaterialRunRow): StudyMaterialRunRecord => ({
   id: row.id,
   courseId: row.course_id,
@@ -240,6 +317,32 @@ const rowToArtifactRecord = (row: StudyMaterialArtifactRow): StudyMaterialArtifa
   pathOrBlobRef: row.path_or_blob_ref,
   ...(row.mime === null ? {} : { mime: row.mime }),
   createdAt: row.created_at,
+});
+
+const rowToCitationSpanRecord = (row: CitationSpanRow): CitationSpanRecord => ({
+  id: row.id,
+  studyRunId: row.study_run_id,
+  artifactId: row.artifact_id,
+  sectionId: row.section_id,
+  sourceDocumentId: row.source_document_id,
+  sourceLocator: row.source_locator,
+  ...(row.confidence === null ? {} : { confidence: row.confidence }),
+});
+
+const rowToExtractionIssueRecord = (row: ExtractionIssueRow): ExtractionIssueRecord => ({
+  id: row.id,
+  studyRunId: row.study_run_id,
+  sourceDocumentId: row.source_document_id,
+  kind: row.kind,
+  detail: row.detail,
+  severity: row.severity,
+});
+
+const rowToStudyRunDiffRecord = (row: StudyRunDiffRow): StudyRunDiffRecord => ({
+  id: row.id,
+  studyRunId: row.study_run_id,
+  previousStudyRunId: row.previous_study_run_id,
+  summary: row.summary,
 });
 
 export type StudyMaterialStoreConfig = {
@@ -290,19 +393,46 @@ export class StudyMaterialStore {
 
     const db = this.db;
 
-    const currentVersion = Number(db.pragma('user_version', { simple: true }) ?? 0);
-    const pendingMigrations = STUDY_MATERIAL_STORE_MIGRATIONS
-      .filter((migration) => migration.version > currentVersion)
-      .sort((a, b) => a.version - b.version);
+    const applyMigrations = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ${STUDY_MATERIAL_MIGRATIONS_TABLE} (
+          scope TEXT PRIMARY KEY,
+          version INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
 
-    for (const migration of pendingMigrations) {
-      const applyMigration = db.transaction(() => {
+      const versionRow = db
+        .prepare(`
+          SELECT version
+          FROM ${STUDY_MATERIAL_MIGRATIONS_TABLE}
+          WHERE scope = ?
+          LIMIT 1
+        `)
+        .get(STUDY_MATERIAL_MIGRATION_SCOPE) as { version: number } | undefined;
+
+      let currentVersion = Number(versionRow?.version ?? 0);
+      const pendingMigrations = STUDY_MATERIAL_STORE_MIGRATIONS
+        .filter((migration) => migration.version > currentVersion)
+        .sort((a, b) => a.version - b.version);
+
+      for (const migration of pendingMigrations) {
         migration.up(db);
-        db.pragma(`user_version = ${migration.version}`);
-      });
+        currentVersion = migration.version;
 
-      applyMigration();
-    }
+        db.prepare(
+          `
+          INSERT INTO ${STUDY_MATERIAL_MIGRATIONS_TABLE} (scope, version, updated_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(scope) DO UPDATE SET
+            version = excluded.version,
+            updated_at = excluded.updated_at
+          `,
+        ).run(STUDY_MATERIAL_MIGRATION_SCOPE, currentVersion, Date.now());
+      }
+    });
+
+    applyMigrations();
   }
 
   createSourceDocument(record: SourceDocumentRecord): SourceDocumentRecord {
@@ -356,6 +486,33 @@ export class StudyMaterialStore {
     return row ? rowToSourceDocumentRecord(row) : null;
   }
 
+  listSourceDocuments(query: SourceDocumentListQuery = {}): SourceDocumentRecord[] {
+    this.initialize();
+    if (!this.db) return [];
+
+    const courseId = query.courseId ?? null;
+    const origin = query.origin ?? null;
+    const limit = Math.min(
+      STUDY_MATERIAL_MAX_LIMIT,
+      Math.max(1, coercePaginationValue(query.limit, STUDY_MATERIAL_DEFAULT_LIMIT)),
+    );
+    const offset = Math.max(0, coercePaginationValue(query.offset, 0));
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT * FROM source_documents
+        WHERE (? IS NULL OR course_id = ?)
+          AND (? IS NULL OR origin = ?)
+        ORDER BY ingested_at DESC
+        LIMIT ? OFFSET ?
+        `,
+      )
+      .all(courseId, courseId, origin, origin, limit, offset) as SourceDocumentRow[];
+
+    return rows.map(rowToSourceDocumentRecord);
+  }
+
   createRun(record: StudyMaterialRunRecord): StudyMaterialRunRecord {
     this.initialize();
     if (!this.db) {
@@ -400,6 +557,28 @@ export class StudyMaterialStore {
       );
 
     return record;
+  }
+
+  updateRun(id: string, patch: StudyMaterialRunPatch): StudyMaterialRunRecord | null {
+    const existing = this.getRun(id);
+    if (!existing) {
+      return null;
+    }
+
+    const merged: StudyMaterialRunRecord = {
+      ...existing,
+      ...(typeof patch.destinationType === 'string' ? { destinationType: patch.destinationType } : {}),
+      ...(typeof patch.status === 'string' ? { status: patch.status } : {}),
+      ...(patch.qualityScore === null
+        ? { qualityScore: undefined }
+        : typeof patch.qualityScore === 'number'
+          ? { qualityScore: patch.qualityScore }
+          : {}),
+      updatedAt: patch.updatedAt ?? Date.now(),
+    };
+
+    this.createRun(merged);
+    return merged;
   }
 
   getRun(id: string): StudyMaterialRunRecord | null {
@@ -487,6 +666,156 @@ export class StudyMaterialStore {
       .all(studyRunId) as StudyMaterialArtifactRow[];
 
     return rows.map(rowToArtifactRecord);
+  }
+
+  createCitationSpan(record: CitationSpanRecord): CitationSpanRecord {
+    this.initialize();
+    if (!this.db) {
+      return record;
+    }
+
+    this.db
+      .prepare(
+        `
+        INSERT INTO citation_spans (
+          id,
+          study_run_id,
+          artifact_id,
+          section_id,
+          source_document_id,
+          source_locator,
+          confidence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          study_run_id = excluded.study_run_id,
+          artifact_id = excluded.artifact_id,
+          section_id = excluded.section_id,
+          source_document_id = excluded.source_document_id,
+          source_locator = excluded.source_locator,
+          confidence = excluded.confidence
+        `,
+      )
+      .run(
+        record.id,
+        record.studyRunId,
+        record.artifactId,
+        record.sectionId,
+        record.sourceDocumentId,
+        record.sourceLocator,
+        record.confidence ?? null,
+      );
+
+    return record;
+  }
+
+  listCitationSpansByRun(studyRunId: string, artifactId?: string): CitationSpanRecord[] {
+    this.initialize();
+    if (!this.db) return [];
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT * FROM citation_spans
+        WHERE study_run_id = ?
+          AND (? IS NULL OR artifact_id = ?)
+        ORDER BY id ASC
+        `,
+      )
+      .all(studyRunId, artifactId ?? null, artifactId ?? null) as CitationSpanRow[];
+
+    return rows.map(rowToCitationSpanRecord);
+  }
+
+  createExtractionIssue(record: ExtractionIssueRecord): ExtractionIssueRecord {
+    this.initialize();
+    if (!this.db) {
+      return record;
+    }
+
+    this.db
+      .prepare(
+        `
+        INSERT INTO extraction_issues (
+          id,
+          study_run_id,
+          source_document_id,
+          kind,
+          detail,
+          severity
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          study_run_id = excluded.study_run_id,
+          source_document_id = excluded.source_document_id,
+          kind = excluded.kind,
+          detail = excluded.detail,
+          severity = excluded.severity
+        `,
+      )
+      .run(record.id, record.studyRunId, record.sourceDocumentId, record.kind, record.detail, record.severity);
+
+    return record;
+  }
+
+  listExtractionIssuesByRun(studyRunId: string, sourceDocumentId?: string): ExtractionIssueRecord[] {
+    this.initialize();
+    if (!this.db) return [];
+
+    const rows = this.db
+      .prepare(
+        `
+        SELECT * FROM extraction_issues
+        WHERE study_run_id = ?
+          AND (? IS NULL OR source_document_id = ?)
+        ORDER BY id ASC
+        `,
+      )
+      .all(studyRunId, sourceDocumentId ?? null, sourceDocumentId ?? null) as ExtractionIssueRow[];
+
+    return rows.map(rowToExtractionIssueRecord);
+  }
+
+  createRunDiff(record: StudyRunDiffRecord): StudyRunDiffRecord {
+    this.initialize();
+    if (!this.db) {
+      return record;
+    }
+
+    this.db
+      .prepare(
+        `
+        INSERT INTO study_run_diffs (
+          id,
+          study_run_id,
+          previous_study_run_id,
+          summary
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          study_run_id = excluded.study_run_id,
+          previous_study_run_id = excluded.previous_study_run_id,
+          summary = excluded.summary
+        `,
+      )
+      .run(record.id, record.studyRunId, record.previousStudyRunId, record.summary);
+
+    return record;
+  }
+
+  getRunDiff(studyRunId: string): StudyRunDiffRecord | null {
+    this.initialize();
+    if (!this.db) return null;
+
+    const row = this.db
+      .prepare(
+        `
+        SELECT * FROM study_run_diffs
+        WHERE study_run_id = ?
+        ORDER BY rowid DESC
+        LIMIT 1
+        `,
+      )
+      .get(studyRunId) as StudyRunDiffRow | undefined;
+
+    return row ? rowToStudyRunDiffRecord(row) : null;
   }
 }
 

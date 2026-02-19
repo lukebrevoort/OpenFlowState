@@ -19,7 +19,19 @@ import type {
   FlowstateConfig,
   ClientCredentials,
   ApprovalNotificationClickEvent,
+  OpenFilesDialogOptions,
+  SourceDocumentCreateInput,
+  SourceDocumentListQuery,
+  StudyMaterialFallbackClassificationInput,
+  StudyMaterialQualityGateEvaluateInput,
+  StudyMaterialLocalSourceValidationInput,
   StudyMaterialArtifactCreateInput,
+  CitationSpanCreateInput,
+  CitationSpanListQuery,
+  ExtractionIssueCreateInput,
+  ExtractionIssueListQuery,
+  StudyMaterialRunConfirmDestinationInput,
+  StudyRunDiffCreateInput,
   StudyMaterialRunCreateInput,
 } from '../renderer/types/electron';
 
@@ -39,6 +51,8 @@ const flowstateAPI: FlowstateAPIDefinition = {
       ipcRenderer.invoke('app:showSaveDialog', options),
     showOpenDialog: (options?: { title?: string }) =>
       ipcRenderer.invoke('app:showOpenDialog', options),
+    showOpenFilesDialog: (options?: OpenFilesDialogOptions) =>
+      ipcRenderer.invoke('app:showOpenFilesDialog', options),
     ensureFile: (filePath: string) => ipcRenderer.invoke('app:ensureFile', filePath),
   },
 
@@ -295,9 +309,27 @@ const flowstateAPI: FlowstateAPIDefinition = {
     listRuns: (query?: { courseId?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('studyMaterials:runs:list', query),
     getRun: (studyRunId: string) => ipcRenderer.invoke('studyMaterials:runs:get', studyRunId),
+    confirmDestination: (input: StudyMaterialRunConfirmDestinationInput) =>
+      ipcRenderer.invoke('studyMaterials:runs:confirmDestination', input),
+    classifyFallback: (input?: StudyMaterialFallbackClassificationInput) =>
+      ipcRenderer.invoke('studyMaterials:fallback:classify', input),
+    evaluateQuality: (input: StudyMaterialQualityGateEvaluateInput) =>
+      ipcRenderer.invoke('studyMaterials:quality:evaluate', input),
+    createSource: (input: SourceDocumentCreateInput) => ipcRenderer.invoke('studyMaterials:sources:create', input),
+    validateLocalSource: (input: StudyMaterialLocalSourceValidationInput) =>
+      ipcRenderer.invoke('studyMaterials:sources:validateLocal', input),
+    getSource: (sourceId: string) => ipcRenderer.invoke('studyMaterials:sources:get', sourceId),
+    listSources: (query?: SourceDocumentListQuery) => ipcRenderer.invoke('studyMaterials:sources:list', query),
     createArtifact: (input: StudyMaterialArtifactCreateInput) =>
       ipcRenderer.invoke('studyMaterials:artifacts:create', input),
     listArtifacts: (studyRunId: string) => ipcRenderer.invoke('studyMaterials:artifacts:list', studyRunId),
+    createCitation: (input: CitationSpanCreateInput) =>
+      ipcRenderer.invoke('studyMaterials:citations:create', input),
+    listCitations: (query: CitationSpanListQuery) => ipcRenderer.invoke('studyMaterials:citations:list', query),
+    createIssue: (input: ExtractionIssueCreateInput) => ipcRenderer.invoke('studyMaterials:issues:create', input),
+    listIssues: (query: ExtractionIssueListQuery) => ipcRenderer.invoke('studyMaterials:issues:list', query),
+    createDiff: (input: StudyRunDiffCreateInput) => ipcRenderer.invoke('studyMaterials:diffs:create', input),
+    getDiff: (studyRunId: string) => ipcRenderer.invoke('studyMaterials:diffs:get', studyRunId),
   },
 
   workflows: {

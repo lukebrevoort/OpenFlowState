@@ -305,7 +305,7 @@ export function useOpenCode() {
    */
   const sendMessage = useCallback(async (
     content: string,
-    opts?: { allowWhileRunning?: boolean; fireAndForget?: boolean },
+    opts?: { allowWhileRunning?: boolean; fireAndForget?: boolean; contextPrefix?: string },
   ) => {
     if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
@@ -323,9 +323,14 @@ export function useOpenCode() {
     try {
       // Send to OpenCode (response comes via events)
       if (DEV) console.log('[Renderer] Calling window.flowstate.opencode.send()...');
+      const outboundContent =
+        typeof opts?.contextPrefix === 'string' && opts.contextPrefix.trim().length > 0
+          ? `${opts.contextPrefix.trim()}\n\n${content}`
+          : content;
+
       const result = opts?.fireAndForget
-        ? await window.flowstate.opencode.sendAsync(content)
-        : await window.flowstate.opencode.send(content);
+        ? await window.flowstate.opencode.sendAsync(outboundContent)
+        : await window.flowstate.opencode.send(outboundContent);
       if (DEV) console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
