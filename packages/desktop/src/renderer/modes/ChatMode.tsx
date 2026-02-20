@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
-import { Send, Sparkles, AlertCircle, RefreshCw, Plus, Square } from "lucide-react";
+import {
+  Send,
+  Sparkles,
+  AlertCircle,
+  RefreshCw,
+  Plus,
+  Square,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -9,10 +16,17 @@ import { useChatStore } from "../stores/chatStore";
 import type { Message } from "../stores/chatStore";
 import { useOpenCode } from "../hooks/useOpenCode";
 import { useConfigStore } from "../stores/configStore";
-import type { McpServerStatus, TimelineEvent } from "../types/electron";
+import type {
+  McpServerStatus,
+  SourceDocument,
+  StudyMaterialRun,
+  TimelineEvent,
+} from "../types/electron";
+import { parseResponseHeader } from "../lib/responseHeaders";
 import { TaskHandoffCard } from "../components/TaskHandoffCard";
 import { ActivityTimeline } from "../components/ActivityTimeline";
 import { ApprovalCard } from "../components/ApprovalCard";
+import { StudyRunDiffCard } from "../components/StudyRunDiffCard";
 import {
   errorActivityStep,
   initialActivitySteps,
@@ -71,7 +85,75 @@ const getTypingStepSize = (contentLength: number) => {
   return 14;
 };
 
+const hasFileDragPayload = (event: React.DragEvent<HTMLDivElement>) => {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types).includes("Files");
+};
+
+const buildAttachedSourcesContext = (sources: SourceDocument[]) => {
+  if (sources.length === 0) return "";
+
+  const lines = [...sources]
+    .sort((a, b) => b.ingestedAt - a.ingestedAt)
+    .slice(0, 12)
+    .map((source, index) => {
+      return `${index + 1}. ${source.title} (${source.fileType})\n   path: ${source.sourceRef}\n   sourceId: ${source.id}\n   versionHash: ${source.versionHash}`;
+    });
+
+  return [
+    "Attached local study sources for this session:",
+    ...lines,
+    "Use these files when answering study questions, creating guides, and generating practice material.",
+  ].join("\n");
+};
+
+const ATTACHED_SOURCES_CONTEXT_PREFIX =
+  "Attached local study sources for this session:";
+const ATTACHED_SOURCES_CONTEXT_SUFFIX =
+  "Use these files when answering study questions, creating guides, and generating practice material.";
+
+const stripAttachedSourcesContextForDisplay = (content: string) => {
+  const trimmedStart = content.trimStart();
+  if (!trimmedStart.startsWith(ATTACHED_SOURCES_CONTEXT_PREFIX)) {
+    return content;
+  }
+
+  const suffixIndex = trimmedStart.indexOf(ATTACHED_SOURCES_CONTEXT_SUFFIX);
+  if (suffixIndex < 0) {
+    return content;
+  }
+
+  const afterSuffix =
+    suffixIndex + ATTACHED_SOURCES_CONTEXT_SUFFIX.length;
+  const remainder = trimmedStart.slice(afterSuffix).trimStart();
+  return remainder.length > 0 ? remainder : "";
+};
+
+type StudyDestinationType = "notion" | "obsidian" | "local";
+
+type FallbackDecisionState = {
+  classification: "auth_expired" | "external_host" | "inaccessible" | "timeout";
+  recommendation: string;
+};
+
+type DestinationPromptState = {
+  isOpen: boolean;
+  pendingMessage: string;
+  selectedDestination: StudyDestinationType;
+};
+
+const DEFAULT_DESTINATION: StudyDestinationType = "local";
+
+const WRITE_INTENT_PATTERN =
+  /\b(write|save|export|publish|sync|send\s+to|push\s+to|notion|obsidian|downloads?)\b/i;
+
+const requiresDestinationConfirmation = (message: string) =>
+  WRITE_INTENT_PATTERN.test(message);
+
 const MAX_INPUT_HEIGHT = 128;
+const MAX_TYPING_ANIMATION_CHARS = 12000;
+const MAX_MARKDOWN_NORMALIZE_CHARS = 200000;
 
 const assistantMarkdownComponents: Components = {
   p: ({ children }) => (
@@ -137,6 +219,15 @@ const assistantMarkdownClassName =
   "[&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:py-0 [&_pre_code]:rounded-none [&_pre_code]:text-sm";
 
 const normalizeAssistantMarkdown = (content: string) => {
+  if (!content) return "";
+  if (content.length > MAX_MARKDOWN_NORMALIZE_CHARS) {
+    return content;
+  }
+
+  if (!content.includes("```") && content.includes("•")) {
+    return content.replace(/^\s*•\s+/gm, "- ");
+  }
+
   const parts = content.split(/(```[\s\S]*?```)/g);
 
   return parts
@@ -150,6 +241,11 @@ const normalizeAssistantMarkdown = (content: string) => {
 };
 
 const AssistantMarkdown = ({ content }: { content: string }) => {
+  const normalizedContent = useMemo(
+    () => normalizeAssistantMarkdown(content),
+    [content],
+  );
+
   return (
     <ReactMarkdown
       className={assistantMarkdownClassName}
@@ -158,44 +254,51 @@ const AssistantMarkdown = ({ content }: { content: string }) => {
       disallowedElements={["img"]}
       components={assistantMarkdownComponents}
     >
-      {normalizeAssistantMarkdown(content)}
+      {normalizedContent}
     </ReactMarkdown>
   );
 };
 
 const AssistantMessageContent = ({
-  message,
+  messageId,
+  content,
+  parts,
   animatedMessagesRef,
 }: {
-  message: Message;
+  messageId: string;
+  content: string;
+  parts?: Message["parts"];
   animatedMessagesRef: MutableRefObject<Set<string>>;
 }) => {
-  const shouldAnimate = !animatedMessagesRef.current.has(message.id);
+  const shouldAnimate =
+    !animatedMessagesRef.current.has(messageId) &&
+    content.length <= MAX_TYPING_ANIMATION_CHARS;
   const [visibleText, setVisibleText] = useState(
-    shouldAnimate ? "" : message.content,
+    shouldAnimate ? "" : content,
   );
   const [isComplete, setIsComplete] = useState(!shouldAnimate);
 
   useEffect(() => {
     if (!shouldAnimate) {
-      setVisibleText(message.content);
+      setVisibleText(content);
       setIsComplete(true);
+      animatedMessagesRef.current.add(messageId);
       return;
     }
 
     let currentIndex = 0;
-    const step = getTypingStepSize(message.content.length);
+    const step = getTypingStepSize(content.length);
     let timeoutId: number | null = null;
 
     const tick = () => {
-      currentIndex = Math.min(message.content.length, currentIndex + step);
-      setVisibleText(message.content.slice(0, currentIndex));
+      currentIndex = Math.min(content.length, currentIndex + step);
+      setVisibleText(content.slice(0, currentIndex));
 
-      if (currentIndex < message.content.length) {
+      if (currentIndex < content.length) {
         timeoutId = window.setTimeout(tick, 22);
       } else {
         setIsComplete(true);
-        animatedMessagesRef.current.add(message.id);
+        animatedMessagesRef.current.add(messageId);
       }
     };
 
@@ -206,7 +309,7 @@ const AssistantMessageContent = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [message.content, message.id, shouldAnimate, animatedMessagesRef]);
+  }, [content, messageId, shouldAnimate, animatedMessagesRef]);
 
   if (!isComplete) {
     return (
@@ -219,8 +322,8 @@ const AssistantMessageContent = ({
 
   return (
     <>
-      <AssistantMarkdown content={message.content} />
-      {renderMessageParts(message.parts)}
+      <AssistantMarkdown content={content} />
+      {renderMessageParts(parts)}
     </>
   );
 };
@@ -244,6 +347,18 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     ReturnType<typeof initialActivitySteps>
   >([]);
   const [activityIndex, setActivityIndex] = useState(0);
+  const [isDropzoneActive, setIsDropzoneActive] = useState(false);
+  const [attachedSources, setAttachedSources] = useState<SourceDocument[]>([]);
+  const [fallbackDecision, setFallbackDecision] =
+    useState<FallbackDecisionState | null>(null);
+  const [destinationPrompt, setDestinationPrompt] = useState<DestinationPromptState>({
+    isOpen: false,
+    pendingMessage: "",
+    selectedDestination: DEFAULT_DESTINATION,
+  });
+  const [lastDestination, setLastDestination] =
+    useState<StudyDestinationType>(DEFAULT_DESTINATION);
+  const [latestStudyRunDiffSummary, setLatestStudyRunDiffSummary] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef<"idle" | "thinking" | "error">("idle");
   const animatedMessagesRef = useRef(new Set<string>());
@@ -257,7 +372,7 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
   const activeTask = useChatStore((state) => state.activeTask);
-  const { sendMessage, checkStatus, refreshTimeline, createSession, cancelActiveTask } =
+  const { sendMessage, cancelGeneration, checkStatus, refreshTimeline, createSession, cancelActiveTask } =
     useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -295,6 +410,34 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
     return { latest, count: pending.length };
   }, [timeline]);
+
+  const renderedMessages = useMemo(
+    () =>
+      messages.map((message) => {
+        if (message.role === "user") {
+          return {
+            ...message,
+            renderedContent: stripAttachedSourcesContextForDisplay(
+              message.content,
+            ),
+          };
+        }
+
+        if (message.role !== "assistant") {
+          return {
+            ...message,
+            renderedContent: message.content,
+          };
+        }
+
+        const parsed = parseResponseHeader(message.content);
+        return {
+          ...message,
+          renderedContent: parsed.content || " ",
+        };
+      }),
+    [messages],
+  );
 
   const replyToApproval = async (
     requestId: string,
@@ -434,20 +577,147 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     previousStatusRef.current = status;
   }, [status]);
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+  useEffect(() => {
+    const classifyFallback = window.flowstate?.studyMaterials?.classifyFallback;
+    if (!error || !classifyFallback) {
+      setFallbackDecision(null);
+      return;
+    }
 
-    const message = input.trim();
+    let active = true;
+
+    const classify = async () => {
+      try {
+        const result = await classifyFallback({ message: error });
+        if (!active || !result.ok) {
+          return;
+        }
+
+        if (result.data.classification === "unknown") {
+          setFallbackDecision(null);
+          return;
+        }
+
+        setFallbackDecision({
+          classification: result.data.classification,
+          recommendation: result.data.recommendation,
+        });
+      } catch {
+        if (active) {
+          setFallbackDecision(null);
+        }
+      }
+    };
+
+    void classify();
+
+    return () => {
+      active = false;
+    };
+  }, [error]);
+
+  const sendMessageWithContext = async (message: string) => {
     setInput("");
 
     // User intent: keep the latest messages in view after sending.
     shouldStickToBottomRef.current = true;
     scrollToBottom("auto");
 
-    const result = await sendMessage(message);
+    const result = await sendMessage(message, {
+      contextPrefix: buildAttachedSourcesContext(attachedSources),
+    });
     if (result?.success) {
       refreshTimeline();
     }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const message = input.trim();
+
+    if (requiresDestinationConfirmation(message)) {
+      setDestinationPrompt({
+        isOpen: true,
+        pendingMessage: message,
+        selectedDestination: lastDestination,
+      });
+      return;
+    }
+
+    await sendMessageWithContext(message);
+  };
+
+  const handleConfirmDestination = async () => {
+    const studyMaterialsApi = window.flowstate?.studyMaterials;
+    const pendingMessage = destinationPrompt.pendingMessage.trim();
+    if (!pendingMessage) {
+      setDestinationPrompt((prev) => ({ ...prev, isOpen: false }));
+      return;
+    }
+
+    const destinationType = destinationPrompt.selectedDestination;
+
+    if (studyMaterialsApi) {
+      const studyRunId =
+        globalThis.crypto?.randomUUID?.() ??
+        `study_run_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const courseId = currentSessionId
+        ? `session-${currentSessionId}`
+        : "chat-manual-upload";
+
+      try {
+        const createRunResult = await studyMaterialsApi.createRun({
+          id: studyRunId,
+          courseId,
+          mode: "conservative",
+          destinationType,
+          status: "awaiting_destination",
+        });
+
+        if (createRunResult.ok) {
+          await studyMaterialsApi.confirmDestination({
+            studyRunId,
+            destinationType,
+            status: "queued",
+          });
+
+          const recentRunsResult = await studyMaterialsApi.listRuns({
+            courseId,
+            limit: 3,
+            offset: 0,
+          });
+
+          if (recentRunsResult.ok) {
+            const previousRun = recentRunsResult.data.find(
+              (run: StudyMaterialRun) => run.id !== studyRunId,
+            );
+            if (previousRun) {
+              const summary = `Run diff: destination ${previousRun.destinationType} -> ${destinationType}; status ${previousRun.status} -> queued.`;
+              await studyMaterialsApi.createDiff({
+                id:
+                  globalThis.crypto?.randomUUID?.() ??
+                  `study_diff_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+                studyRunId,
+                previousStudyRunId: previousRun.id,
+                summary,
+              });
+              setLatestStudyRunDiffSummary(summary);
+            }
+          }
+        }
+      } catch {
+        // Destination confirmation best-effort for now; do not block chat send.
+      }
+    }
+
+    setLastDestination(destinationType);
+    setDestinationPrompt({
+      isOpen: false,
+      pendingMessage: "",
+      selectedDestination: destinationType,
+    });
+    await sendMessageWithContext(pendingMessage);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -461,6 +731,16 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     checkStatus();
   };
 
+  const handleFallbackRetryCanvas = () => {
+    setFallbackDecision(null);
+    handleRetry();
+  };
+
+  const handleFallbackUploadLocal = async () => {
+    setFallbackDecision(null);
+    await handleBrowseFiles();
+  };
+
   const handleNewChat = async () => {
     try {
       await createSession();
@@ -471,6 +751,10 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     } catch (err) {
       console.error("Failed to create new chat session", err);
     }
+  };
+
+  const handleStopGeneration = async () => {
+    await cancelGeneration();
   };
 
   const canStopActiveTask = Boolean(
@@ -486,6 +770,230 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
       console.error("Failed to cancel active task from ChatMode", result.error);
     }
   };
+
+  const extractFilePathsFromDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const fromFileList = Array.from(event.dataTransfer.files)
+      .map((file) => (file as File & { path?: string }).path)
+      .filter((value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+      )
+      .map((value) => value.trim());
+
+    if (fromFileList.length > 0) {
+      return Array.from(new Set(fromFileList));
+    }
+
+    const fromItems = Array.from(event.dataTransfer.items)
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+      .map((file) => (file as File & { path?: string }).path)
+      .filter((value): value is string =>
+        typeof value === "string" && value.trim().length > 0,
+      )
+      .map((value) => value.trim());
+
+    return Array.from(new Set(fromItems));
+  };
+
+  const uploadStudySourceFiles = async (rawPaths: string[]) => {
+    const studyMaterialsApi = window.flowstate?.studyMaterials;
+    if (!studyMaterialsApi) {
+      console.warn("Study materials API unavailable.");
+      return;
+    }
+
+    const paths = Array.from(
+      new Set(
+        rawPaths
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0),
+      ),
+    );
+
+    if (paths.length === 0) {
+      console.warn("No file paths detected from drop event.");
+      return;
+    }
+
+    let successCount = 0;
+    let failureCount = 0;
+    const failureMessages: string[] = [];
+    const courseId = currentSessionId
+      ? `session-${currentSessionId}`
+      : "chat-manual-upload";
+
+    for (const filePath of paths) {
+      try {
+        const validateResult = await studyMaterialsApi.validateLocalSource({
+          filePath,
+        });
+
+        if (!validateResult.ok) {
+          failureCount += 1;
+          failureMessages.push(
+            `${filePath}: ${validateResult.error.message}`,
+          );
+          continue;
+        }
+
+        const validation = validateResult.data;
+        if (
+          !validation.ok ||
+          !validation.fileType ||
+          !validation.fileName ||
+          !validation.normalizedPath ||
+          !validation.versionHash
+        ) {
+          failureCount += 1;
+          failureMessages.push(
+            `${filePath}: ${validation.issue?.message ?? "Validation failed."}`,
+          );
+          continue;
+        }
+
+        const sourceId =
+          globalThis.crypto?.randomUUID?.() ??
+          `source_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+        const createResult = await studyMaterialsApi.createSource({
+          id: sourceId,
+          courseId,
+          origin: "local",
+          fileType: validation.fileType,
+          title: validation.fileName,
+          sourceRef: validation.normalizedPath,
+          versionHash: validation.versionHash,
+          ingestedAt: Date.now(),
+        });
+
+        if (!createResult.ok) {
+          failureCount += 1;
+          failureMessages.push(
+            `${validation.fileName}: ${createResult.error.message}`,
+          );
+          continue;
+        }
+
+        successCount += 1;
+      } catch (error) {
+        failureCount += 1;
+        failureMessages.push(
+          `${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    if (successCount === 0) {
+      console.warn(
+        failureMessages[0] ?? "No valid PDF/PPTX files were uploaded.",
+      );
+    }
+
+    if (successCount > 0) {
+      const courseId = currentSessionId
+        ? `session-${currentSessionId}`
+        : "chat-manual-upload";
+      try {
+        const listResult = await studyMaterialsApi.listSources({
+          courseId,
+          origin: "local",
+          limit: 200,
+          offset: 0,
+        });
+        if (listResult.ok) {
+          setAttachedSources(listResult.data);
+        } else {
+          console.warn("Unable to refresh attached sources.");
+        }
+      } catch {
+        console.warn("Unable to refresh attached sources.");
+      }
+    }
+
+  };
+
+  const handleDropzoneDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    if (!isDropzoneActive) {
+      setIsDropzoneActive(true);
+    }
+  };
+
+  const handleDropzoneDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event)) return;
+    event.preventDefault();
+    setIsDropzoneActive(true);
+  };
+
+  const handleDropzoneDragLeave = (
+    event: React.DragEvent<HTMLDivElement>,
+  ) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setIsDropzoneActive(false);
+  };
+
+  const handleDropzoneDrop = async (
+    event: React.DragEvent<HTMLDivElement>,
+  ) => {
+    if (!hasFileDragPayload(event)) return;
+    event.preventDefault();
+    setIsDropzoneActive(false);
+    const filePaths = extractFilePathsFromDrop(event);
+    await uploadStudySourceFiles(filePaths);
+  };
+
+  const handleBrowseFiles = async () => {
+    const picker = window.flowstate?.app?.showOpenFilesDialog;
+    if (!picker) return;
+
+    const selectedPaths = await picker({
+      title: "Attach study files",
+      multiSelect: true,
+      filters: [
+        {
+          name: "Study files",
+          extensions: ["pdf", "pptx"],
+        },
+      ],
+    });
+
+    if (!selectedPaths || selectedPaths.length === 0) return;
+    await uploadStudySourceFiles(selectedPaths);
+  };
+
+  useEffect(() => {
+    const loadAttachedSources = async () => {
+      const studyMaterialsApi = window.flowstate?.studyMaterials;
+      if (!studyMaterialsApi || !currentSessionId) {
+        setAttachedSources([]);
+        return;
+      }
+
+      try {
+        const listResult = await studyMaterialsApi.listSources({
+          courseId: `session-${currentSessionId}`,
+          origin: "local",
+          limit: 200,
+          offset: 0,
+        });
+
+        if (listResult.ok) {
+          setAttachedSources(listResult.data);
+        } else {
+          setAttachedSources([]);
+        }
+      } catch {
+        setAttachedSources([]);
+      }
+    };
+
+    void loadAttachedSources();
+  }, [currentSessionId]);
 
   const statusLabel = statusLabels[status] ?? statusLabels.idle;
   const sessionLabel = currentSessionId
@@ -545,7 +1053,15 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   );
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div
+      className="h-full flex flex-col overflow-hidden"
+      onDragEnter={handleDropzoneDragEnter}
+      onDragOver={handleDropzoneDragOver}
+      onDragLeave={handleDropzoneDragLeave}
+      onDrop={(event) => {
+        void handleDropzoneDrop(event);
+      }}
+    >
       <div className="flex-shrink-0 px-6 pt-4">
         <div className="w-full max-w-4xl mx-auto">
           <div className="bg-card/80 border border-border rounded-2xl p-5 shadow-[0_18px_40px_rgba(62,47,39,0.16)] backdrop-blur-xl">
@@ -728,13 +1244,45 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
         </div>
       )}
 
+      {fallbackDecision && (
+        <div className="mx-6 mt-3 rounded-xl border border-amber-300/50 bg-amber-100/40 p-3 text-amber-900">
+          <p className="text-xs font-semibold uppercase tracking-wide">
+            Canvas source fallback available
+          </p>
+          <p className="mt-1 text-xs">
+            {fallbackDecision.recommendation}
+          </p>
+          <p className="mt-1 text-[11px] opacity-80">
+            Classification: {fallbackDecision.classification}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleFallbackRetryCanvas}
+              className="rounded-full border border-amber-500/60 bg-transparent px-3 py-1 text-[11px] font-medium transition-colors hover:bg-amber-100"
+            >
+              Retry Canvas now
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleFallbackUploadLocal();
+              }}
+              className="rounded-full border border-amber-500/60 bg-amber-200/70 px-3 py-1 text-[11px] font-medium transition-colors hover:bg-amber-200"
+            >
+              Upload local file instead
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 min-h-0 px-6 py-4 flex flex-col">
         <div
           ref={messagesScrollRef}
           onScroll={updateStickToBottom}
           className="w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-4 pb-24 scroll-pb-24 scrollbar-hide"
         >
-          {messages.map((message) => (
+          {renderedMessages.map((message) => (
             <div
               key={message.id}
               className={`w-full flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
@@ -761,7 +1309,9 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                     </span>
                   ) : (
                     <AssistantMessageContent
-                      message={message}
+                      messageId={message.id}
+                      content={message.renderedContent}
+                      parts={message.parts}
                       animatedMessagesRef={animatedMessagesRef}
                     />
                   )}
@@ -894,11 +1444,26 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
 
       <div className="flex-shrink-0 px-6 pb-6">
         <div className="w-full max-w-4xl mx-auto">
-          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
-            <div className="flex items-end gap-3">
-              <textarea
-                ref={textareaRef}
-                value={input}
+          {attachedSources.length > 0 && (
+            <p className="mb-1 text-center text-[11px] text-muted-foreground">
+              {attachedSources.length} {attachedSources.length === 1 ? "file" : "files"} uploaded
+            </p>
+          )}
+            <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-lg p-4">
+              <div className="flex items-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleBrowseFiles();
+                  }}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center self-center rounded-full border border-border bg-background/70 text-muted-foreground transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                  aria-label="Browse files to attach"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Type your message..."
@@ -907,13 +1472,24 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
                 className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground resize-none outline-none max-h-32 overflow-y-auto disabled:opacity-50"
                 style={{ minHeight: "24px" }}
               />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isLoading}
-                className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:opacity-50 flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
-              >
-                <Send className="w-5 h-5 text-primary-foreground" />
-              </button>
+              {showThinking ? (
+                <button
+                  type="button"
+                  onClick={handleStopGeneration}
+                  className="flex-shrink-0 w-10 h-10 rounded-xl border border-destructive/80 bg-destructive hover:bg-destructive/90 text-destructive-foreground flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+                  aria-label="Stop generation"
+                >
+                  <Square className="w-4 h-4" fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isLoading}
+                  className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted disabled:opacity-50 flex items-center justify-center transition-all duration-300 ease-in-out hover:scale-105 active:scale-95 shadow-md"
+                >
+                  <Send className="w-5 h-5 text-primary-foreground" />
+                </button>
+              )}
             </div>
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">
@@ -929,8 +1505,89 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
               />
             </div>
           )}
+          {latestStudyRunDiffSummary && (
+            <div className="mt-2">
+              <StudyRunDiffCard summary={latestStudyRunDiffSummary} />
+            </div>
+          )}
         </div>
       </div>
+
+      {destinationPrompt.isOpen && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/70 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <p className="text-sm font-semibold text-foreground">
+              Confirm destination for this run
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Choose where FlowState should write outputs for this request.
+              External writes always require explicit confirmation.
+            </p>
+
+            <div className="mt-4 grid gap-2">
+              {([
+                ["local", "Local (Downloads)", "Recommended default"],
+                ["notion", "Notion", "Creates external workspace content"],
+                ["obsidian", "Obsidian", "Writes into selected vault path"],
+              ] as Array<[StudyDestinationType, string, string]>).map(
+                ([value, label, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setDestinationPrompt((prev) => ({
+                        ...prev,
+                        selectedDestination: value,
+                      }))
+                    }
+                    className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                      destinationPrompt.selectedDestination === value
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:bg-muted/50"
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-foreground">{label}</p>
+                    <p className="text-[11px] text-muted-foreground">{hint}</p>
+                  </button>
+                ),
+              )}
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setDestinationPrompt({
+                    isOpen: false,
+                    pendingMessage: "",
+                    selectedDestination: lastDestination,
+                  })
+                }
+                className="rounded-full border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleConfirmDestination();
+                }}
+                className="rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Confirm and continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDropzoneActive && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-end justify-center bg-background/40 pb-8">
+          <div className="pointer-events-none rounded-full border border-primary/40 bg-card/95 px-4 py-2 text-xs text-foreground shadow-lg">
+            Drop PDF/PPTX to upload
+          </div>
+        </div>
+      )}
     </div>
   );
 }

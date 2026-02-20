@@ -651,8 +651,8 @@ function CanvasConnectionForm({
                 Browser Login (No token)
               </p>
               <p className="text-xs text-muted-foreground">
-                Use a Playwright storage state file created by the Canvas MCP tool
-                <span className="font-mono"> canvas_auth_browser_login</span>.
+                Use a Playwright storage state file generated during the Canvas
+                browser login flow in Integrations.
               </p>
             </div>
           </button>

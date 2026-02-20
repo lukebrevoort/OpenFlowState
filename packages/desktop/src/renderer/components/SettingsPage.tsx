@@ -1,7 +1,20 @@
 import { useEffect, useState } from "react";
-import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw } from "lucide-react";
+import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw, BookOpen, BarChart3, Download } from "lucide-react";
 import { useConfig } from "../hooks/useConfig";
-import type { WorkflowDefinition } from "../types/electron";
+import type { FlowstateConfig, WorkflowDefinition } from "../types/electron";
+
+const STUDY_METRICS_RECENT_LIMIT = 12;
+
+interface StudyMaterialMetrics {
+  citationCoverage: number;
+  rerunFrequency: number;
+  acceptanceRate: number;
+  totalRuns: number;
+  completedRuns: number;
+  uniqueCourseCount: number;
+  recentRunSampleSize: number;
+  calculatedAtIso: string;
+}
 
 export function SettingsPage() {
   const { config, isLoaded, loadConfig, updateConfig } = useConfig();
@@ -22,6 +35,9 @@ export function SettingsPage() {
   const [approvalGrantsLoading, setApprovalGrantsLoading] = useState(false);
   const [approvalGrantsError, setApprovalGrantsError] = useState<string | null>(null);
   const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+  const [studyMetrics, setStudyMetrics] = useState<StudyMaterialMetrics | null>(null);
+  const [studyMetricsLoading, setStudyMetricsLoading] = useState(false);
+  const [studyMetricsError, setStudyMetricsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -163,6 +179,64 @@ export function SettingsPage() {
   const notificationPreferences = config?.preferences.notifications;
   const approvalsNotificationsEnabled = notificationPreferences?.approvals ?? true;
   const taskCompletionNotificationsEnabled = notificationPreferences?.taskComplete ?? true;
+  const studyMaterialPreferences = config?.preferences.studyMaterials;
+  const externalKnowledgeAllowlistEnabled =
+    studyMaterialPreferences?.externalKnowledgeAllowlistEnabled ?? false;
+  const defaultGenerationMode =
+    studyMaterialPreferences?.defaultGenerationMode ?? "conservative";
+  const maxConcurrentRuns = Math.min(
+    3,
+    Math.max(1, studyMaterialPreferences?.maxConcurrentRuns ?? 2)
+  );
+  const globalRetentionDays = Math.max(
+    1,
+    studyMaterialPreferences?.retention?.globalRetentionDays ?? 30
+  );
+  const perCourseRetentionEnabled =
+    studyMaterialPreferences?.retention?.perCourseRetentionEnabled ?? true;
+
+  const updateStudyMaterialPreferences = async (
+    patch: Partial<
+      NonNullable<FlowstateConfig["preferences"]["studyMaterials"]>
+    >
+  ) => {
+    if (!config) return;
+
+    const current = config.preferences.studyMaterials;
+    const nextRetention = {
+      globalRetentionDays:
+        patch.retention?.globalRetentionDays ??
+        current?.retention?.globalRetentionDays ??
+        30,
+      perCourseRetentionEnabled:
+        patch.retention?.perCourseRetentionEnabled ??
+        current?.retention?.perCourseRetentionEnabled ??
+        true,
+    };
+
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          studyMaterials: {
+            externalKnowledgeAllowlistEnabled:
+              patch.externalKnowledgeAllowlistEnabled ??
+              current?.externalKnowledgeAllowlistEnabled ??
+              false,
+            defaultGenerationMode:
+              patch.defaultGenerationMode ??
+              current?.defaultGenerationMode ??
+              "conservative",
+            maxConcurrentRuns:
+              patch.maxConcurrentRuns ?? current?.maxConcurrentRuns ?? 2,
+            retention: nextRetention,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update study material preferences", error);
+    }
+  };
 
   const handleToggleReducedMotion = async () => {
     if (!config) return;
@@ -257,6 +331,130 @@ export function SettingsPage() {
     } catch (error) {
       console.error("Failed to update approval notifications", error);
     }
+  };
+
+  const formatPercent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const formatDecimal = (value: number) => value.toFixed(2);
+
+  const downloadBlob = (fileName: string, mimeType: string, content: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const loadStudyMaterialMetrics = async () => {
+    const studyMaterialsApi = window.flowstate?.studyMaterials;
+    if (!studyMaterialsApi) {
+      setStudyMetrics(null);
+      setStudyMetricsError("Study materials API is unavailable.");
+      return;
+    }
+
+    setStudyMetricsLoading(true);
+    setStudyMetricsError(null);
+    try {
+      const runsResult = await studyMaterialsApi.listRuns({
+        limit: 100,
+        offset: 0,
+      });
+
+      if (!runsResult.ok) {
+        setStudyMetrics(null);
+        setStudyMetricsError(runsResult.error.message);
+        return;
+      }
+
+      const runs = runsResult.data;
+      const completedRuns = runs.filter((run) => run.status === "completed");
+      const recentRuns = completedRuns.slice(0, STUDY_METRICS_RECENT_LIMIT);
+
+      const citationResults = await Promise.all(
+        recentRuns.map((run) => studyMaterialsApi.listCitations({ studyRunId: run.id }))
+      );
+
+      const citationPresenceRatios = citationResults.map((result) => {
+        if (!result.ok) {
+          throw new Error(result.error.message);
+        }
+        return Number(result.data.length > 0);
+      });
+
+      const citationCoverage =
+        citationPresenceRatios.length > 0
+          ? citationPresenceRatios.reduce((sum, value) => sum + value, 0) /
+            citationPresenceRatios.length
+          : 0;
+
+      const uniqueCourseCount = new Set(runs.map((run) => run.courseId)).size;
+      const rerunFrequency = uniqueCourseCount > 0 ? runs.length / uniqueCourseCount : 0;
+      const acceptanceRate = runs.length > 0 ? completedRuns.length / runs.length : 0;
+
+      setStudyMetrics({
+        citationCoverage,
+        rerunFrequency,
+        acceptanceRate,
+        totalRuns: runs.length,
+        completedRuns: completedRuns.length,
+        uniqueCourseCount,
+        recentRunSampleSize: recentRuns.length,
+        calculatedAtIso: new Date().toISOString(),
+      });
+    } catch (error) {
+      setStudyMetrics(null);
+      setStudyMetricsError(
+        error instanceof Error ? error.message : "Failed to compute study material metrics."
+      );
+    } finally {
+      setStudyMetricsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStudyMaterialMetrics().catch(() => {});
+  }, []);
+
+  const exportStudyMetricsJson = () => {
+    if (!studyMetrics) return;
+
+    downloadBlob(
+      "study-material-metrics.json",
+      "application/json;charset=utf-8",
+      `${JSON.stringify(studyMetrics, null, 2)}\n`
+    );
+  };
+
+  const exportStudyMetricsCsv = () => {
+    if (!studyMetrics) return;
+
+    const headers = [
+      "citationCoverage",
+      "rerunFrequency",
+      "acceptanceRate",
+      "recentRunSampleSize",
+      "totalRuns",
+      "completedRuns",
+      "uniqueCourseCount",
+      "calculatedAtIso",
+    ];
+    const row = [
+      studyMetrics.citationCoverage.toFixed(4),
+      studyMetrics.rerunFrequency.toFixed(4),
+      studyMetrics.acceptanceRate.toFixed(4),
+      String(studyMetrics.recentRunSampleSize),
+      String(studyMetrics.totalRuns),
+      String(studyMetrics.completedRuns),
+      String(studyMetrics.uniqueCourseCount),
+      studyMetrics.calculatedAtIso,
+    ];
+
+    const csv = `${headers.join(",")}\n${row.join(",")}\n`;
+    downloadBlob("study-material-metrics.csv", "text/csv;charset=utf-8", csv);
   };
 
   const ToggleSwitch = ({
@@ -397,6 +595,193 @@ export function SettingsPage() {
                 </select>
               </div>
             </div>
+          </div>
+
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center gap-3 mb-6">
+              <BookOpen className="w-5 h-5 text-primary" />
+              <h3 className="text-xl text-foreground">Study Materials</h3>
+            </div>
+
+            <div className="space-y-6">
+              <div className="flex items-start justify-between gap-6">
+                <div>
+                  <p className="text-sm text-foreground">External knowledge mode</p>
+                  <p className="text-xs text-muted-foreground">
+                    When enabled, external knowledge usage follows your allowlist policy.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={externalKnowledgeAllowlistEnabled}
+                  onToggle={() => {
+                    void updateStudyMaterialPreferences({
+                      externalKnowledgeAllowlistEnabled: !externalKnowledgeAllowlistEnabled,
+                    });
+                  }}
+                  disabled={!config}
+                  label="External knowledge mode"
+                />
+              </div>
+
+              <div>
+                <label className="text-sm text-foreground mb-2 block">Default generation mode</label>
+                <select
+                  value={defaultGenerationMode}
+                  onChange={(event) => {
+                    void updateStudyMaterialPreferences({
+                      defaultGenerationMode: event.target.value as "conservative" | "coaching",
+                    });
+                  }}
+                  className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  disabled={!config}
+                >
+                  <option value="conservative">Conservative</option>
+                  <option value="coaching">Coaching</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-sm text-foreground mb-2 block">Max concurrent study runs</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={maxConcurrentRuns}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (!Number.isFinite(parsed)) return;
+                    const clamped = Math.min(3, Math.max(1, Math.trunc(parsed)));
+                    updateStudyMaterialPreferences({ maxConcurrentRuns: clamped }).catch(() => {});
+                  }}
+                  className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  disabled={!config}
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="text-sm text-foreground mb-2 block">Global retention days</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={globalRetentionDays}
+                    onChange={(event) => {
+                      const parsed = Number(event.target.value);
+                      if (!Number.isFinite(parsed)) return;
+                      const clamped = Math.max(1, Math.trunc(parsed));
+                      updateStudyMaterialPreferences({
+                        retention: { globalRetentionDays: clamped },
+                      }).catch(() => {});
+                    }}
+                    className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    disabled={!config}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between rounded-lg border border-border bg-muted/10 p-3">
+                  <div className="pr-4">
+                    <p className="text-sm text-foreground">Per-course retention</p>
+                    <p className="text-xs text-muted-foreground">
+                      Allow per-course retention rules in addition to global retention.
+                    </p>
+                  </div>
+                  <ToggleSwitch
+                    checked={perCourseRetentionEnabled}
+                    onToggle={() => {
+                      void updateStudyMaterialPreferences({
+                        retention: {
+                          perCourseRetentionEnabled: !perCourseRetentionEnabled,
+                        },
+                      });
+                    }}
+                    disabled={!config}
+                    label="Per-course retention"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-3">
+                <BarChart3 className="w-5 h-5 text-primary" />
+                <h3 className="text-xl text-foreground">Study Materials Metrics</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadStudyMaterialMetrics()}
+                className="fs-button-secondary text-xs px-3 py-1.5"
+                disabled={studyMetricsLoading}
+              >
+                {studyMetricsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+
+            {studyMetricsError ? (
+              <p className="text-xs text-destructive">{studyMetricsError}</p>
+            ) : null}
+
+            {studyMetrics ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-lg border border-border bg-muted/10 p-4">
+                    <p className="text-xs text-muted-foreground">Citation coverage (recent)</p>
+                    <p className="mt-1 text-2xl text-foreground font-semibold">
+                      {formatPercent(studyMetrics.citationCoverage)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Based on {studyMetrics.recentRunSampleSize} recent completed runs.
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-muted/10 p-4">
+                    <p className="text-xs text-muted-foreground">Rerun frequency</p>
+                    <p className="mt-1 text-2xl text-foreground font-semibold">
+                      {formatDecimal(studyMetrics.rerunFrequency)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">Runs per active course.</p>
+                  </div>
+
+                  <div className="rounded-lg border border-border bg-muted/10 p-4">
+                    <p className="text-xs text-muted-foreground">User acceptance rate</p>
+                    <p className="mt-1 text-2xl text-foreground font-semibold">
+                      {formatPercent(studyMetrics.acceptanceRate)}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {studyMetrics.completedRuns} completed of {studyMetrics.totalRuns} total runs.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={exportStudyMetricsJson}
+                    className="fs-button-secondary flex items-center gap-2 text-sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportStudyMetricsCsv}
+                    className="fs-button-secondary flex items-center gap-2 text-sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export CSV
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    Local-only export. Last updated {new Date(studyMetrics.calculatedAtIso).toLocaleString()}.
+                  </p>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {studyMetricsLoading ? "Calculating study material metrics..." : "No study material run data available yet."}
+              </p>
+            )}
           </div>
 
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">

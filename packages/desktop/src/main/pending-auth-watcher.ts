@@ -1,7 +1,7 @@
 /**
  * Pending Auth Watcher
  *
- * Watches for pending auth files written by MCP tools (e.g., canvas_auth_browser_login)
+ * Watches for pending auth files written by integration auth flows
  * and processes them to persist auth tokens and reload MCPs.
  *
  * This enables MCP tools to trigger auth persistence without direct IPC to the desktop.

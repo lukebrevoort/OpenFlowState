@@ -70,7 +70,7 @@ const buildCookieHeaderFromStorageState = async (storageStatePath, baseUrl) => {
     catch (error) {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
             throw new Error(`Canvas browser auth requires a Playwright storage state file, but it was not found at: ${storageStatePath}. ` +
-                `Run the 'canvas_auth_browser_login' tool to generate it.`);
+                `Refresh Canvas authentication in FlowState Integrations and retry.`);
         }
         throw error;
     }
@@ -87,7 +87,7 @@ const buildCookieHeaderFromStorageState = async (storageStatePath, baseUrl) => {
     catch (error) {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
             throw new Error(`Canvas browser auth requires a Playwright storage state file, but it was not found at: ${storageStatePath}. ` +
-                `Run the 'canvas_auth_browser_login' tool to generate it.`);
+                `Refresh Canvas authentication in FlowState Integrations and retry.`);
         }
         throw error;
     }
@@ -107,7 +107,7 @@ const buildCookieHeaderFromStorageState = async (storageStatePath, baseUrl) => {
         .filter(Boolean);
     if (matched.length === 0) {
         throw new Error(`Canvas storage state at ${storageStatePath} contains no usable cookies for ${host}. ` +
-            `Re-run 'canvas_auth_browser_login' to refresh the session.`);
+            `Refresh Canvas authentication in FlowState Integrations and retry.`);
     }
     const cookieHeader = matched.join('; ');
     cookieHeaderCache = {
@@ -136,7 +136,7 @@ const getCanvasConfig = async () => {
         const token = await getCanvasToken();
         if (!token) {
             throw new Error('Canvas auth mode is auto but no credentials were found. ' +
-                'Set CANVAS_API_TOKEN (or store a token in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and CANVAS_STORAGE_STATE_PATH (then run canvas_auth_browser_login).');
+                'Set CANVAS_API_TOKEN (or store a token in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and CANVAS_STORAGE_STATE_PATH, then refresh Canvas authentication in FlowState Integrations.');
         }
         return { baseUrl, auth: { mode: 'token', token } };
     }
@@ -144,13 +144,13 @@ const getCanvasConfig = async () => {
         const token = envToken ?? (await getCanvasToken());
         if (!token) {
             throw new Error('Canvas token auth is selected but CANVAS_API_TOKEN is not set. ' +
-                "Either set CANVAS_API_TOKEN (or CANVAS_TOKEN, or connect Canvas in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and run the 'canvas_auth_browser_login' tool.");
+                'Either set CANVAS_API_TOKEN (or CANVAS_TOKEN, or connect Canvas in FlowState Integrations), or set CANVAS_AUTH_MODE=browser and refresh Canvas authentication in FlowState Integrations.');
         }
         return { baseUrl, auth: { mode: 'token', token } };
     }
     if (!storageStatePath) {
         throw new Error('Canvas browser auth requires CANVAS_STORAGE_STATE_PATH (path to a Playwright storage state JSON file). ' +
-            "Run the 'canvas_auth_browser_login' tool to generate it.");
+            'Refresh Canvas authentication in FlowState Integrations and retry.');
     }
     const cookieHeader = await buildCookieHeaderFromStorageState(storageStatePath, baseUrl);
     return {
@@ -205,12 +205,10 @@ const makeCanvasHttpError = async (response, authMode) => {
     const contentType = response.headers.get('content-type') || '';
     if (authMode === 'browser') {
         if (response.status === 401 || response.status === 403) {
-            return new Error('Canvas browser session is unauthorized or expired. Run the ' +
-                "'canvas_auth_browser_login' tool to refresh your session.");
+            return new Error('Canvas browser session is unauthorized or expired. Refresh Canvas authentication in FlowState Integrations and retry.');
         }
         if (contentType.includes('text/html') || response.url.includes('/login')) {
-            return new Error('Canvas browser session appears to be expired. Run the ' +
-                "'canvas_auth_browser_login' tool to refresh your session.");
+            return new Error('Canvas browser session appears to be expired. Refresh Canvas authentication in FlowState Integrations and retry.');
         }
     }
     if (response.status === 401 || response.status === 403) {
@@ -251,8 +249,7 @@ async function canvasFetchResponse(url, options = {}) {
     const contentType = response.headers.get('content-type') || '';
     if (auth.mode === 'browser' &&
         (contentType.includes('text/html') || response.url.includes('/login'))) {
-        throw new Error('Canvas browser session appears to be expired. Run the ' +
-            "'canvas_auth_browser_login' tool to refresh your session.");
+        throw new Error('Canvas browser session appears to be expired. Refresh Canvas authentication in FlowState Integrations and retry.');
     }
     return response;
 }
@@ -567,8 +564,8 @@ export async function downloadFileByUrl(fileUrl, options) {
                 const extra = body ? `: ${summarizeBodyForError(body)}` : '';
                 throw new Error(`Canvas file download unauthorized (${response.status})${extra}`);
             }
-            throw new Error('This file appears to be hosted outside Canvas and requires browser authentication. ' +
-                'Please upload it or paste the relevant text.');
+            throw new Error('This file appears to be hosted outside Canvas and is not directly accessible through the Canvas API in this mode. ' +
+                'Please upload the file directly or paste the relevant text.');
         }
         if (!response.ok) {
             const body = await response.text().catch(() => '');

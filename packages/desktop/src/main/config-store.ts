@@ -58,6 +58,18 @@ export interface WorkingHours {
   end: string;
 }
 
+export interface StudyMaterialRetentionPreferences {
+  globalRetentionDays: number;
+  perCourseRetentionEnabled: boolean;
+}
+
+export interface StudyMaterialPreferences {
+  externalKnowledgeAllowlistEnabled: boolean;
+  defaultGenerationMode: 'conservative' | 'coaching';
+  maxConcurrentRuns: number;
+  retention: StudyMaterialRetentionPreferences;
+}
+
 /**
  * User preferences
  */
@@ -77,6 +89,8 @@ export interface UserPreferences {
    * When undefined, the renderer should default to 'animated'.
    */
   backgroundMotion?: 'animated' | 'static';
+
+  studyMaterials?: StudyMaterialPreferences;
 }
 
 export interface GoogleCalendarPreferences {
@@ -144,6 +158,15 @@ const DEFAULT_CONFIG: FlowStateConfig = {
       approvals: true,
       taskComplete: true,
     },
+    studyMaterials: {
+      externalKnowledgeAllowlistEnabled: false,
+      defaultGenerationMode: 'conservative',
+      maxConcurrentRuns: 2,
+      retention: {
+        globalRetentionDays: 30,
+        perCourseRetentionEnabled: true,
+      },
+    },
   },
   integrations: {},
   onboardingComplete: false,
@@ -204,7 +227,7 @@ class ConfigStore {
       const loaded = JSON.parse(data) as FlowStateConfig;
       // Deep-merge with defaults so upgraded configs with missing nested
       // fields (e.g. notifications.taskComplete) inherit the correct defaults
-      this.config = {
+      const merged: FlowStateConfig = {
         ...DEFAULT_CONFIG,
         ...loaded,
         preferences: {
@@ -218,9 +241,29 @@ class ConfigStore {
             ...DEFAULT_CONFIG.preferences.workingHours,
             ...loaded.preferences?.workingHours,
           },
+          studyMaterials: {
+            externalKnowledgeAllowlistEnabled:
+              loaded.preferences?.studyMaterials?.externalKnowledgeAllowlistEnabled ??
+              DEFAULT_CONFIG.preferences.studyMaterials!.externalKnowledgeAllowlistEnabled,
+            defaultGenerationMode:
+              loaded.preferences?.studyMaterials?.defaultGenerationMode ??
+              DEFAULT_CONFIG.preferences.studyMaterials!.defaultGenerationMode,
+            maxConcurrentRuns:
+              loaded.preferences?.studyMaterials?.maxConcurrentRuns ??
+              DEFAULT_CONFIG.preferences.studyMaterials!.maxConcurrentRuns,
+            retention: {
+              globalRetentionDays:
+                loaded.preferences?.studyMaterials?.retention?.globalRetentionDays ??
+                DEFAULT_CONFIG.preferences.studyMaterials!.retention.globalRetentionDays,
+              perCourseRetentionEnabled:
+                loaded.preferences?.studyMaterials?.retention?.perCourseRetentionEnabled ??
+                DEFAULT_CONFIG.preferences.studyMaterials!.retention.perCourseRetentionEnabled,
+            },
+          },
         },
       };
-      return this.config;
+      this.config = merged;
+      return merged;
     } catch (error) {
       // File doesn't exist or is invalid - create default config
       console.log('Config file not found, creating default configuration');

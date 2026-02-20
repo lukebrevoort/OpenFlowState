@@ -104,4 +104,81 @@ describe('normalizeOpenCodeEvent approval payloads', () => {
     // Should not contain truncation marker
     expect(payload.summary).not.toContain('…');
   });
+
+  it('keeps generated approval body intact for very large metadata payloads', () => {
+    const hugeMetadata = {
+      command: 'python script.py',
+      diagnostics: 'z'.repeat(12_000),
+    };
+
+    const normalized = normalizeOpenCodeEvent(
+      {
+        type: 'permission.updated',
+        properties: {
+          id: 'perm-huge-metadata',
+          type: 'bash',
+          metadata: hugeMetadata,
+        },
+      },
+      'session-1'
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.event.kind).toBe('approval_request');
+
+    const payload = normalized?.payload as Record<string, unknown>;
+    expect(typeof payload.body).toBe('string');
+    expect(String(payload.body)).toContain('Metadata:');
+    expect(String(payload.body)).toContain('"diagnostics":');
+    expect(String(payload.body)).toContain('z'.repeat(512));
+    expect(String(payload.body)).not.toContain('…');
+    expect(String(payload.body).length).toBeGreaterThan(10_000);
+  });
+
+  it('extracts requestId from nested permission objects', () => {
+    const normalized = normalizeOpenCodeEvent(
+      {
+        type: 'permission.asked',
+        properties: {
+          permission: {
+            requestID: 'perm-nested-1',
+          },
+          pattern: ['/tmp/demo/*'],
+        },
+      },
+      'session-1'
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.event.kind).toBe('approval_request');
+    expect(normalized?.payload).toMatchObject({
+      requestId: 'perm-nested-1',
+    });
+  });
+
+  it('redacts nested secrets and reports payload redaction', () => {
+    const normalized = normalizeOpenCodeEvent(
+      {
+        type: 'tool.called',
+        properties: {
+          provider: 'notion',
+          metadata: {
+            apiKey: 'secret-value',
+            nested: {
+              bearerToken: 'token-value',
+            },
+          },
+        },
+      },
+      'session-1'
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized?.redacted).toBe(true);
+
+    const payload = normalized?.payload as Record<string, unknown>;
+    const metadata = payload.metadata as Record<string, unknown>;
+    expect(metadata.apiKey).toBe('[REDACTED]');
+    expect((metadata.nested as Record<string, unknown>).bearerToken).toBe('[REDACTED]');
+  });
 });

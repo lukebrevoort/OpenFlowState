@@ -1088,17 +1088,20 @@ Problem: current integrations status is largely “static” (token/session pres
 Decision: keep the existing fast “configured/credential present” status, but add a manual **Health Check** that verifies the integration actually works. Only run health checks when the user explicitly clicks **Sync** (in Integrations mode) so we do not silently ping third-party services.
 
 UI semantics (per integration):
+
 - **Connected**: credentials exist AND last health check succeeded.
 - **Connected (Not verified yet)**: credentials exist but no successful health check has been run yet.
 - **Needs reconnect**: last health check failed; user should reconnect.
 - **Not connected**: no credentials.
 
 Required new IPC surface (preload + main):
+
 - `window.flowstate.integrations.healthCheck(service: string): Promise<{ ok: boolean; checkedAt: string; message?: string; email?: string }>`
   - Runs a minimal “whoami/profile” style request per service and returns success/failure.
   - Does not mutate tokens on failure (do not auto-remove credentials).
 
 Health check behavior by service (MVP):
+
 - Gmail / Google Calendar: use stored OAuth token, refresh if needed, then run a lightweight endpoint to confirm validity (and optionally return email).
 - Notion (API token): call Notion “me” style endpoint to confirm token validity.
 - Canvas:
@@ -1106,14 +1109,17 @@ Health check behavior by service (MVP):
   - Browser session mode (Playwright storage state): validate by performing an authenticated request using the stored state (same endpoint as above) and fail clearly when session is invalid/expired.
 
 Persistence:
+
 - Store per-integration `lastHealthCheckAt` + `lastHealthCheckOk` + `lastHealthCheckError` in config (or a small local store) so the UI can show “Not verified yet” vs “Needs reconnect” without background polling.
 
 Integrations UI updates:
+
 - **Sync** becomes “Run health check” for that integration (spinner per-card, not global).
 - On failure: card shows “Needs reconnect” state + short error message + Connect button.
 - On success: update “Last sync” to reflect the health check time.
 
 Acceptance criteria:
+
 - Canvas: if the Playwright session is expired, clicking **Sync** changes the card to “Needs reconnect” and shows a failure message (no false “Connected”).
 - Gmail/GCal/Notion: clicking **Sync** produces a definitive pass/fail based on an actual API request.
 - Health check is available and consistent in both Integrations mode and when launched from onboarding (same UI/components).
@@ -1123,20 +1129,24 @@ Acceptance criteria:
 Problem: modal overlay is visually messy/too transparent and does not feel like it cleanly covers the app (notably near the top bar area).
 
 Changes:
+
 - Update modal overlay styling so the dim + blur feels intentional and covers the usable surface cleanly (acceptable to exclude the native title bar region, but the boundary must look deliberate).
 - Improve instruction blocks for OAuth/API token flows: clearer hierarchy, more legible callouts, and better “open console” affordances.
 
 Acceptance criteria:
+
 - Overlay appears uniform, sufficiently opaque, and visually consistent across all modes; no “leaking” UI at the top edge.
 - Instructions are more scannable (setup steps visible without hunting).
 
 #### Onboarding: Integrations Step Matches New UI
 
 Keep the current flow:
+
 - Onboarding “Connect” step shows only apps selected on the “Apps” step.
 - “Connect/Manage” navigates into IntegrationsMode in `onboardingMode`, uses the same ConnectionModal UI, and user returns via “Back to onboarding”.
 
 Changes:
+
 - Ensure onboarding uses the same polished connection modal and reflects updated status semantics.
 
 #### Onboarding: Provider Models from OpenCode
@@ -1144,28 +1154,34 @@ Changes:
 Problem: onboarding provider models are hardcoded and drift from what OpenCode actually has configured.
 
 Decision:
+
 - Populate provider model options dynamically using `window.flowstate.opencode.listModels()` (same source of truth as Settings).
 - Keep model selection as a `<select>` (no free-text) for onboarding simplicity.
 
 Implementation notes:
+
 - Derive provider groups from model IDs (`<provider>/<model>`) and show provider cards based on discovered providers.
 - Use existing `providerDefinitions` only as display metadata/ordering hints; do not treat it as the authoritative model list.
 
 Acceptance criteria:
+
 - On first-run, provider step lists models that match the user’s actual `opencode models` output.
 - Selecting a provider limits the model dropdown to models for that provider.
 
 #### Remove “Wow Moment” From Onboarding
 
 Decision:
+
 - Replace the “Wow Moment” step with a simple final step that contains a single “Start FlowState” button.
 - Remove all related state and props (no dead code).
 
 Acceptance criteria:
+
 - Onboarding steps become: `welcome → apps → connect → provider → finish`.
 - No references remain to wow prompts, wow selection, or skip-wow actions in the renderer stores/components.
 
 Files likely touched (non-exhaustive):
+
 - `packages/desktop/src/renderer/modes/IntegrationsMode.tsx`
 - `packages/desktop/src/renderer/hooks/useIntegrations.ts`
 - `packages/desktop/src/renderer/stores/integrationsStore.ts`
@@ -1259,6 +1275,345 @@ Value: repeatable builds, fewer regressions, and a shippable beta.
 - [ ] Add regression tests for timeline normalization + storage
 - [ ] Performance pass (timeline virtualization, memory usage, native module rebuild ergonomics)
 - [ ] Package unsigned DMG + docs + demo video
+- [ ] Improve ChatMode.tsx to better use Headers System for better performance and reliability (reduce re-renders, fix edge cases with large messages)
+- [ ] ChatMode.tsx should allow users to cancle message generation (currently no way to stop a runaway message stream); add a button that calls `session.cancel()` and properly handles UI state cleanup
+- [ ] Clean up Sidebar to use Real-Time Data (e.g. active workflow run, pending approvals) instead of stale session state
+- [ ] Clean Sidebar Clean and allow users to search for previous conversations / sessions
+
+### Phase 8: Academic Intelligence - Canvas Document Study Pack Engine
+
+Value: FlowState can pull Canvas course files (PDF + PPTX), interpret them with source-grounded reasoning, and generate high-quality study materials with citation traceability.
+
+#### Phase 8 Product Goal
+
+Enable users to ask:
+
+- "Build study materials for my next exam from Canvas"
+- "Use my latest slides and make a practice exam"
+- "Refresh my study pack because new lecture files were uploaded"
+
+And FlowState should:
+
+1. Pull scoped source docs from Canvas (and local attachments in MVP).
+2. Parse PDFs + PPTX slide text + speaker notes.
+3. Merge context at course level.
+4. Generate study outputs with per-section inline citations.
+5. Save outputs to user-selected destination (ask every run).
+
+#### Confirmed Phase 8 Decisions (Interview Locked)
+
+- Destination selection is asked every run; if unknown, suggest local file fallback (Downloads).
+- Destination options include Notion, Obsidian vault write, and local files.
+- MVP output bundle: quiz/practice exam + summary sheet/exam review + flashcards (if possible).
+- Citation model: per-section citations with inline tags.
+- Extraction failures are non-blocking: continue with uncertainty markers and recovery guidance.
+- Two-tier reasoning mode: Conservative (source-grounded) and Coaching (light inference), but practice content remains strictly source-derived.
+- Context scope is course-level merged context.
+- Output is versioned on reruns; include summary diff.
+- Refresh policy is event-driven suggestion + one-click regenerate (also when exam proximity signals urgency).
+- Autonomy policy: auto for read/extract/compose; approval required for external writes.
+- Canvas scope is strict explicit course scope first.
+- PPTX MVP extraction includes slide text + speaker notes only.
+- OCR is out of MVP; image-only/scanned sections are flagged.
+- Stable internal schema is required in Phase 8.
+- Notion destination uses hybrid model (DB row + rich page).
+- Personalization uses user profile with transparency notice.
+- Learning science defaults are lightweight and on by default.
+- Quality gate runs before write; failed gate produces draft preview + explicit "write anyway" approval.
+- Task summary order: succeeded -> gaps -> next actions.
+- Storage is local durable with user-controlled purge and per-course retention.
+- Concurrency defaults to 2, configurable up to 3.
+- External knowledge retrieval is allowlist-based + explicit user toggle.
+- Metrics are local-only with export (JSON/CSV).
+
+#### User Experience Flow (Phase 8 MVP)
+
+1. User prompt in Chat or Workflow: "Create study materials for [Course]".
+2. FlowState prompts for destination (Notion / Obsidian / Local).
+3. FlowState prompts source scope mode:
+   - Course-wide recent files, or
+   - Explicit file selection.
+4. FlowState creates a TaskRun and routes to Tasks mode.
+5. Pipeline runs: discover -> extract -> normalize -> generate -> validate -> preview.
+6. User sees draft preview + quality summary + extraction gaps.
+7. If quality gate passes, user approves write destination action.
+8. Outputs saved and versioned; run summary includes diff vs previous run.
+
+#### Destinations and Output Format
+
+Destination is user-selected per run.
+
+- Notion (hybrid):
+  - one DB row per study material run (metadata),
+  - linked page with full outputs, citations, and extraction warnings,
+  - optional attached artifacts.
+- Obsidian:
+  - direct vault write (path selected/approved by user),
+  - markdown files + flashcards CSV artifact.
+- Local fallback:
+  - folder output in Downloads by default,
+  - `summary.md`, `practice-exam.md`, `flashcards.csv`, `run-metadata.json`.
+
+#### Source Ingestion Scope (MVP)
+
+Supported sources:
+
+- Canvas course files (strict explicit course scope).
+- Local file attach (manual upload path).
+
+Supported file types:
+
+- PDF (text extraction).
+- PPTX (slide text + speaker notes).
+
+Out of MVP:
+
+- OCR for scanned/image-only content.
+- Non-PDF/non-PPTX academic format expansion.
+
+#### Generation and Guardrails
+
+Generation outputs:
+
+- Summary Sheet / Exam Review.
+- Practice Exam / Quiz.
+- Flashcards (Anki-friendly CSV first).
+
+Grounding and creativity policy:
+
+- Practice questions are strictly source-derived.
+- Per-section inline citations are required in generated outputs.
+- External knowledge augmentation is configurable via settings and constrained to allowlisted domains.
+
+Quality gate checks before write:
+
+- Citation coverage threshold (default 80%).
+- Duplicate question threshold (default <10%).
+- Source coverage requirement (selected files represented).
+- Parsing uncertainty report attached to run.
+
+If quality gate fails:
+
+- Show draft preview + issues.
+- Require explicit "write anyway" approval to persist externally.
+
+#### Data Model Additions (Phase 8)
+
+Add durable local entities (SQLite + file artifacts):
+
+- `SourceDocument`
+  - `id`, `courseId`, `origin` (`canvas` | `local`), `fileType`, `title`, `sourceRef`, `versionHash`, `ingestedAt`.
+- `StudyMaterialRun`
+  - `id`, `courseId`, `taskRunId`, `mode` (`conservative` | `coaching`), `destinationType`, `status`, `qualityScore`, `createdAt`, `updatedAt`.
+- `StudyMaterialArtifact`
+  - `id`, `studyRunId`, `kind` (`summary` | `practice_exam` | `flashcards` | `report`), `pathOrBlobRef`, `mime`, `createdAt`.
+- `CitationSpan`
+  - `id`, `studyRunId`, `artifactId`, `sectionId`, `sourceDocumentId`, `sourceLocator` (`page`/`slide`/`note`), `confidence`.
+- `ExtractionIssue`
+  - `id`, `studyRunId`, `sourceDocumentId`, `kind`, `detail`, `severity`.
+- `StudyRunDiff`
+  - `id`, `studyRunId`, `previousStudyRunId`, `summary`.
+
+#### Settings Additions (Phase 8)
+
+New settings in Integrations/Agent/Storage surfaces:
+
+- External knowledge mode toggle (allowlisted domains only).
+- Generation mode default (Conservative vs Coaching).
+- Max concurrent study runs (default 2, max 3).
+- Retention + purge controls:
+  - per-course,
+  - per-source-file,
+  - cache class,
+  - global TTL override.
+- Destination preferences (optional suggestions only; destination still asked each run).
+
+#### Task and Timeline Behavior
+
+- Any study-material generation request is promoted to Tasks mode.
+- Timeline emits explicit stages:
+  - source discovery,
+  - extraction,
+  - uncertainty detection,
+  - generation,
+  - quality gate,
+  - destination write.
+- Summary ordering in task completion:
+  - what succeeded,
+  - what gaps remain,
+  - recommended next actions.
+
+#### Metrics (Local Only)
+
+Track locally and expose in dashboard/export:
+
+- Citation coverage.
+- Rerun frequency.
+- User acceptance/edit rate.
+
+Export formats:
+
+- JSON.
+- CSV.
+
+#### Phase 8 Acceptance Criteria
+
+- User can select a Canvas course (or local files), generate a study pack, and save to selected destination.
+- Generated summary + practice exam include inline per-section citations.
+- PPTX speaker notes are included when present.
+- Extraction uncertainty is surfaced clearly when OCR-like limitations occur.
+- Failed quality gate blocks write by default and requires explicit "write anyway" approval.
+- Runs are versioned; reruns include a summary diff.
+- Notion hybrid write path and Obsidian direct vault write both function end-to-end.
+- Concurrency honors default 2 and configurable cap up to 3.
+- Metrics are available locally and exportable with no telemetry.
+
+#### Phase 8 Implementation Checklist
+
+- [x] Add Phase 8 schema + migrations for source docs, study runs, artifacts, citations, extraction issues, and run diffs
+- [ ] Implement Canvas source discovery + explicit file picker flow (course-wide + file-scoped)
+- [x] Implement local file attach flow for PDF/PPTX
+- [x] Implement PDF parser and PPTX parser (slide text + speaker notes)
+- [x] Add extraction uncertainty detector and issue model
+- [x] Build generation orchestrator for summary + practice exam + flashcards
+- [x] Add per-section inline citation formatter and source map rendering
+- [x] Add quality gate evaluator and draft-only failure path
+- [x] Add destination router (Notion hybrid, Obsidian direct vault, local folder output)
+- [x] Add study run versioning + diff summarizer
+- [x] Add settings UI for external knowledge toggle, concurrency, and retention/purge controls
+- [x] Add local metrics dashboard + JSON/CSV export
+- [x] Add e2e tests: Canvas scope -> generate -> quality gate -> destination write -> rerun diff
+
+#### Phase 8 completed (Feb 18 2026)
+
+- Implemented Canvas-failure fallback UX with local upload recovery and structured failure handling.
+- Shipped destination confirmation + destination routing for final write paths.
+- Completed PDF/PPTX parsing, generation orchestration, inline citation/provenance persistence, and rerun diff support.
+- Added settings and local metrics/export surfaces, then closed Phase 8 with passing e2e and regression verification batches.
+
+#### Phase 8 Implementation Status (as of Feb 18 2026)
+
+**All 44 Phase 8 tests pass (10 test files, 0 failures).**
+
+What is fully built and working:
+
+| Component | File | Status | Tests |
+|-----------|------|--------|-------|
+| SQLite persistence (6 tables, full CRUD) | `study-material-store.ts` (793 lines) | Complete | 6/6 |
+| Local file validation (path, ext, size, magic bytes, SHA-256) | `study-material-source-validation.ts` (302 lines) | Complete | 8/8 |
+| Canvas failure classification (5 failure types + recommendations) | `study-material-fallback.ts` (146 lines) | Complete | 5/5 |
+| Quality gate evaluator (4 checks, composite score, write-anyway) | `study-material-quality-gate.ts` (139 lines) | Complete | 4/4 |
+| IPC handlers (15 handlers across studyMaterials namespace) | `main/index.ts` | Complete | covered by above |
+| Preload bridge (full studyMaterials namespace) | `preload/index.ts` | Complete | — |
+| TypeScript interfaces (all Phase 8 types) | `renderer/types/electron.d.ts` | Complete | — |
+| Drag-and-drop upload in ChatMode | `ChatMode.tsx` | Complete | — |
+| Upload validation + SourceDocument creation flow | `ChatMode.tsx` | Complete | — |
+| Context injection (attached sources prepended to AI messages) | `ChatMode.tsx` + `useOpenCode.ts` | Complete | — |
+| Agent skill for reading local study sources | `.opencode/skills/read-local-study-sources/SKILL.md` | Complete | — |
+
+**Known issue — migration version conflict risk:** `study-material-store.ts` uses SQLite `user_version` pragma for migration tracking, but this is database-global. If `timeline-store.ts` or `task-store.ts` also use `user_version` on the shared `memory.db`, migrations could be skipped or re-run. Must be investigated before production use.
+
+#### Phase 8 Completion Plan: Canvas-Failure Local Upload Fallback
+
+Goal: when Canvas document pull fails, users can seamlessly switch to local PDF/PPTX upload and still complete a high-quality study-pack run.
+
+Execution is organized as dependency-aware waves to maximize parallelism and minimize rework.
+
+Wave A (foundation) — COMPLETE
+
+- [x] `phase-8.a1` Add desktop file-picker IPC for local source files (`showOpenFilesDialog`) with PDF/PPTX filters, multi-select support, and path normalization.
+- [x] `phase-8.a2` Add `studyMaterials:sources:*` IPC + preload + renderer typing for `SourceDocument` CRUD.
+- [x] `phase-8.a3` Add local source validation (type, MIME sniff, size bounds, hash/version) and safe error mapping.
+
+Wave B (fallback orchestration + UX) — COMPLETE
+
+- [x] `phase-8.b1` Detect classified Canvas source failures (`auth_expired`, `external_host`, `inaccessible`, `timeout`) and emit structured fallback events.
+- [x] `phase-8.b2` Add fallback decision UX in Chat/Tasks timeline: `Retry Canvas now` vs `Upload local file instead`.
+- [x] `phase-8.b3` Implement upload flow states: pick file -> validate -> attach to run -> resume generation pipeline.
+- [x] `phase-8.b4` Enforce destination confirmation each run before final write (`Notion`, `Obsidian`, `Local`) with explicit user approval for external writes.
+
+Wave C (generation quality and provenance) — COMPLETE
+
+- [x] `phase-8.c1` Unify local and Canvas document parsing behavior for PDF/PPTX (including PPTX speaker notes and uncertainty flags).
+- [x] `phase-8.c2` Persist extraction issues and citation spans for fallback runs; ensure per-section inline citation rendering remains intact.
+- [x] `phase-8.c3` Keep quality-gate blocking default for failed runs, with explicit `write anyway` approval path.
+
+Wave D (verification and hardening) — COMPLETE
+
+- [x] `phase-8.d1` Add e2e: Canvas failure -> fallback upload -> generate -> quality gate -> destination write -> rerun diff.
+- [x] `phase-8.d2` Add regression tests for unsupported files, oversized files, duplicate uploads/version hash behavior, and repeated retry loop prevention.
+- [x] `phase-8.d3` Add timeline assertions for fallback stage ordering: discover -> fallback decision -> upload/validate -> generate -> quality gate -> write.
+
+Parallelization and dependency notes
+
+- Wave A tasks can run in parallel except `a3` should consume finalized picker and source contract from `a1/a2`.
+- Wave B depends on Wave A completion.
+- Wave C can start once `b3` is in place; `c2/c3` can run in parallel.
+- Wave D gates merge readiness and should run after B+C verification.
+
+Definition of done for this fallback slice
+
+- A user can recover from Canvas file pull failure without leaving the current run.
+- User can upload local PDF/PPTX, see validation feedback, and continue generation.
+- Generated outputs preserve citation traceability and quality-gate behavior.
+- Destination selection is explicit per run and defaults never write into project source paths.
+- Tests cover both happy path and failure/retry edge cases.
+
+#### Phase 8 Continuation Steps (historical execution order)
+
+The following steps were used to execute and close Phase 8 and are kept as a historical implementation sequence.
+
+**Step 1 — Add "Browse files" button to ChatMode (trivial)**
+The `app:showOpenFilesDialog` IPC handler already exists and works. Add a small paperclip/attach button next to the ChatMode input that calls `window.flowstate.studyMaterials.sources.validateLocal()` after the file picker returns. Wire it into the same `uploadStudySourceFiles()` flow that drag-and-drop uses.
+Files: `ChatMode.tsx`
+
+**Step 2 — Investigate and fix migration version conflict**
+`study-material-store.ts` uses SQLite `PRAGMA user_version` which is DB-global. Check whether `timeline-store.ts` and `task-store.ts` also use `user_version` on the shared `memory.db`. If so, migrate all stores to a `_migrations` table keyed by store name, or use separate DB files per store.
+Files: `study-material-store.ts`, `timeline-store.ts`, `task-store.ts`
+
+**Step 3 — Build PDF text extractor**
+Add a `study-material-pdf-parser.ts` module that uses `pdf-parse` (or similar) to extract text from PDF files. Return structured output: `{ pages: Array<{ pageNumber: number, text: string }>, metadata: { title, author, pageCount } }`. Flag pages with no extractable text (likely scanned/image-only) as `ExtractionIssue` with kind `ocr_required`.
+Files: new `study-material-pdf-parser.ts`, new test file
+
+**Step 4 — Build PPTX parser (slide text + speaker notes)**
+Add a `study-material-pptx-parser.ts` module. PPTX files are ZIP archives; extract `ppt/slides/slide*.xml` for slide text and `ppt/notesSlides/notesSlide*.xml` for speaker notes. Return `{ slides: Array<{ slideNumber: number, text: string, speakerNotes: string | null }> }`. Flag slides with no text as potential image-only. Use `adm-zip` or `jszip` for ZIP handling and a lightweight XML parser.
+Files: new `study-material-pptx-parser.ts`, new test file
+
+**Step 5 — Build generation orchestrator**
+Create `study-material-orchestrator.ts` that chains: (1) discover sources for course → (2) extract text via PDF/PPTX parsers → (3) normalize/merge extracted text at course level → (4) generate outputs (summary, practice exam, flashcards) via AI prompts → (5) run quality gate → (6) present draft preview → (7) write to destination on approval. This is the core pipeline. Each step should emit timeline events. The orchestrator should create a `StudyMaterialRun` and update its status as it progresses.
+Files: new `study-material-orchestrator.ts`, new test file
+
+**Step 6 — Add fallback decision UX (phase-8.b2)**
+When Canvas source pull fails and the fallback classifier fires, show an inline decision card in the Chat/Tasks timeline: "Canvas returned [error type]. Retry Canvas now / Upload local file instead". Wire the "Upload" action to the file picker flow from Step 1.
+Files: `ChatMode.tsx` or a new `FallbackDecisionCard.tsx` component
+
+**Step 7 — Add destination confirmation flow (phase-8.b4)**
+Before final write, prompt the user with a destination selection: Notion / Obsidian / Local (Downloads). The `studyMaterials:runs:confirmDestination` IPC handler exists but has no UI. Add a modal or inline card that presents the three options, remembers the last choice as a suggestion, and requires explicit confirmation.
+Files: new `DestinationConfirmation.tsx` component, wire into orchestrator
+
+**Step 8 — Build destination router**
+Implement the actual write paths: (a) **Local**: write `summary.md`, `practice-exam.md`, `flashcards.csv`, `run-metadata.json` to user-selected folder. (b) **Notion**: create DB row for run metadata + linked page with rich content, citations, and warnings. (c) **Obsidian**: write markdown files + CSV to vault path.
+Files: new `study-material-destination-router.ts`, new test file
+
+**Step 9 — Add inline citation rendering**
+The `CitationSpan` data model and persistence are complete. Build a formatter that takes generated output text + citation spans and produces markdown/JSX with inline citation tags (e.g., `[Source: Lecture 5, Slide 12]`). Apply during generation step in the orchestrator.
+Files: new `study-material-citation-formatter.ts`, integrate into orchestrator
+
+**Step 10 — Add study run versioning + diff UI**
+`StudyRunDiff` storage works. Build a summarizer that compares two runs for the same course and produces a human-readable diff (new content, removed content, updated sections). Show in the timeline after a rerun completes.
+Files: new `study-material-diff-summarizer.ts`, UI component for diff display
+
+**Step 11 — Add Phase 8 settings**
+Add settings surface entries for: external knowledge toggle, generation mode default, max concurrent runs, retention/purge controls. Wire to existing settings infrastructure.
+Files: settings UI components, settings store integration
+
+**Step 12 — Add metrics dashboard + export**
+Track citation coverage, rerun frequency, user acceptance rate locally. Add a dashboard view and JSON/CSV export.
+Files: new metrics components
+
+**Step 13 — Add e2e tests (phase-8.d1/d2/d3)**
+Full pipeline e2e: Canvas failure → fallback upload → generate → quality gate → destination write → rerun diff. Regression tests for edge cases. Timeline stage ordering assertions.
+Files: new e2e test files
 
 #### Legacy Spec: Unified Real-Time Timeline
 

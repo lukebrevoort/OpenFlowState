@@ -50,6 +50,9 @@ const statusPriority: Record<TaskRun['status'], number> = {
   cancelled: 4,
 };
 
+export const isTaskRunActiveStatus = (status: TaskRun['status']) =>
+  status === 'running' || status === 'waiting_approval';
+
 const sortRuns = (runs: TaskRun[]) => {
   return [...runs].sort((a, b) => {
     const byStatus = statusPriority[a.status] - statusPriority[b.status];

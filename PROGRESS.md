@@ -1,13 +1,13 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 18, 2026 (ChatMode Live Updates + Stop-to-Cancel Sync)
+> **Last Updated**: February 20, 2026 (Phase 8 + ChatMode Live Updates merged)
 
 ---
 
-## Current Status: ✅ Phases 5 & 5.5 COMPLETE → Ready for Phase 6
+## Current Status: ✅ Phase 8 COMPLETE (Academic Intelligence study-pack scope)
 
-**Phase 5 (Workflows + Commands Productization)** and **Phase 5.5 (Inline Approvals System)** are both complete!
+Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
 
 ### What's Working:
 - Electron main process with macOS window management
@@ -30,6 +30,112 @@
 - **Shared LRU cache with TTL for MCP servers**
 - **Workflows QoL: delete with confirmation, editable command file in details menu, generation no longer creates stuck tasks**
 - **Canvas browser auth persistence via MCP-to-desktop pending auth files**
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Phase 8 Completion Wave)
+
+- ✅ Completed fallback UX end-to-end for Canvas pull failures, including local upload recovery and fallback decision flow.
+- ✅ Completed destination confirmation and destination routing paths for study-pack writes.
+- ✅ Completed parsers/orchestration/provenance scope (PDF/PPTX parsing, orchestrator wiring, citation spans, extraction issues, run diffs).
+- ✅ Completed Phase 8 settings + local metrics/export scope (external-knowledge toggle, concurrency/retention controls, JSON/CSV export).
+- ✅ Completed verification wave with successful e2e and regression coverage; all implementation/verify batches through `phase-8.full.verify-batch-6` are successful.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Canvas MCP Auth-Tool Removal + Refresh Guidance)
+
+- ✅ Removed `canvas_auth_browser_login` from exposed Canvas MCP tools to prevent agents from triggering browser sign-in flows.
+- ✅ Updated Canvas browser-auth error guidance to instruct users to refresh Canvas authentication in Integrations and retry.
+- ✅ Added regression validation to ensure `canvas_auth_browser_login` is not listed by tool discovery.
+- ✅ Updated Integrations UI copy to remove references to the removed MCP auth tool.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Canvas Pull Accuracy Guardrails)
+
+- ✅ Tightened `pull-canvas` skill with explicit file-ID resolution flow (`canvas_list_course_files` -> `canvas_read_file_text`).
+- ✅ Added hard guardrails against module-item-ID misuse for file text extraction.
+- ✅ Updated FlowState agent prompt to route Canvas pulls through `pull-canvas` guidance and avoid in-agent browser-login flows.
+- ✅ Clarified reauthentication path: user should reconnect from Integrations -> Canvas, then retry after lightweight tool health check.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Save Destination Guardrails)
+
+- ✅ Added agent-level policy to ask users where generated files should be saved before writing artifacts.
+- ✅ Added explicit prohibition against defaulting generated files into FlowState source directories unless requested.
+- ✅ Updated Canvas study workflow guidance to prompt for destination (`Desktop`, specific path, or inline-only) before saving study guides.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Phase 8 Upload Fallback Wave A/B/C)
+
+- ✅ Added desktop local-file picker IPC (`app:showOpenFilesDialog`) with typed preload/renderer API and safe path normalization/approval.
+- ✅ Added `studyMaterials` source APIs (`create/get/list`) and local PDF/PPTX validation (`validateLocalSource`) with size/signature/hash checks.
+- ✅ Added fallback orchestration APIs: Canvas failure classification (`studyMaterials:fallback:classify`) and destination confirmation flow (`studyMaterials:runs:confirmDestination`).
+- ✅ Added provenance persistence APIs for `citation_spans`, `extraction_issues`, and `study_run_diffs` (store + IPC + typed preload/renderer surfaces).
+- ✅ Added quality-gate evaluator API (`studyMaterials:quality:evaluate`) with default thresholds, override support, and explicit block/unblock semantics.
+- ✅ Added regression tests for fallback classification, quality-gate logic, source validation, source listing pagination, and provenance persistence; desktop typecheck + tests pass.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Chat Dropzone for Local Study Sources)
+
+- ✅ Added a ChatMode drag-and-drop upload zone for local PDF/PPTX study files.
+- ✅ Added a `Browse files` fallback action in ChatMode using `app:showOpenFilesDialog`.
+- ✅ Wired dropzone upload flow to `studyMaterials.validateLocalSource` + `studyMaterials.createSource` with per-file success/failure feedback.
+- ✅ Verified desktop typecheck after ChatMode UI changes.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Session Attachment Context Injection)
+
+- ✅ Added automatic session-scoped source loading in ChatMode for locally attached study files.
+- ✅ Injected attached source metadata (title/type/path/sourceId/version hash) into outbound chat prompts so agents can act on uploaded files.
+- ✅ Added lightweight attached-source count indicator in ChatMode to confirm what is available to the active session.
+- ✅ Updated `useOpenCode.sendMessage` to support hidden context prefixes without altering displayed user message text.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Compact Upload Badge + Local Source Reading Skill)
+
+- ✅ Simplified ChatMode upload UI to a compact badge (`1 file uploaded`) above the chat bar instead of larger persistent status sections.
+- ✅ Reduced drag overlay to a minimal one-line drop hint to lower visual footprint.
+- ✅ Added `read-local-study-sources` skill under `.opencode/skills/` to enforce actual file reads from attached local source paths.
+- ✅ Updated FlowState agent prompts to invoke local-source reading behavior when attached-source context is present.
+
+---
+
+## Tasks Completed (Feb 18, 2026 - Phase 8 Canvas External-Host Download Guidance)
+
+- ✅ Updated Canvas external-host download failures to avoid misleading reauthentication guidance when files are inaccessible via API mode.
+- ✅ Clarified user-facing fallback to direct upload or pasted text for externally hosted files.
+- ✅ Added regression coverage to ensure external-host 403 errors do not suggest `canvas_auth_browser_login` and preserve non-reauth guidance.
+- ✅ Re-validated modified packages (`@flowstate/mcp-canvas` and `@flowstate/desktop`) with passing typecheck + test runs.
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Phase 8 Kickoff: Canvas Ingestion + Study-Material Foundations)
+
+- ✅ Added the initial Canvas ingestion slice for Phase 8 so course/file inputs can be pulled into the study-pack pipeline foundation.
+- ✅ Added study-material store foundations for Phase 8 run data, source-document tracking, and artifact metadata persistence.
+- ✅ Added desktop IPC foundations to connect renderer-triggered Phase 8 study-material actions to main-process orchestration.
+- ✅ Captured kickoff status to anchor Phase 8 execution against the new Academic Intelligence plan scope.
+
+### Follow-Up (Phase 8)
+- Closed by the Feb 18 completion wave and verification batches through `phase-8.full.verify-batch-6`.
+
+---
+
+## Tasks Completed (Feb 17, 2026 - Phase 7 Chat/Sidebar Reliability + Launch Prep)
+
+- ✅ Added cancellable chat generation flow end-to-end (renderer -> preload -> main -> ProcessManager) with session-scoped cancellation checks.
+- ✅ Improved ChatMode rendering reliability for large assistant responses by parsing response headers up front and skipping expensive animation/normalization paths when content is large.
+- ✅ Replaced Sidebar placeholder data with live sessions/pinned workflows/running tasks and added debounced refresh coalescing to reduce event-driven reload churn.
+- ✅ Added Phase 7 regression coverage (`phase7-happy-path.test.ts`, timeline normalization regressions, workflow ID immutability regression).
+- ✅ Hardened IPC boundaries: `app:openExternal` protocol allowlist and `app:ensureFile` path restrictions to app-owned or dialog-approved locations.
+- ✅ Added launch prep documentation for unsigned DMG packaging and repeatable beta demo capture (`docs/phase-7-launch-prep.md`).
 
 ---
 
@@ -1488,6 +1594,44 @@ Renderer (useOpenCode.ts):
 
 **BLOCKERS**
 - None
+
+---
+
+## Phase 8 Architecture Review (Feb 18, 2026)
+**Timestamp**: Feb 18, 2026
+
+**REVIEW COMPLETED**
+- ✅ Full codebase audit of all Phase 8 implementation files
+- ✅ Verified all 44 Phase 8 tests pass (10 test files, 0 failures)
+- ✅ Confirmed Wave A (foundation) is fully complete: file picker IPC, SourceDocument CRUD, local source validation
+- ✅ Confirmed Wave B partially complete: drag-and-drop upload + validation + context injection working in ChatMode
+- ✅ Updated PLAN.md Phase 8 with implementation status table, wave completion markers, and 13 specific continuation steps
+- ✅ Identified migration version conflict risk (`user_version` pragma is DB-global, shared across stores)
+
+**WHAT'S WORKING**
+- SQLite persistence for all 6 Phase 8 tables (793 lines, 6 tests)
+- Local file validation with magic byte checking (302 lines, 8 tests)
+- Canvas failure classification (146 lines, 5 tests)
+- Quality gate evaluator (139 lines, 4 tests)
+- 15 IPC handlers + preload bridge + TypeScript types
+- Drag-and-drop PDF/PPTX upload in ChatMode with validation
+- Context injection prepending source metadata to AI messages
+- Agent skill for reading attached local study sources
+
+**NOT YET BUILT**
+- "Browse files" button (IPC exists, no UI trigger)
+- PDF text extractor / PPTX slide+notes parser
+- Generation orchestrator (the core pipeline)
+- Fallback decision UX (Canvas failure → upload prompt)
+- Destination confirmation + router (Notion/Obsidian/Local)
+- Inline citation rendering
+- Study run versioning + diff UI
+- Phase 8 settings, metrics dashboard, e2e tests
+
+**NEXT PRIORITY**: Step 1 (Browse button) and Step 2 (migration conflict) are quick wins. Steps 3-5 (parsers + orchestrator) are the critical path.
+
+**BLOCKERS**
+- Migration version conflict must be resolved before production use (Step 2)
 
 ---
 

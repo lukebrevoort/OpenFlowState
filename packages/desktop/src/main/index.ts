@@ -6,6 +6,7 @@
  */
 
 import { app, BrowserWindow, ipcMain, shell, nativeTheme, dialog } from 'electron';
+import type { OpenDialogOptions } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -29,6 +30,27 @@ import { startPendingAuthWatcher, stopPendingAuthWatcher } from './pending-auth-
 import type {
   IpcError,
   IpcResult,
+  CitationSpan,
+  CitationSpanCreateInput,
+  CitationSpanListQuery,
+  ExtractionIssue,
+  ExtractionIssueCreateInput,
+  ExtractionIssueListQuery,
+  SourceDocument,
+  SourceDocumentCreateInput,
+  StudyRunDiff,
+  StudyRunDiffCreateInput,
+  StudyMaterialFallbackClassificationInput,
+  StudyMaterialFallbackClassificationResult,
+  StudyMaterialQualityGateEvaluateInput,
+  StudyMaterialQualityGateEvaluateResult,
+  StudyMaterialLocalSourceValidationInput,
+  StudyMaterialLocalSourceValidationResult,
+  StudyMaterialArtifact,
+  StudyMaterialArtifactCreateInput,
+  StudyMaterialRun,
+  StudyMaterialRunConfirmDestinationInput,
+  StudyMaterialRunCreateInput,
   TaskRun,
   WorkflowArtifact,
   WorkflowDefinition,
@@ -38,9 +60,13 @@ import { workflowsRunner } from './workflows-runner.js';
 import { workflowsGenerator } from './workflows-generator.js';
 import { toRendererTaskRun } from './task-types.js';
 import { workflowRunStore } from './workflow-run-store.js';
+import { studyMaterialStore } from './study-material-store.js';
 import { PinnedWorkflowsLimitError, workflowsPinsStore } from './workflows-pins-store.js';
 import { userProfile } from '@flowstate/core';
 import { runIntegrationHealthCheck, runOAuthBatchHealthCheck } from './integrations-health.js';
+import { validateLocalStudyMaterialSource } from './study-material-source-validation.js';
+import { classifyStudyMaterialFallback } from './study-material-fallback.js';
+import { evaluateStudyMaterialQualityGate } from './study-material-quality-gate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +74,79 @@ const execFileAsync = promisify(execFile);
 const SAFE_PROVIDER_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TERMINAL_COMMAND_PREFIX = 'opencode auth login';
 const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+
+const approvedEnsureFilePaths = new Set<string>();
+const approvedEnsureFileDirectories = new Set<string>();
+
+const normalizeAbsolutePath = (value: string, fieldName: string): string => {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  if (!trimmed) {
+    throw new Error(`${fieldName} must be a non-empty string.`);
+  }
+  if (!path.isAbsolute(trimmed)) {
+    throw new Error(`${fieldName} must be an absolute path.`);
+  }
+  return path.normalize(path.resolve(trimmed));
+};
+
+const isPathWithin = (candidatePath: string, rootPath: string): boolean => {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const getAppOwnedRoots = (): string[] => {
+  return Array.from(new Set([app.getPath('userData'), configStore.getDataDir()].map((p) => path.normalize(path.resolve(p)))));
+};
+
+const markEnsureFilePathApproved = (filePath: string): void => {
+  approvedEnsureFilePaths.add(filePath);
+  approvedEnsureFileDirectories.add(path.dirname(filePath));
+};
+
+const markEnsureFileDirectoryApproved = (dirPath: string): void => {
+  approvedEnsureFileDirectories.add(dirPath);
+};
+
+const isEnsureFilePathAllowed = (filePath: string): boolean => {
+  if (approvedEnsureFilePaths.has(filePath)) {
+    return true;
+  }
+
+  for (const approvedDir of approvedEnsureFileDirectories) {
+    if (isPathWithin(filePath, approvedDir)) {
+      return true;
+    }
+  }
+
+  for (const root of getAppOwnedRoots()) {
+    if (isPathWithin(filePath, root)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const parseAllowedExternalUrl = (rawUrl: string): URL => {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) {
+    throw new Error('URL must be a non-empty string.');
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(trimmed);
+  } catch {
+    throw new Error('URL must be a valid absolute URL.');
+  }
+
+  if (!ALLOWED_EXTERNAL_PROTOCOLS.has(parsedUrl.protocol)) {
+    throw new Error(`Blocked URL protocol "${parsedUrl.protocol}". Allowed protocols: ${Array.from(ALLOWED_EXTERNAL_PROTOCOLS).join(', ')}.`);
+  }
+
+  return parsedUrl;
+};
 
 const parseSupportedTerminalCommand = (command: string): string => {
   const trimmed = typeof command === 'string' ? command.trim() : '';
@@ -128,7 +227,12 @@ function createWindow(): void {
 
   // Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsedUrl = parseAllowedExternalUrl(url);
+      void shell.openExternal(parsedUrl.toString());
+    } catch (error) {
+      console.warn('[Security] Blocked unsafe external window URL:', error instanceof Error ? error.message : String(error));
+    }
     return { action: 'deny' };
   });
 
@@ -241,7 +345,8 @@ ipcMain.handle('app:getTheme', () => {
  * Open external URL in default browser
  */
 ipcMain.handle('app:openExternal', async (_event, url: string) => {
-  await shell.openExternal(url);
+  const parsedUrl = parseAllowedExternalUrl(url);
+  await shell.openExternal(parsedUrl.toString());
 });
 
 ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; defaultPath?: string }) => {
@@ -254,7 +359,15 @@ ipcMain.handle('app:showSaveDialog', async (_event, options?: { title?: string; 
   });
 
   if (result.canceled) return null;
-  return result.filePath ?? null;
+  const filePath = result.filePath ?? null;
+  if (filePath) {
+    try {
+      markEnsureFilePathApproved(normalizeAbsolutePath(filePath, 'filePath'));
+    } catch (error) {
+      console.warn('[Security] Failed to register save dialog approval:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return filePath;
 });
 
 ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }) => {
@@ -265,14 +378,67 @@ ipcMain.handle('app:showOpenDialog', async (_event, options?: { title?: string }
   });
 
   if (result.canceled) return null;
-  return result.filePaths[0] ?? null;
+  const selectedPath = result.filePaths[0] ?? null;
+  if (selectedPath) {
+    try {
+      markEnsureFileDirectoryApproved(normalizeAbsolutePath(selectedPath, 'path'));
+    } catch (error) {
+      console.warn('[Security] Failed to register open dialog approval:', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return selectedPath;
 });
+
+ipcMain.handle(
+  'app:showOpenFilesDialog',
+  async (
+    _event,
+    options?: { title?: string; filters?: Array<{ name: string; extensions: string[] }>; multiSelect?: boolean },
+  ) => {
+    if (!mainWindow) return null;
+
+    const properties: OpenDialogOptions['properties'] = ['openFile'];
+    if (options?.multiSelect !== false) {
+      properties.push('multiSelections');
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: options?.title ?? 'Choose file(s)',
+      filters: options?.filters,
+      properties,
+    });
+
+    if (result.canceled) return null;
+
+    const approvedPaths: string[] = [];
+    for (const rawPath of result.filePaths) {
+      try {
+        const normalizedPath = normalizeAbsolutePath(rawPath, 'path');
+        approvedPaths.push(normalizedPath);
+        markEnsureFileDirectoryApproved(path.dirname(normalizedPath));
+      } catch (error) {
+        console.warn('[Security] Failed to register open files dialog approval:', error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    return approvedPaths;
+  },
+);
 
 ipcMain.handle('app:ensureFile', async (_event, filePath: string) => {
   try {
-    const dir = path.dirname(filePath);
+    const normalizedFilePath = normalizeAbsolutePath(filePath, 'filePath');
+    if (!isEnsureFilePathAllowed(normalizedFilePath)) {
+      return {
+        success: false,
+        error:
+          'Refused to create file at an unapproved location. Choose a location using the app save/open dialog or use a path under app data.',
+      };
+    }
+
+    const dir = path.dirname(normalizedFilePath);
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, '', { flag: 'a' });
+    await fs.writeFile(normalizedFilePath, '', { flag: 'a' });
     return { success: true };
   } catch (error) {
     console.error('Failed to ensure file exists:', error);
@@ -733,6 +899,16 @@ ipcMain.handle('opencode:sendAsync', async (event, message: string) => {
   }
 });
 
+ipcMain.handle('opencode:cancelGeneration', async (_event, context?: { expectedSessionId?: string | null }) => {
+  try {
+    const result = await processManager.cancelActiveGeneration(context?.expectedSessionId);
+    return { success: true, cancelled: result.cancelled };
+  } catch (error) {
+    console.error('[IPC] Error in opencode:cancelGeneration:', error);
+    return { success: false, cancelled: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 /**
  * Get OpenCode status
  */
@@ -784,6 +960,23 @@ const ipcError = <T>(code: IpcError['code'], message: string, details?: unknown)
 });
 
 const ipcOk = <T>(data: T): IpcResult<T> => ({ ok: true, data });
+
+const STUDY_MATERIAL_RUN_MODES = new Set(['conservative', 'coaching']);
+const STUDY_MATERIAL_RUN_STATUSES = new Set([
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+  'awaiting_destination',
+  'awaiting_quality_override',
+]);
+const STUDY_MATERIAL_ARTIFACT_KINDS = new Set(['summary', 'practice_exam', 'flashcards', 'report']);
+const STUDY_MATERIAL_MAX_LIMIT = 200;
+
+const isFiniteInteger = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value);
+};
 
 const DEFAULT_CONVERSATION_TITLE = 'New Conversation';
 
@@ -855,6 +1048,11 @@ const configureTaskStore = (): void => {
 const configureWorkflowRunStore = (): void => {
   // Keep workflow run history persisted in memory.db.
   workflowRunStore.configure({ dataDir: configStore.getDataDir() });
+};
+
+const configureStudyMaterialStore = (): void => {
+  // Keep study material run history persisted in memory.db.
+  studyMaterialStore.configure({ dataDir: configStore.getDataDir() });
 };
 
 const configureWorkflowsPinsStore = (): void => {
@@ -1020,6 +1218,16 @@ ipcMain.handle('chat:sendMessage', async (event, message: string) => {
       content: message,
       errorDetails: opencodeError,
     };
+  }
+});
+
+ipcMain.handle('chat:cancelGeneration', async (_event, context?: { expectedSessionId?: string | null }) => {
+  try {
+    const result = await processManager.cancelActiveGeneration(context?.expectedSessionId);
+    return { success: true, cancelled: result.cancelled };
+  } catch (error) {
+    console.error('[IPC] Error in chat:cancelGeneration:', error);
+    return { success: false, cancelled: false, error: error instanceof Error ? error.message : String(error) };
   }
 });
 
@@ -1270,6 +1478,719 @@ ipcMain.handle('tasks:remove', async (_event, taskRunId: string) => {
   } catch (error) {
     console.warn('[IPC] Failed to remove task run:', error);
     return ipcError<{ removed: boolean }>('UNKNOWN', 'Failed to remove task run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:create', async (_event, input: StudyMaterialRunCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const courseId = typeof input?.courseId === 'string' ? input.courseId.trim() : '';
+  const mode = typeof input?.mode === 'string' ? input.mode.trim() : '';
+  const destinationType = typeof input?.destinationType === 'string' ? input.destinationType.trim() : '';
+
+  if (!id || !courseId || !mode || !destinationType) {
+    return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'id, courseId, mode, and destinationType are required.');
+  }
+
+  if (!STUDY_MATERIAL_RUN_MODES.has(mode)) {
+    return ipcError<StudyMaterialRun>(
+      'INVALID_REQUEST',
+      `mode must be one of: ${Array.from(STUDY_MATERIAL_RUN_MODES).join(', ')}.`,
+    );
+  }
+
+  const status = input?.status ?? 'queued';
+  if (!STUDY_MATERIAL_RUN_STATUSES.has(status)) {
+    return ipcError<StudyMaterialRun>(
+      'INVALID_REQUEST',
+      `status must be one of: ${Array.from(STUDY_MATERIAL_RUN_STATUSES).join(', ')}.`,
+    );
+  }
+
+  if (input?.qualityScore !== undefined) {
+    if (typeof input.qualityScore !== 'number' || !Number.isFinite(input.qualityScore)) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be a finite number between 0 and 1.');
+    }
+
+    if (input.qualityScore < 0 || input.qualityScore > 1) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be between 0 and 1.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const now = Date.now();
+    const run = studyMaterialStore.createRun({
+      id,
+      courseId,
+      ...(typeof input.taskRunId === 'string' && input.taskRunId.trim().length > 0
+        ? { taskRunId: input.taskRunId.trim() }
+        : {}),
+      mode: mode as StudyMaterialRun['mode'],
+      destinationType,
+      status: status as StudyMaterialRun['status'],
+      ...(typeof input.qualityScore === 'number' && Number.isFinite(input.qualityScore)
+        ? { qualityScore: input.qualityScore }
+        : {}),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    return ipcOk<StudyMaterialRun>(run);
+  } catch (error) {
+    console.warn('[IPC] Failed to create study material run:', error);
+    return ipcError<StudyMaterialRun>('UNKNOWN', 'Failed to create study material run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:list', async (_event, query?: { courseId?: string; limit?: number; offset?: number }) => {
+  if (query?.limit !== undefined) {
+    if (!isFiniteInteger(query.limit)) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'limit must be a finite integer between 1 and 200.');
+    }
+
+    if (query.limit < 1 || query.limit > STUDY_MATERIAL_MAX_LIMIT) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'limit must be between 1 and 200.');
+    }
+  }
+
+  if (query?.offset !== undefined) {
+    if (!isFiniteInteger(query.offset)) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'offset must be a finite integer greater than or equal to 0.');
+    }
+
+    if (query.offset < 0) {
+      return ipcError<StudyMaterialRun[]>('INVALID_REQUEST', 'offset must be greater than or equal to 0.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const runs = studyMaterialStore.listRuns({
+      ...(typeof query?.courseId === 'string' && query.courseId.trim().length > 0
+        ? { courseId: query.courseId.trim() }
+        : {}),
+      ...(typeof query?.limit === 'number' ? { limit: query.limit } : {}),
+      ...(typeof query?.offset === 'number' ? { offset: query.offset } : {}),
+    }) as unknown as StudyMaterialRun[];
+    return ipcOk<StudyMaterialRun[]>(runs);
+  } catch (error) {
+    console.warn('[IPC] Failed to list study material runs:', error);
+    return ipcError<StudyMaterialRun[]>('UNKNOWN', 'Failed to list study material runs.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:get', async (_event, studyRunId: string) => {
+  const id = typeof studyRunId === 'string' ? studyRunId.trim() : '';
+  if (!id) {
+    return ipcError<StudyMaterialRun | null>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const run = studyMaterialStore.getRun(id) as StudyMaterialRun | null;
+    return ipcOk<StudyMaterialRun | null>(run);
+  } catch (error) {
+    console.warn('[IPC] Failed to get study material run:', error);
+    return ipcError<StudyMaterialRun | null>('UNKNOWN', 'Failed to get study material run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:runs:confirmDestination', async (_event, input: StudyMaterialRunConfirmDestinationInput) => {
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const destinationType = typeof input?.destinationType === 'string' ? input.destinationType.trim() : '';
+
+  if (!studyRunId || !destinationType) {
+    return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'studyRunId and destinationType are required.');
+  }
+
+  const status = typeof input?.status === 'string' && input.status.trim().length > 0 ? input.status : 'queued';
+  if (!STUDY_MATERIAL_RUN_STATUSES.has(status)) {
+    return ipcError<StudyMaterialRun>(
+      'INVALID_REQUEST',
+      `status must be one of: ${Array.from(STUDY_MATERIAL_RUN_STATUSES).join(', ')}.`,
+    );
+  }
+
+  if (input?.qualityScore !== undefined) {
+    if (typeof input.qualityScore !== 'number' || !Number.isFinite(input.qualityScore)) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be a finite number between 0 and 1.');
+    }
+
+    if (input.qualityScore < 0 || input.qualityScore > 1) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'qualityScore must be between 0 and 1.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+
+    const existing = studyMaterialStore.getRun(studyRunId);
+    if (!existing) {
+      return ipcError<StudyMaterialRun>('INVALID_REQUEST', 'Study material run not found.');
+    }
+
+    const updated = studyMaterialStore.updateRun(studyRunId, {
+      destinationType,
+      status: status as StudyMaterialRun['status'],
+      ...(typeof input.qualityScore === 'number' ? { qualityScore: input.qualityScore } : {}),
+      updatedAt: Date.now(),
+    }) as StudyMaterialRun | null;
+
+    if (!updated) {
+      return ipcError<StudyMaterialRun>('UNKNOWN', 'Failed to confirm destination for study material run.');
+    }
+
+    return ipcOk<StudyMaterialRun>(updated);
+  } catch (error) {
+    console.warn('[IPC] Failed to confirm destination for study material run:', error);
+    return ipcError<StudyMaterialRun>('UNKNOWN', 'Failed to confirm destination for study material run.');
+  }
+});
+
+ipcMain.handle('studyMaterials:fallback:classify', async (_event, input?: StudyMaterialFallbackClassificationInput) => {
+  const payload = input ?? {};
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return ipcError<StudyMaterialFallbackClassificationResult>('INVALID_REQUEST', 'input must be an object.');
+  }
+
+  if (payload.message !== undefined && typeof payload.message !== 'string') {
+    return ipcError<StudyMaterialFallbackClassificationResult>('INVALID_REQUEST', 'message must be a string when provided.');
+  }
+
+  if (payload.code !== undefined && typeof payload.code !== 'string') {
+    return ipcError<StudyMaterialFallbackClassificationResult>('INVALID_REQUEST', 'code must be a string when provided.');
+  }
+
+  if (payload.url !== undefined && typeof payload.url !== 'string') {
+    return ipcError<StudyMaterialFallbackClassificationResult>('INVALID_REQUEST', 'url must be a string when provided.');
+  }
+
+  if (payload.status !== undefined && typeof payload.status !== 'number' && typeof payload.status !== 'string') {
+    return ipcError<StudyMaterialFallbackClassificationResult>(
+      'INVALID_REQUEST',
+      'status must be a number or string when provided.',
+    );
+  }
+
+  try {
+    const result = classifyStudyMaterialFallback(payload);
+    return ipcOk<StudyMaterialFallbackClassificationResult>({
+      classification: result.classification,
+      recommendation: result.recommendation,
+      localUploadPrimaryAction: result.localUploadPrimaryAction,
+    });
+  } catch (error) {
+    console.warn('[IPC] Failed to classify study material fallback:', error);
+    return ipcError<StudyMaterialFallbackClassificationResult>('UNKNOWN', 'Failed to classify study material fallback.');
+  }
+});
+
+ipcMain.handle('studyMaterials:quality:evaluate', async (_event, input?: StudyMaterialQualityGateEvaluateInput) => {
+  const payload = input as unknown;
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>('INVALID_REQUEST', 'input must be an object.');
+  }
+
+  const metrics = payload as Record<string, unknown>;
+
+  const citationCoverage = metrics.citationCoverage;
+  if (typeof citationCoverage !== 'number' || !Number.isFinite(citationCoverage)) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'citationCoverage must be a finite number between 0 and 1.',
+    );
+  }
+  if (citationCoverage < 0 || citationCoverage > 1) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>('INVALID_REQUEST', 'citationCoverage must be between 0 and 1.');
+  }
+
+  const duplicateQuestionRatio = metrics.duplicateQuestionRatio;
+  if (typeof duplicateQuestionRatio !== 'number' || !Number.isFinite(duplicateQuestionRatio)) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'duplicateQuestionRatio must be a finite number between 0 and 1.',
+    );
+  }
+  if (duplicateQuestionRatio < 0 || duplicateQuestionRatio > 1) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'duplicateQuestionRatio must be between 0 and 1.',
+    );
+  }
+
+  const sourceCoverageRatio = metrics.sourceCoverageRatio;
+  if (typeof sourceCoverageRatio !== 'number' || !Number.isFinite(sourceCoverageRatio)) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'sourceCoverageRatio must be a finite number between 0 and 1.',
+    );
+  }
+  if (sourceCoverageRatio < 0 || sourceCoverageRatio > 1) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>('INVALID_REQUEST', 'sourceCoverageRatio must be between 0 and 1.');
+  }
+
+  const extractionIssueCount = metrics.extractionIssueCount;
+  if (!isFiniteInteger(extractionIssueCount)) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'extractionIssueCount must be a finite integer greater than or equal to 0.',
+    );
+  }
+  if (extractionIssueCount < 0) {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'extractionIssueCount must be greater than or equal to 0.',
+    );
+  }
+
+  const writeAnywayRequested = metrics.writeAnywayRequested;
+  if (typeof writeAnywayRequested !== 'boolean') {
+    return ipcError<StudyMaterialQualityGateEvaluateResult>(
+      'INVALID_REQUEST',
+      'writeAnywayRequested must be a boolean.',
+    );
+  }
+
+  const thresholdOverrides = metrics.thresholds;
+  const thresholds: StudyMaterialQualityGateEvaluateInput['thresholds'] = {};
+  if (thresholdOverrides !== undefined) {
+    if (typeof thresholdOverrides !== 'object' || thresholdOverrides === null || Array.isArray(thresholdOverrides)) {
+      return ipcError<StudyMaterialQualityGateEvaluateResult>('INVALID_REQUEST', 'thresholds must be an object when provided.');
+    }
+
+    const allowedKeys = new Set([
+      'minCitationCoverage',
+      'maxDuplicateQuestionRatio',
+      'minSourceCoverageRatio',
+    ]);
+    for (const key of Object.keys(thresholdOverrides)) {
+      if (!allowedKeys.has(key)) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          `thresholds contains unsupported key "${key}".`,
+        );
+      }
+    }
+
+    const rawThresholds = thresholdOverrides as Record<string, unknown>;
+
+    if (rawThresholds.minCitationCoverage !== undefined) {
+      if (typeof rawThresholds.minCitationCoverage !== 'number' || !Number.isFinite(rawThresholds.minCitationCoverage)) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.minCitationCoverage must be a finite number between 0 and 1.',
+        );
+      }
+      if (rawThresholds.minCitationCoverage < 0 || rawThresholds.minCitationCoverage > 1) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.minCitationCoverage must be between 0 and 1.',
+        );
+      }
+      thresholds.minCitationCoverage = rawThresholds.minCitationCoverage;
+    }
+
+    if (rawThresholds.maxDuplicateQuestionRatio !== undefined) {
+      if (
+        typeof rawThresholds.maxDuplicateQuestionRatio !== 'number' ||
+        !Number.isFinite(rawThresholds.maxDuplicateQuestionRatio)
+      ) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.maxDuplicateQuestionRatio must be a finite number between 0 and 1.',
+        );
+      }
+      if (rawThresholds.maxDuplicateQuestionRatio < 0 || rawThresholds.maxDuplicateQuestionRatio > 1) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.maxDuplicateQuestionRatio must be between 0 and 1.',
+        );
+      }
+      thresholds.maxDuplicateQuestionRatio = rawThresholds.maxDuplicateQuestionRatio;
+    }
+
+    if (rawThresholds.minSourceCoverageRatio !== undefined) {
+      if (typeof rawThresholds.minSourceCoverageRatio !== 'number' || !Number.isFinite(rawThresholds.minSourceCoverageRatio)) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.minSourceCoverageRatio must be a finite number between 0 and 1.',
+        );
+      }
+      if (rawThresholds.minSourceCoverageRatio < 0 || rawThresholds.minSourceCoverageRatio > 1) {
+        return ipcError<StudyMaterialQualityGateEvaluateResult>(
+          'INVALID_REQUEST',
+          'thresholds.minSourceCoverageRatio must be between 0 and 1.',
+        );
+      }
+      thresholds.minSourceCoverageRatio = rawThresholds.minSourceCoverageRatio;
+    }
+  }
+
+  try {
+    const result = evaluateStudyMaterialQualityGate({
+      citationCoverage,
+      duplicateQuestionRatio,
+      sourceCoverageRatio,
+      extractionIssueCount,
+      writeAnywayRequested,
+      ...(Object.keys(thresholds).length > 0 ? { thresholds } : {}),
+    });
+
+    return ipcOk<StudyMaterialQualityGateEvaluateResult>(result);
+  } catch (error) {
+    console.warn('[IPC] Failed to evaluate study material quality gate:', error);
+    return ipcError<StudyMaterialQualityGateEvaluateResult>('UNKNOWN', 'Failed to evaluate study material quality gate.');
+  }
+});
+
+ipcMain.handle('studyMaterials:sources:create', async (_event, input: SourceDocumentCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const courseId = typeof input?.courseId === 'string' ? input.courseId.trim() : '';
+  const origin = typeof input?.origin === 'string' ? input.origin.trim() : '';
+  const fileType = typeof input?.fileType === 'string' ? input.fileType.trim() : '';
+  const title = typeof input?.title === 'string' ? input.title.trim() : '';
+  const sourceRef = typeof input?.sourceRef === 'string' ? input.sourceRef.trim() : '';
+  const versionHash = typeof input?.versionHash === 'string' ? input.versionHash.trim() : '';
+
+  if (!id || !courseId || !origin || !fileType || !title || !sourceRef || !versionHash) {
+    return ipcError<SourceDocument>(
+      'INVALID_REQUEST',
+      'id, courseId, origin, fileType, title, sourceRef, and versionHash are required.',
+    );
+  }
+
+  if (input?.ingestedAt !== undefined) {
+    if (!isFiniteInteger(input.ingestedAt)) {
+      return ipcError<SourceDocument>('INVALID_REQUEST', 'ingestedAt must be a finite integer greater than or equal to 0.');
+    }
+
+    if (input.ingestedAt < 0) {
+      return ipcError<SourceDocument>('INVALID_REQUEST', 'ingestedAt must be greater than or equal to 0.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const source = studyMaterialStore.createSourceDocument({
+      id,
+      courseId,
+      origin,
+      fileType,
+      title,
+      sourceRef,
+      versionHash,
+      ingestedAt: input?.ingestedAt ?? Date.now(),
+    }) as unknown as SourceDocument;
+    return ipcOk<SourceDocument>(source);
+  } catch (error) {
+    console.warn('[IPC] Failed to create source document:', error);
+    return ipcError<SourceDocument>('UNKNOWN', 'Failed to create source document.');
+  }
+});
+
+ipcMain.handle('studyMaterials:sources:get', async (_event, sourceId: string) => {
+  const id = typeof sourceId === 'string' ? sourceId.trim() : '';
+  if (!id) {
+    return ipcError<SourceDocument | null>('INVALID_REQUEST', 'sourceId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const source = studyMaterialStore.getSourceDocument(id) as SourceDocument | null;
+    return ipcOk<SourceDocument | null>(source);
+  } catch (error) {
+    console.warn('[IPC] Failed to get source document:', error);
+    return ipcError<SourceDocument | null>('UNKNOWN', 'Failed to get source document.');
+  }
+});
+
+ipcMain.handle(
+  'studyMaterials:sources:list',
+  async (_event, query?: { courseId?: string; origin?: string; limit?: number; offset?: number }) => {
+    if (query?.limit !== undefined) {
+      if (!isFiniteInteger(query.limit)) {
+        return ipcError<SourceDocument[]>('INVALID_REQUEST', 'limit must be a finite integer between 1 and 200.');
+      }
+
+      if (query.limit < 1 || query.limit > STUDY_MATERIAL_MAX_LIMIT) {
+        return ipcError<SourceDocument[]>('INVALID_REQUEST', 'limit must be between 1 and 200.');
+      }
+    }
+
+    if (query?.offset !== undefined) {
+      if (!isFiniteInteger(query.offset)) {
+        return ipcError<SourceDocument[]>('INVALID_REQUEST', 'offset must be a finite integer greater than or equal to 0.');
+      }
+
+      if (query.offset < 0) {
+        return ipcError<SourceDocument[]>('INVALID_REQUEST', 'offset must be greater than or equal to 0.');
+      }
+    }
+
+    try {
+      configureStudyMaterialStore();
+      const sources = studyMaterialStore.listSourceDocuments({
+        ...(typeof query?.courseId === 'string' && query.courseId.trim().length > 0
+          ? { courseId: query.courseId.trim() }
+          : {}),
+        ...(typeof query?.origin === 'string' && query.origin.trim().length > 0
+          ? { origin: query.origin.trim() }
+          : {}),
+        ...(typeof query?.limit === 'number' ? { limit: query.limit } : {}),
+        ...(typeof query?.offset === 'number' ? { offset: query.offset } : {}),
+      }) as unknown as SourceDocument[];
+      return ipcOk<SourceDocument[]>(sources);
+    } catch (error) {
+      console.warn('[IPC] Failed to list source documents:', error);
+      return ipcError<SourceDocument[]>('UNKNOWN', 'Failed to list source documents.');
+    }
+  },
+);
+
+ipcMain.handle(
+  'studyMaterials:sources:validateLocal',
+  async (_event, input: StudyMaterialLocalSourceValidationInput) => {
+    try {
+      const result = await validateLocalStudyMaterialSource(input);
+      return ipcOk<StudyMaterialLocalSourceValidationResult>(result);
+    } catch (error) {
+      console.warn('[IPC] Failed to validate local source document:', error);
+      return ipcError<StudyMaterialLocalSourceValidationResult>('UNKNOWN', 'Failed to validate local source document.');
+    }
+  },
+);
+
+ipcMain.handle('studyMaterials:artifacts:create', async (_event, input: StudyMaterialArtifactCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const kind = typeof input?.kind === 'string' ? input.kind.trim() : '';
+  const pathOrBlobRef = typeof input?.pathOrBlobRef === 'string' ? input.pathOrBlobRef.trim() : '';
+
+  if (!id || !studyRunId || !kind || !pathOrBlobRef) {
+    return ipcError<StudyMaterialArtifact>('INVALID_REQUEST', 'id, studyRunId, kind, and pathOrBlobRef are required.');
+  }
+
+  if (!STUDY_MATERIAL_ARTIFACT_KINDS.has(kind)) {
+    return ipcError<StudyMaterialArtifact>(
+      'INVALID_REQUEST',
+      `kind must be one of: ${Array.from(STUDY_MATERIAL_ARTIFACT_KINDS).join(', ')}.`,
+    );
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const artifact = studyMaterialStore.createArtifact({
+      id,
+      studyRunId,
+      kind: kind as StudyMaterialArtifact['kind'],
+      pathOrBlobRef,
+      ...(typeof input.mime === 'string' && input.mime.trim().length > 0 ? { mime: input.mime.trim() } : {}),
+      createdAt: Date.now(),
+    });
+    return ipcOk<StudyMaterialArtifact>(artifact);
+  } catch (error) {
+    console.warn('[IPC] Failed to create study material artifact:', error);
+    return ipcError<StudyMaterialArtifact>('UNKNOWN', 'Failed to create study material artifact.');
+  }
+});
+
+ipcMain.handle('studyMaterials:artifacts:list', async (_event, studyRunId: string) => {
+  const id = typeof studyRunId === 'string' ? studyRunId.trim() : '';
+  if (!id) {
+    return ipcError<StudyMaterialArtifact[]>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const artifacts = studyMaterialStore.listArtifactsByRun(id) as unknown as StudyMaterialArtifact[];
+    return ipcOk<StudyMaterialArtifact[]>(artifacts);
+  } catch (error) {
+    console.warn('[IPC] Failed to list study material artifacts:', error);
+    return ipcError<StudyMaterialArtifact[]>('UNKNOWN', 'Failed to list study material artifacts.');
+  }
+});
+
+ipcMain.handle('studyMaterials:citations:create', async (_event, input: CitationSpanCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const artifactId = typeof input?.artifactId === 'string' ? input.artifactId.trim() : '';
+  const sectionId = typeof input?.sectionId === 'string' ? input.sectionId.trim() : '';
+  const sourceDocumentId = typeof input?.sourceDocumentId === 'string' ? input.sourceDocumentId.trim() : '';
+  const sourceLocator = typeof input?.sourceLocator === 'string' ? input.sourceLocator.trim() : '';
+
+  if (!id || !studyRunId || !artifactId || !sectionId || !sourceDocumentId || !sourceLocator) {
+    return ipcError<CitationSpan>(
+      'INVALID_REQUEST',
+      'id, studyRunId, artifactId, sectionId, sourceDocumentId, and sourceLocator are required.',
+    );
+  }
+
+  if (input?.confidence !== undefined) {
+    if (typeof input.confidence !== 'number' || !Number.isFinite(input.confidence)) {
+      return ipcError<CitationSpan>('INVALID_REQUEST', 'confidence must be a finite number between 0 and 1.');
+    }
+
+    if (input.confidence < 0 || input.confidence > 1) {
+      return ipcError<CitationSpan>('INVALID_REQUEST', 'confidence must be between 0 and 1.');
+    }
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const citation = studyMaterialStore.createCitationSpan({
+      id,
+      studyRunId,
+      artifactId,
+      sectionId,
+      sourceDocumentId,
+      sourceLocator,
+      ...(typeof input?.confidence === 'number' ? { confidence: input.confidence } : {}),
+    }) as unknown as CitationSpan;
+    return ipcOk<CitationSpan>(citation);
+  } catch (error) {
+    console.warn('[IPC] Failed to create citation span:', error);
+    return ipcError<CitationSpan>('UNKNOWN', 'Failed to create citation span.');
+  }
+});
+
+ipcMain.handle('studyMaterials:citations:list', async (_event, query: CitationSpanListQuery) => {
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) {
+    return ipcError<CitationSpan[]>('INVALID_REQUEST', 'query must be an object.');
+  }
+
+  const studyRunId = typeof query.studyRunId === 'string' ? query.studyRunId.trim() : '';
+  if (!studyRunId) {
+    return ipcError<CitationSpan[]>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  const artifactId =
+    query.artifactId === undefined
+      ? undefined
+      : typeof query.artifactId === 'string'
+        ? query.artifactId.trim()
+        : null;
+
+  if (artifactId === null || artifactId === '') {
+    return ipcError<CitationSpan[]>('INVALID_REQUEST', 'artifactId must be a non-empty string when provided.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const citations = studyMaterialStore.listCitationSpansByRun(studyRunId, artifactId) as unknown as CitationSpan[];
+    return ipcOk<CitationSpan[]>(citations);
+  } catch (error) {
+    console.warn('[IPC] Failed to list citation spans:', error);
+    return ipcError<CitationSpan[]>('UNKNOWN', 'Failed to list citation spans.');
+  }
+});
+
+ipcMain.handle('studyMaterials:issues:create', async (_event, input: ExtractionIssueCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const sourceDocumentId = typeof input?.sourceDocumentId === 'string' ? input.sourceDocumentId.trim() : '';
+  const kind = typeof input?.kind === 'string' ? input.kind.trim() : '';
+  const detail = typeof input?.detail === 'string' ? input.detail.trim() : '';
+  const severity = typeof input?.severity === 'string' ? input.severity.trim() : '';
+
+  if (!id || !studyRunId || !sourceDocumentId || !kind || !detail || !severity) {
+    return ipcError<ExtractionIssue>(
+      'INVALID_REQUEST',
+      'id, studyRunId, sourceDocumentId, kind, detail, and severity are required.',
+    );
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const issue = studyMaterialStore.createExtractionIssue({
+      id,
+      studyRunId,
+      sourceDocumentId,
+      kind,
+      detail,
+      severity,
+    }) as unknown as ExtractionIssue;
+    return ipcOk<ExtractionIssue>(issue);
+  } catch (error) {
+    console.warn('[IPC] Failed to create extraction issue:', error);
+    return ipcError<ExtractionIssue>('UNKNOWN', 'Failed to create extraction issue.');
+  }
+});
+
+ipcMain.handle('studyMaterials:issues:list', async (_event, query: ExtractionIssueListQuery) => {
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) {
+    return ipcError<ExtractionIssue[]>('INVALID_REQUEST', 'query must be an object.');
+  }
+
+  const studyRunId = typeof query.studyRunId === 'string' ? query.studyRunId.trim() : '';
+  if (!studyRunId) {
+    return ipcError<ExtractionIssue[]>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  const sourceDocumentId =
+    query.sourceDocumentId === undefined
+      ? undefined
+      : typeof query.sourceDocumentId === 'string'
+        ? query.sourceDocumentId.trim()
+        : null;
+
+  if (sourceDocumentId === null || sourceDocumentId === '') {
+    return ipcError<ExtractionIssue[]>(
+      'INVALID_REQUEST',
+      'sourceDocumentId must be a non-empty string when provided.',
+    );
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const issues = studyMaterialStore.listExtractionIssuesByRun(studyRunId, sourceDocumentId) as unknown as ExtractionIssue[];
+    return ipcOk<ExtractionIssue[]>(issues);
+  } catch (error) {
+    console.warn('[IPC] Failed to list extraction issues:', error);
+    return ipcError<ExtractionIssue[]>('UNKNOWN', 'Failed to list extraction issues.');
+  }
+});
+
+ipcMain.handle('studyMaterials:diffs:create', async (_event, input: StudyRunDiffCreateInput) => {
+  const id = typeof input?.id === 'string' ? input.id.trim() : '';
+  const studyRunId = typeof input?.studyRunId === 'string' ? input.studyRunId.trim() : '';
+  const previousStudyRunId = typeof input?.previousStudyRunId === 'string' ? input.previousStudyRunId.trim() : '';
+  const summary = typeof input?.summary === 'string' ? input.summary.trim() : '';
+
+  if (!id || !studyRunId || !previousStudyRunId || !summary) {
+    return ipcError<StudyRunDiff>(
+      'INVALID_REQUEST',
+      'id, studyRunId, previousStudyRunId, and summary are required.',
+    );
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const diff = studyMaterialStore.createRunDiff({
+      id,
+      studyRunId,
+      previousStudyRunId,
+      summary,
+    }) as unknown as StudyRunDiff;
+    return ipcOk<StudyRunDiff>(diff);
+  } catch (error) {
+    console.warn('[IPC] Failed to create run diff:', error);
+    return ipcError<StudyRunDiff>('UNKNOWN', 'Failed to create run diff.');
+  }
+});
+
+ipcMain.handle('studyMaterials:diffs:get', async (_event, studyRunId: string) => {
+  const id = typeof studyRunId === 'string' ? studyRunId.trim() : '';
+  if (!id) {
+    return ipcError<StudyRunDiff | null>('INVALID_REQUEST', 'studyRunId must be a non-empty string.');
+  }
+
+  try {
+    configureStudyMaterialStore();
+    const diff = studyMaterialStore.getRunDiff(id) as unknown as StudyRunDiff | null;
+    return ipcOk<StudyRunDiff | null>(diff);
+  } catch (error) {
+    console.warn('[IPC] Failed to get run diff:', error);
+    return ipcError<StudyRunDiff | null>('UNKNOWN', 'Failed to get run diff.');
   }
 });
 

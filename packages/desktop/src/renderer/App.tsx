@@ -17,6 +17,7 @@ import { useIntegrationsStore } from './stores/integrationsStore';
 import { useOnboardingStore } from './stores/onboardingStore';
 import { useProviderStore } from './stores/providerStore';
 import { useTasksStore } from './stores/tasksStore';
+import { useWorkflowsStore } from './stores/workflowsStore';
 import { providerDefinitions } from './data/providerData';
 import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
@@ -81,6 +82,10 @@ function App() {
   const loadMessages = useChatStore((state) => state.loadMessages);
   const chatStatus = useChatStore((state) => state.status);
   const timeline = useChatStore((state) => state.timeline);
+  const reloadTaskRuns = useTasksStore((state) => state.reloadRuns);
+  const loadActiveTaskRun = useTasksStore((state) => state.loadActiveRun);
+  const reloadWorkflows = useWorkflowsStore((state) => state.reload);
+  const loadWorkflowPins = useWorkflowsStore((state) => state.loadPins);
 
   const config = useConfigStore((state) => state.config);
   const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -304,6 +309,37 @@ function App() {
       .map(([id]) => id);
   }, [recentlyConnectedAt]);
 
+  const handleSelectTaskRun = useCallback(
+    (taskRunId: string) => {
+      setCurrentPage('tasks');
+      if (!isDesktop) {
+        setIsSidebarOpen(false);
+      }
+
+      const tasks = useTasksStore.getState();
+      const sleep = (ms: number) =>
+        new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+      const focus = async () => {
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          await tasks.loadActiveRun({ silent: true });
+          await tasks.reloadRuns({ silent: true });
+          await tasks.selectRun(taskRunId);
+
+          const latest = useTasksStore.getState().runs;
+          if (latest.some((run) => run.id === taskRunId)) {
+            return;
+          }
+
+          await sleep(250);
+        }
+      };
+
+      void focus();
+    },
+    [isDesktop],
+  );
+
   const renderPage = () => {
     switch (currentPage) {
       case 'chat':
@@ -313,28 +349,7 @@ function App() {
       case 'workflows':
         return (
           <WorkflowsMode
-            onOpenTaskRun={(taskRunId) => {
-              setCurrentPage('tasks');
-              const tasks = useTasksStore.getState();
-
-              const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-              const focus = async () => {
-                for (let attempt = 0; attempt < 8; attempt += 1) {
-                  await tasks.loadActiveRun({ silent: true });
-                  await tasks.reloadRuns({ silent: true });
-                  await tasks.selectRun(taskRunId);
-
-                  const latest = useTasksStore.getState().runs;
-                  if (latest.some((run) => run.id === taskRunId)) {
-                    return;
-                  }
-
-                  await sleep(250);
-                }
-              };
-
-              void focus();
-            }}
+            onOpenTaskRun={handleSelectTaskRun}
           />
         );
       case 'integrations':
@@ -490,26 +505,7 @@ function App() {
       const taskRunId = typeof event?.taskRunId === 'string' ? event.taskRunId : '';
 
       if (taskRunId) {
-        setCurrentPage('tasks');
-        const tasks = useTasksStore.getState();
-
-        const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-        const focus = async () => {
-          for (let attempt = 0; attempt < 8; attempt += 1) {
-            await tasks.loadActiveRun({ silent: true });
-            await tasks.reloadRuns({ silent: true });
-            await tasks.selectRun(taskRunId);
-
-            const latest = useTasksStore.getState().runs;
-            if (latest.some((run) => run.id === taskRunId)) {
-              return;
-            }
-
-            await sleep(250);
-          }
-        };
-
-        void focus();
+        handleSelectTaskRun(taskRunId);
         return;
       }
 
@@ -520,7 +516,81 @@ function App() {
 
       setCurrentPage('tasks');
     });
-  }, [handleSelectConversation, isOnboarding]);
+  }, [handleSelectConversation, handleSelectTaskRun, isOnboarding]);
+
+  useEffect(() => {
+    if (isOnboarding) return;
+
+    const TIMELINE_REFRESH_DEBOUNCE_MS = 250;
+    let timelineDebounceTimer: number | null = null;
+    let refreshInFlight = false;
+    let refreshQueued = false;
+
+    const runSidebarRefresh = async () => {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+      }
+
+      refreshInFlight = true;
+      try {
+        await Promise.all([
+          loadActiveTaskRun({ silent: true }),
+          reloadTaskRuns({ silent: true }),
+          reloadWorkflows({ silent: true }),
+          loadWorkflowPins({ silent: true }),
+        ]);
+      } finally {
+        refreshInFlight = false;
+        if (refreshQueued) {
+          refreshQueued = false;
+          void runSidebarRefresh();
+        }
+      }
+    };
+
+    const queueTimelineRefresh = () => {
+      if (timelineDebounceTimer !== null) {
+        window.clearTimeout(timelineDebounceTimer);
+      }
+      timelineDebounceTimer = window.setTimeout(() => {
+        timelineDebounceTimer = null;
+        void runSidebarRefresh();
+      }, TIMELINE_REFRESH_DEBOUNCE_MS);
+    };
+
+    void runSidebarRefresh();
+
+    const interval = window.setInterval(() => {
+      void runSidebarRefresh();
+    }, 10_000);
+    const removeTimelineListener = window.flowstate.opencode.onTimelineEvent(() => {
+      queueTimelineRefresh();
+    });
+
+    return () => {
+      window.clearInterval(interval);
+      if (timelineDebounceTimer !== null) {
+        window.clearTimeout(timelineDebounceTimer);
+      }
+      removeTimelineListener();
+    };
+  }, [isOnboarding, loadActiveTaskRun, loadWorkflowPins, reloadTaskRuns, reloadWorkflows]);
+
+  const handleCloseSidebar = useCallback(() => {
+    setIsSidebarOpen(false);
+  }, []);
+
+  const handleToggleSidebar = useCallback(() => {
+    setIsSidebarOpen((open) => !open);
+  }, []);
+
+  const handleNavigateHome = useCallback(() => {
+    setCurrentPage('home');
+    if (!isDesktop) {
+      setIsSidebarOpen(false);
+    }
+  }, [isDesktop]);
 
   return (
     <div className="size-full relative overflow-hidden">
@@ -533,14 +603,17 @@ function App() {
         <>
           <Sidebar
             isOpen={isSidebarOpen}
-            onClose={() => setIsSidebarOpen(false)}
+            onClose={handleCloseSidebar}
+            onToggleSidebar={handleToggleSidebar}
+            onNavigateHome={handleNavigateHome}
+            onSelectTaskRun={handleSelectTaskRun}
             onSelectConversation={handleSelectConversation}
           />
 
           {isSidebarOpen && !isDesktop && (
             <div
               className="fixed inset-0 fs-overlay z-40 transition-opacity duration-300 ease-in-out"
-              onClick={() => setIsSidebarOpen(false)}
+              onClick={handleCloseSidebar}
             />
           )}
         </>
@@ -554,12 +627,9 @@ function App() {
         {showMainShell && (
           <TitleBar
             isSidebarOpen={isSidebarOpen}
-            onToggleSidebar={() => setIsSidebarOpen((open) => !open)}
+            onToggleSidebar={handleToggleSidebar}
             showHomeButton={currentPage !== 'home'}
-            onNavigateHome={() => {
-              setCurrentPage('home');
-              if (!isDesktop) setIsSidebarOpen(false);
-            }}
+            onNavigateHome={handleNavigateHome}
             onNavigateSettings={() => {
               setCurrentPage('settings');
               if (!isDesktop) setIsSidebarOpen(false);

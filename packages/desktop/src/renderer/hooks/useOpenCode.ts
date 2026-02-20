@@ -86,6 +86,20 @@ export function useOpenCode() {
     return `${title}: ${baseMessage}${suffix}`;
   }, []);
 
+  const isCancellationError = useCallback((err: OpenCodeError | string | null | undefined): boolean => {
+    if (!err) return false;
+
+    const code = typeof err === 'string' ? '' : (err.code ?? '').toLowerCase();
+    const message = typeof err === 'string' ? err.toLowerCase() : (err.message ?? err.error ?? '').toLowerCase();
+
+    if (code.includes('abort') || code.includes('cancel')) return true;
+    return (
+      message.includes('abort') ||
+      message.includes('cancel') ||
+      message.includes('request superseded')
+    );
+  }, []);
+
   /**
    * Set up event listeners for OpenCode responses
    */
@@ -133,6 +147,11 @@ export function useOpenCode() {
     // Handle errors
     const removeErrorListener = window.flowstate.opencode.onError((err: OpenCodeError) => {
       if (DEV) console.error('[Renderer] OpenCode error:', err);
+      if (isCancellationError(err)) {
+        setStatus('idle');
+        setError(null);
+        return;
+      }
       setError(formatOpenCodeError(err));
     });
 
@@ -326,7 +345,7 @@ export function useOpenCode() {
       removeTimelineListener();
       listenersInitialized = false;
     };
-  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError, loadMessages]);
+  }, [addAssistantMessage, addTimelineEvent, setHandoffTaskFromTimeline, updateActiveTask, setStatus, setError, setCurrentSessionId, refreshStatus, formatOpenCodeError, isCancellationError, loadMessages]);
 
   // Note: We intentionally do not auto-inject task summaries into chat.
   // The chat response already arrives via `opencode:message`, and injecting the
@@ -337,7 +356,7 @@ export function useOpenCode() {
    */
   const sendMessage = useCallback(async (
     content: string,
-    opts?: { allowWhileRunning?: boolean; fireAndForget?: boolean },
+    opts?: { allowWhileRunning?: boolean; fireAndForget?: boolean; contextPrefix?: string },
   ) => {
     if (DEV) console.log('[Renderer] sendMessage called with content length:', content.length);
     if (!content.trim()) return;
@@ -355,9 +374,14 @@ export function useOpenCode() {
     try {
       // Send to OpenCode (response comes via events)
       if (DEV) console.log('[Renderer] Calling window.flowstate.opencode.send()...');
+      const outboundContent =
+        typeof opts?.contextPrefix === 'string' && opts.contextPrefix.trim().length > 0
+          ? `${opts.contextPrefix.trim()}\n\n${content}`
+          : content;
+
       const result = opts?.fireAndForget
-        ? await window.flowstate.opencode.sendAsync(content)
-        : await window.flowstate.opencode.send(content);
+        ? await window.flowstate.opencode.sendAsync(outboundContent)
+        : await window.flowstate.opencode.send(outboundContent);
       if (DEV) console.log('[Renderer] opencode.send() returned:', result.success ? 'success' : 'error');
 
       if (result.error) {
@@ -384,6 +408,27 @@ export function useOpenCode() {
       return { success: false, error: formattedError };
     }
   }, [activeTask, addUserMessage, setError, addAssistantMessage, formatOpenCodeError]);
+
+  const cancelGeneration = useCallback(async () => {
+    try {
+      const result = await window.flowstate.chat.cancelGeneration({
+        expectedSessionId: currentSessionId,
+      });
+
+      if (result.success && result.cancelled) {
+        setStatus('idle');
+        setError(null);
+      }
+
+      return result;
+    } catch (err) {
+      const formattedError = formatOpenCodeError(
+        err instanceof Error ? err.message : 'Failed to cancel generation'
+      );
+      setError(formattedError);
+      return { success: false, cancelled: false, error: formattedError };
+    }
+  }, [currentSessionId, formatOpenCodeError, setError, setStatus]);
 
   /**
    * Create a new session
@@ -532,6 +577,7 @@ export function useOpenCode() {
 
     // Actions
     sendMessage,
+    cancelGeneration,
     createSession,
     switchSession,
     refreshSessions,

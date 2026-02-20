@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu } from "lucide-react";
 import type { TimelineEvent } from "../types/electron";
 import { ActivityTimeline } from "./ActivityTimeline";
 import StatusPill, { type ZenStatus } from "./StatusPill";
@@ -31,50 +31,50 @@ function TitleBar({
 }: TitleBarProps) {
   return (
     <header className="fs-titlebar relative" role="banner">
-      <div className="titlebar-no-drag flex items-center gap-4">
-        <button
-          type="button"
-          onClick={onToggleSidebar}
-          className="fs-icon-button"
-          aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
-        >
-          {isSidebarOpen ? (
-            <X className="w-5 h-5 text-foreground" />
-          ) : (
-            <Menu className="w-5 h-5 text-foreground" />
-          )}
-        </button>
+      <div className="titlebar-no-drag flex items-center gap-4 min-w-[220px]">
+        {!isSidebarOpen && (
+          <>
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="fs-icon-button"
+              aria-label="Open sidebar"
+            >
+              <Menu className="w-5 h-5 text-foreground" />
+            </button>
 
-        <button
-          type="button"
-          onClick={onNavigateHome}
-          className="titlebar-no-drag flex items-center gap-3 transition-opacity duration-300 ease-in-out hover:opacity-80"
-          aria-label="Go to Home"
-        >
-          <div
-            className="w-8 h-8 rounded-xl border flex items-center justify-center"
-            style={{
-              borderColor: "var(--fs-line)",
-              backgroundColor:
-                "color-mix(in srgb, var(--fs-surface-1) 55%, transparent)",
-              boxShadow: "var(--fs-shadow-sm)",
-            }}
-            aria-hidden="true"
-          >
-            <img
-              src={flowstateLogo}
-              alt="FlowState Logo"
-              className="w-6 h-6 object-contain"
-              style={{ fontFamily: "var(--fs-font-display)" }}
-            />
-          </div>
-          <h1
-            className="text-lg text-foreground"
-            style={{ fontFamily: "var(--fs-font-display)" }}
-          >
-            FlowState
-          </h1>
-        </button>
+            <button
+              type="button"
+              onClick={onNavigateHome}
+              className="titlebar-no-drag flex items-center gap-3 transition-opacity duration-300 ease-in-out hover:opacity-80"
+              aria-label="Go to Home"
+            >
+              <div
+                className="w-8 h-8 rounded-xl border flex items-center justify-center"
+                style={{
+                  borderColor: "var(--fs-line)",
+                  backgroundColor:
+                    "color-mix(in srgb, var(--fs-surface-1) 55%, transparent)",
+                  boxShadow: "var(--fs-shadow-sm)",
+                }}
+                aria-hidden="true"
+              >
+                <img
+                  src={flowstateLogo}
+                  alt="FlowState Logo"
+                  className="w-6 h-6 object-contain"
+                  style={{ fontFamily: "var(--fs-font-display)" }}
+                />
+              </div>
+              <h1
+                className="text-lg text-foreground"
+                style={{ fontFamily: "var(--fs-font-display)" }}
+              >
+                FlowState
+              </h1>
+            </button>
+          </>
+        )}
       </div>
 
       <div className="titlebar-no-drag absolute left-1/2 -translate-x-1/2 flex items-center justify-center">
