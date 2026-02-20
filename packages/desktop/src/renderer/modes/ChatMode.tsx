@@ -371,7 +371,8 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
   const currentSessionId = useChatStore((state) => state.currentSessionId);
   const handoffTask = useChatStore((state) => state.handoffTask);
   const timeline = useChatStore((state) => state.timeline);
-  const { sendMessage, cancelGeneration, checkStatus, refreshTimeline, createSession } =
+  const activeTask = useChatStore((state) => state.activeTask);
+  const { sendMessage, cancelGeneration, checkStatus, refreshTimeline, createSession, cancelActiveTask } =
     useOpenCode();
   const { openCodeStatus, config, isLoaded, loadConfig } = useConfigStore();
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -756,6 +757,20 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
     await cancelGeneration();
   };
 
+  const canStopActiveTask = Boolean(
+    activeTask &&
+      activeTask.sessionId === currentSessionId &&
+      (activeTask.status === "running" || activeTask.status === "waiting_approval"),
+  );
+
+  const handleStopActiveTask = async () => {
+    if (!canStopActiveTask) return;
+    const result = await cancelActiveTask();
+    if (!result.success) {
+      console.error("Failed to cancel active task from ChatMode", result.error);
+    }
+  };
+
   const extractFilePathsFromDrop = (event: React.DragEvent<HTMLDivElement>) => {
     const fromFileList = Array.from(event.dataTransfer.files)
       .map((file) => (file as File & { path?: string }).path)
@@ -1072,14 +1087,26 @@ function ChatMode({ onViewTask }: { onViewTask?: () => void }) {
               </div>
               <div className="flex flex-col items-end gap-2 text-xs text-muted-foreground text-right">
                 <p>{providerLabel}</p>
-                <button
-                  type="button"
-                  onClick={handleNewChat}
-                  className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  New chat
-                </button>
+                <div className="flex items-center gap-2">
+                  {canStopActiveTask && (
+                    <button
+                      type="button"
+                      onClick={handleStopActiveTask}
+                      className="inline-flex items-center gap-2 rounded-full border border-destructive/40 px-3 py-1 text-[11px] text-destructive transition-all hover:bg-destructive/10"
+                    >
+                      <Square className="h-3.5 w-3.5" />
+                      Stop task
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleNewChat}
+                    className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground transition-all hover:bg-muted/50"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    New chat
+                  </button>
+                </div>
               </div>
             </div>
             {activityDetail && (

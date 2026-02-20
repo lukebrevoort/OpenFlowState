@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 18, 2026 (Phase 8 completion wave)
+> **Last Updated**: February 20, 2026 (Phase 8 + ChatMode Live Updates merged)
 
 ---
 
@@ -136,6 +136,15 @@ Phase 8 execution is complete, including implementation and verification through
 - ✅ Added Phase 7 regression coverage (`phase7-happy-path.test.ts`, timeline normalization regressions, workflow ID immutability regression).
 - ✅ Hardened IPC boundaries: `app:openExternal` protocol allowlist and `app:ensureFile` path restrictions to app-owned or dialog-approved locations.
 - ✅ Added launch prep documentation for unsigned DMG packaging and repeatable beta demo capture (`docs/phase-7-launch-prep.md`).
+
+---
+
+## Tasks Completed (Feb 18, 2026 - ChatMode Live Updates + Stop-to-Cancel Sync)
+
+- ✅ Added timeline-driven message refresh fallback in `useOpenCode` so ChatMode receives incremental assistant updates during long-running promoted tasks without requiring a TasksMode round-trip.
+- ✅ Added a `Stop task` action in ChatMode header that cancels the active task run and syncs cancellation state into shared chat/task state.
+- ✅ Kept refresh behavior session-safe with debounced in-flight guards to avoid duplicate loads and cross-session message clobbering.
+- ✅ Validated desktop package checks in this branch (`pnpm --filter @flowstate/core build`, `pnpm --filter @flowstate/desktop typecheck`, `pnpm --filter @flowstate/desktop test`).
 
 ---
 

@@ -175,6 +175,49 @@ export function useOpenCode() {
       }
     };
 
+    const messageRefreshTimerBySession = new Map<string, number>();
+    const messageRefreshInFlightBySession = new Set<string>();
+    const messageRefreshQueuedBySession = new Set<string>();
+
+    const refreshMessagesIfCurrentSession = async (sessionId: string) => {
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+
+      if (messageRefreshInFlightBySession.has(sessionId)) {
+        messageRefreshQueuedBySession.add(sessionId);
+        return;
+      }
+
+      messageRefreshInFlightBySession.add(sessionId);
+      try {
+        const messages = await window.flowstate.opencode.getMessages();
+        const latestCurrentSession = useChatStore.getState().currentSessionId;
+        if (!latestCurrentSession || latestCurrentSession !== sessionId) return;
+        loadMessages(messages);
+      } catch (err) {
+        if (DEV) console.warn('Failed to refresh chat messages from timeline event:', err);
+      } finally {
+        messageRefreshInFlightBySession.delete(sessionId);
+        if (messageRefreshQueuedBySession.has(sessionId)) {
+          messageRefreshQueuedBySession.delete(sessionId);
+          void refreshMessagesIfCurrentSession(sessionId);
+        }
+      }
+    };
+
+    const scheduleMessageRefresh = (sessionId: string) => {
+      const currentSession = useChatStore.getState().currentSessionId;
+      if (!currentSession || currentSession !== sessionId) return;
+
+      if (messageRefreshTimerBySession.has(sessionId)) return;
+
+      const timer = window.setTimeout(() => {
+        messageRefreshTimerBySession.delete(sessionId);
+        void refreshMessagesIfCurrentSession(sessionId);
+      }, 150);
+      messageRefreshTimerBySession.set(sessionId, timer);
+    };
+
     const applyTimelineEvent = (event: TimelineEvent) => {
       addTimelineEvent(event);
       if (event.kind === 'status' && event.title === 'Task promoted') {
@@ -224,6 +267,10 @@ export function useOpenCode() {
     const removeTimelineListener = window.flowstate.opencode.onTimelineEvent((payload: TimelineEventEnvelope) => {
       const events = unwrapBatch<TimelineEvent>(payload);
       if (events.length === 0) return;
+
+      for (const event of events) {
+        scheduleMessageRefresh(event.sessionId);
+      }
 
       // Preserve existing behavior for single events.
       if (events.length === 1) {
@@ -287,6 +334,10 @@ export function useOpenCode() {
     // Cleanup on unmount
     return () => {
       if (DEV) console.log('Cleaning up OpenCode event listeners');
+      for (const timer of messageRefreshTimerBySession.values()) {
+        window.clearTimeout(timer);
+      }
+      messageRefreshTimerBySession.clear();
       removeMessageListener();
       removeProgressListener();
       removeErrorListener();
@@ -482,6 +533,40 @@ export function useOpenCode() {
     }
   }, [setOpenCodeStatus]);
 
+  const cancelActiveTask = useCallback(async () => {
+    if (!activeTask) {
+      return { success: false, error: 'No active task to cancel.' } as const;
+    }
+
+    // Prevent cancelling a task that belongs to a different session
+    const currentSession = useChatStore.getState().currentSessionId;
+    if (currentSession && activeTask.sessionId !== currentSession) {
+      return { success: false, error: 'Active task belongs to a different session.' } as const;
+    }
+
+    try {
+      const result = await window.flowstate.tasks.cancelRun(activeTask.id);
+      if (!result.ok) {
+        const message = result.error?.message ?? 'Failed to cancel active task.';
+        setError(message);
+        return { success: false, error: message } as const;
+      }
+
+      updateActiveTask({
+        status: 'cancelled',
+        blockingReason: undefined,
+        description: 'Cancelled by user.',
+      });
+      setError(null);
+      setStatus('idle');
+      return { success: true } as const;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to cancel active task.';
+      setError(message);
+      return { success: false, error: message } as const;
+    }
+  }, [activeTask, setError, setStatus, updateActiveTask]);
+
   return {
     // State
     isLoading,
@@ -498,6 +583,7 @@ export function useOpenCode() {
     refreshSessions,
     refreshTimeline,
     checkStatus,
+    cancelActiveTask,
   };
 }
 
