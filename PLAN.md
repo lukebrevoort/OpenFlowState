@@ -1828,6 +1828,648 @@ Canvas is already present in the codebase (Canvas MCP + integration surface). Re
 
 ---
 
+## Beta Packaging + Launch Program (v0.1.0-beta)
+
+This section defines the packaging and beta-readiness execution plan for initial external testers.
+
+### Program Goal
+
+Ship a reproducible, installable macOS beta build with clear onboarding, support channels, rollback path, and release quality gates.
+
+### Phase DAG (PM-Executable)
+
+```text
+phase.beta.1_release-hardening
+  -> phase.beta.2_packaging-pipeline
+  -> phase.beta.3_tester-experience
+  -> phase.beta.4_beta-operations
+  -> phase.beta.5_launch-gate
+```
+
+### Phase Details
+
+#### `phase.beta.1_release-hardening`
+- Scope: lock release target, validate critical UX flows, freeze risky feature work.
+- Outputs:
+  - Beta scope manifest (what is in/out).
+  - Critical-path checklist (onboarding, auth, workflow run, approval, export).
+  - Known-issues list with severity labels.
+- Exit criteria:
+  - All P0/P1 defects closed or explicitly waived.
+  - Reproducible local build + test commands documented.
+
+##### `phase.beta.1` execution spec (required)
+
+**A) Beta Scope Manifest (template)**
+
+```md
+## Beta Scope Manifest (`beta-scope-manifest.md`)
+
+Release Target: v0.1.0-beta
+Owner: <name>
+Date Frozen: <YYYY-MM-DD>
+
+### In Scope (must ship in beta)
+- [ ] <feature or flow>
+- [ ] <feature or flow>
+
+### Out of Scope (not allowed in beta build)
+- [ ] <feature or flow>
+- [ ] <feature or flow>
+
+### Deferred (accepted gap with planned follow-up)
+- [ ] <feature or flow> -> Target: <phase/version>
+- [ ] <feature or flow> -> Target: <phase/version>
+```
+
+**B) Critical-Path Validation Matrix (must pass before phase exit)**
+
+| Flow | Precondition | Validation Action | Expected Outcome | Evidence Required |
+| --- | --- | --- | --- | --- |
+| Onboarding | Fresh local app data state | Complete first-launch onboarding with default provider path | User reaches Home/Chat without crash; provider config persists after restart | Screenshot of completion + persisted config key/value |
+| Auth | Notion or Google integration disconnected | Connect one OAuth integration, restart app, verify connected state | Token survives restart in encrypted storage; integration shows connected in UI | Log snippet + UI proof after restart |
+| Workflow Run | At least one bundled workflow available | Run one bundled workflow from Workflows mode | Workflow creates Task, auto-routes to Tasks, timeline events stream, terminal status recorded | Task timeline excerpt + final status record |
+| Approval | Workflow/chat action that triggers approval-gated tool call | Validate `Approve`, `Always Approve`, and `Deny` paths in one session | `Approve` executes once, `Always Approve` suppresses later prompts for same run, `Deny` blocks action and records denial | Three timeline events showing each path outcome |
+| Export | Completed workflow/task run with timeline data | Export run bundle from UI/command path | Export artifact is created, readable, and redacted of secrets/tokens | Artifact path + redaction check notes |
+
+**C) Known-Issues Policy + P0/P1 Waiver Rules**
+
+- Severity labels: `P0` (data loss, security exposure, app unusable), `P1` (critical flow blocked, no safe workaround), `P2` (major but workable degradation), `P3` (minor defect/documentation/UI polish).
+- `P0` waiver policy: **not permitted**. Every `P0` must be fixed and verified before `phase.beta.1_release-hardening` can exit.
+- `P1` waiver policy: permitted only with explicit written waiver containing owner, user impact, workaround, rollback/hotfix plan, and expiration date.
+- `P1` waiver approvals required from all of: release owner + verifier owner + product owner. Missing any signer means waiver is invalid.
+- Any waived `P1` auto-fails launch gate if not resolved or re-approved before `phase.beta.5_launch-gate` review.
+
+**D) Reproducible Local Verification Command Sequence (clean state)**
+
+Run from repo root (`flowstate/`) on a clean working tree:
+
+1. `pnpm install --frozen-lockfile`
+2. `pnpm --filter @flowstate/desktop clean`
+3. `pnpm lint && pnpm typecheck && pnpm test`
+4. `pnpm --filter @flowstate/desktop build`
+5. `pnpm --filter @flowstate/desktop package:mac`
+
+Expected verification output: desktop artifacts generated under `packages/desktop/out/` with no failing lint/type/test/package step.
+
+#### `phase.beta.2_packaging-pipeline`
+- Scope: deterministic packaging and artifact production for macOS testers.
+- Outputs:
+  - Repeatable command flow for building desktop artifacts.
+  - Unsigned DMG and zipped app artifact naming convention.
+  - SHA256 checksum generation + artifact manifest.
+- Exit criteria:
+  - Packaging succeeds from clean machine state.
+  - Install/uninstall instructions validated end-to-end.
+
+##### `phase.beta.2` execution spec (required)
+
+**A) Deterministic Packaging Runbook (clean environment + exact order)**
+
+Run from repo root (`flowstate/`) on a clean working tree. Do not skip or reorder:
+
+1. `git status --porcelain` (must return no modified/untracked files for release run)
+2. `rm -rf packages/desktop/out packages/desktop/dist`
+3. `pnpm install --frozen-lockfile`
+4. `pnpm --filter @flowstate/desktop clean`
+5. `pnpm lint && pnpm typecheck && pnpm test`
+6. `pnpm --filter @flowstate/desktop build`
+7. `pnpm --filter @flowstate/desktop package:mac`
+8. `mkdir -p packages/desktop/out/release`
+9. Copy only beta deliverables into `packages/desktop/out/release/` (DMG first, then zip)
+
+Determinism rules:
+- Packaging must run on a clean machine state or fresh CI runner with pinned lockfile.
+- Artifact set is invalid if any step above is retried in-place after a failure; restart from step 1.
+- Distribution order is DMG-first (primary tester path), zip second (fallback for extraction/manual app move).
+
+**B) Artifact Naming Convention (DMG + zip)**
+
+Use this exact naming format for copied release artifacts:
+
+`FlowState-v<version>-beta+<build>-macos-<arch>.<ext>`
+
+- `<version>`: semantic version from root package (`0.1.0` for this program)
+- `<build>`: release identifier `b<YYYYMMDD>.<shortsha>` (example: `b20260223.a1b2c3d`)
+- `<arch>`: `arm64` or `x64`
+- `<ext>`: `dmg` for primary installer, `zip` for fallback bundle
+
+Example pair for one architecture:
+- `FlowState-v0.1.0-beta+b20260223.a1b2c3d-macos-arm64.dmg`
+- `FlowState-v0.1.0-beta+b20260223.a1b2c3d-macos-arm64.zip`
+
+**C) SHA256 + Artifact Manifest Generation (traceable)**
+
+From repo root, after naming artifacts in `packages/desktop/out/release/`:
+
+1. `cd packages/desktop/out/release`
+2. `shasum -a 256 FlowState-v*-beta+*-macos-*.dmg FlowState-v*-beta+*-macos-*.zip > SHA256SUMS.txt`
+3. Create `artifact-manifest.json` with one entry per artifact including:
+   - `name`, `sha256`, `bytes`, `arch`, `channel` (`beta-private`), `primary` (`true` for DMG), `builtAt` (ISO 8601), `gitSha`, `version`
+4. Verify checksum traceability:
+   - `shasum -a 256 -c SHA256SUMS.txt`
+   - each `artifact-manifest.json` entry must map to an identical `SHA256SUMS.txt` digest
+
+Required deliverables in `packages/desktop/out/release/`:
+- DMG + zip artifacts
+- `SHA256SUMS.txt`
+- `artifact-manifest.json`
+
+**D) GitHub Draft Release Flow (private-access distribution)**
+
+Release process (testable, repeatable):
+
+1. Create release branch/tag for target build (`v0.1.0-beta+<build>`).
+2. Open draft release only (do not publish):
+   - Title: `FlowState v<version> Beta (<build>)`
+   - Tag: `v<version>-beta+<build>`
+   - Mark as pre-release.
+3. Upload assets in this order:
+   1) DMG(s) 2) zip(s) 3) `SHA256SUMS.txt` 4) `artifact-manifest.json`
+4. Add release notes sections:
+   - `Install (DMG first)`
+   - `Gatekeeper workaround for unsigned app`
+   - `Checksum verification`
+   - `Known issues`
+   - `Uninstall`
+5. Keep release in **draft** state and share only with approved private beta cohort via direct collaborator access.
+6. Before any publish action, verifier confirms checksum + manifest + install checklist evidence.
+
+**E) Unsigned DMG Install/Uninstall Validation Checklist**
+
+Execute and record evidence on the packaging host architecture for phase.beta.2. Cross-architecture coverage (2 Apple Silicon + 1 Intel across at least 2 macOS versions) is enforced at `phase.beta.5_launch-gate` cohort gate:
+
+- Install:
+  - Download DMG from draft release assets and verify `shasum -a 256 -c SHA256SUMS.txt` passes.
+  - Mount DMG, drag `FlowState.app` to `/Applications`.
+  - First launch via Finder context menu `Open` (expected unsigned warning path).
+  - Confirm app boots to Home, no startup crash, and creates local app data directory.
+- Re-launch:
+  - Quit and reopen from `/Applications/FlowState.app` without repeating bypass steps.
+  - Confirm user config persists across relaunch.
+- Uninstall:
+  - Remove `/Applications/FlowState.app`.
+  - Remove support data under `~/Library/Application Support/FlowState/`.
+  - Validate no running background process remains for FlowState.
+- Evidence required:
+  - Installer screenshots (warning + successful first launch), checksum output, uninstall confirmation notes.
+
+#### `phase.beta.3_tester-experience`
+- Scope: first-run experience, docs, and tester instrumentation.
+- Outputs:
+  - Beta guide (`install`, `Gatekeeper workaround`, `connect integrations`, `known limits`).
+  - In-app beta feedback entry point (link or command).
+  - Privacy notice for local-only data and optional log sharing.
+- Exit criteria:
+  - First-run validation protocol is finalized and one internal smoke run completes in <=15 minutes.
+  - Required support docs are in-repo and versioned.
+  - Five-session non-technical cohort evidence is scheduled and deferred to `phase.beta.5_launch-gate`.
+
+##### `phase.beta.3` execution spec (required)
+
+**A) Beta Guide Artifact Set (must exist and be testable)**
+
+Create a single beta onboarding packet that includes all of the following sections, in this order:
+
+1. `Install` (DMG-first path): download, checksum verify, mount, drag to `/Applications`, first launch, relaunch.
+2. `Gatekeeper workaround` (unsigned app path): Finder `Open` flow, expected warning copy, successful launch confirmation.
+3. `Connect integrations`: minimum path for Notion + Gmail + Google Calendar, with expected connected-state indicators.
+4. `Known limits`: current beta constraints, accepted rough edges, and user-safe workarounds.
+
+Executable checklist for the guide artifact:
+- [ ] A tester with no prior context can follow steps without CLI usage.
+- [ ] Every section includes expected result text (`what success looks like`).
+- [ ] Every section includes at least one recovery step (`if this fails, do X`).
+- [ ] The `Known limits` list includes severity label (`P1/P2/P3`) and workaround status.
+
+**B) In-App Feedback Entrypoint + Fallback Channel (explicit behavior)**
+
+Entrypoint requirements:
+- Primary UI entrypoint label is exactly `Send Beta Feedback`.
+- Entry point appears in both `Settings > Help` and onboarding completion screen.
+- Activation opens a feedback composer prefilled with: app version, build id, macOS version, active integration names, and timestamp.
+- Prefill must exclude secrets/tokens, email bodies, OAuth codes, and filesystem paths outside FlowState support dir.
+
+Fallback behavior requirements:
+- If online submission fails (offline, request error, provider blocked), app shows `Fallback: Email Feedback` with one-click copy of sanitized feedback payload.
+- Fallback channel is email to `flowstate-beta@proton.me` with subject format: `FlowState Beta Feedback - v<version>+<build>`.
+- App must display `Feedback not sent` until user explicitly confirms manual fallback action.
+
+Validation checks:
+- [ ] Primary path succeeds in normal online environment.
+- [ ] Forced-failure path triggers fallback UI in <=3 seconds.
+- [ ] Copied fallback payload contains required metadata and no redacted-field leaks.
+
+**C) Privacy Notice Requirements (local-only + explicit consent)**
+
+Privacy notice must be shown during first-run onboarding before integration connection starts.
+
+Required notice statements (verbatim intent, can vary in wording):
+- Local-only storage: settings, tokens, and memory are stored on this Mac under `~/Library/Application Support/FlowState/`.
+- No telemetry by default: FlowState does not auto-send usage analytics.
+- Optional log sharing: user may opt in to share a redacted log bundle for support.
+
+Consent rules:
+- Log sharing toggle default is `Off`.
+- Consent is granular (one-time share or persistent opt-in) and revocable in Settings.
+- `Continue` in onboarding cannot imply consent; consent must be a separate control.
+- If log sharing is enabled, preview must list included/excluded data categories before send.
+
+Validation checks:
+- [ ] First-run user sees notice before first OAuth/connect action.
+- [ ] Default state is no log sharing.
+- [ ] Revocation path works without app restart.
+
+**D) First-Run Validation Protocol + Launch-Gate Rubric**
+
+Phase.beta.3 output requirement:
+- Define and version the validation protocol, run-sheet template, and pass/fail rubric.
+- Execute one internal smoke run to confirm the protocol is usable end-to-end.
+
+Phase.beta.5 execution requirement:
+- Execute the full 5-session non-technical cohort validation and evaluate against the rubric below.
+
+Test method (measurable):
+1. Recruit 5 non-technical testers with no FlowState setup history.
+2. Reset app state before each run (`/Applications/FlowState.app` fresh install + clear support dir).
+3. Start timer at first app launch.
+4. End timer when tester reaches Home and successfully completes one guided action (send prompt + receive response OR run one bundled workflow to terminal status).
+5. Record interventions (`none`, `minor hint`, `hands-on assistance`) and blocker category.
+
+Pass/fail rubric:
+
+| Metric | Pass Threshold | Fail Trigger |
+| --- | --- | --- |
+| Completion time | >=4/5 testers finish in <=15:00 | <=3/5 finish in <=15:00 |
+| Assistance level | >=4/5 require no more than one minor hint | Any tester requires hands-on operator control |
+| Critical blockers | 0 P0/P1 onboarding blockers | Any reproducible P0/P1 blocker |
+| Feedback capture | 5/5 submit feedback via primary or fallback path | Any run cannot submit feedback |
+
+Phase exit evidence required:
+- Timestamped run sheet for all 5 sessions.
+- Per-session notes with blocker type and resolution.
+- Aggregated outcome summary mapped to rubric above.
+
+**E) Required In-Repo Doc Locations + Versioning Conventions**
+
+Required docs for this phase (must be committed):
+- `docs/beta/v0.1.0-beta/BETA_GUIDE.md`
+- `docs/beta/v0.1.0-beta/KNOWN_LIMITS.md`
+- `docs/beta/v0.1.0-beta/PRIVACY_NOTICE.md`
+- `docs/beta/v0.1.0-beta/FEEDBACK_CHANNELS.md`
+- `docs/beta/v0.1.0-beta/FIRST_RUN_VALIDATION.md`
+
+Versioning rules:
+- Beta docs are versioned by directory (`v<semver>-beta`), immutable after launch gate except errata.
+- Any post-freeze edit requires an entry in `docs/beta/CHANGELOG.md` with date, owner, reason, and affected file.
+- Each phase.beta.3 doc must include metadata header fields: `Version`, `Build`, `Last Updated`, `Owner`, `Applies To`.
+- `docs/beta/current` must be updated to point to the active beta doc set (symlink or index file reference).
+
+Completion checklist:
+- [ ] All required docs exist at required paths.
+- [ ] Metadata headers present in every required doc.
+- [ ] Changelog entry added for any modified published beta doc.
+- [ ] `docs/beta/current` resolves to the same version used in release artifacts.
+
+#### `phase.beta.4_beta-operations`
+- Scope: operate the beta safely (intake, triage, release cadence, rollback).
+- Outputs:
+  - Issue template set (bug, UX friction, integration failure).
+  - Triage SLA and severity policy.
+  - Hotfix path for emergency repackage.
+  - Artifact channel policy: GitHub Releases (draft), private-access distribution.
+- Exit criteria:
+  - Team can classify and respond to critical bug reports within SLA.
+  - Rollback communication template is ready.
+
+##### `phase.beta.4` execution spec (required)
+
+**A) Intake Templates (GitHub Issues)**
+
+Required templates (version-controlled):
+- `.github/ISSUE_TEMPLATE/beta-bug-report.md`
+- `.github/ISSUE_TEMPLATE/beta-ux-friction.md`
+- `.github/ISSUE_TEMPLATE/beta-integration-failure.md`
+
+Template requirements:
+- Include required fields for `build`, `macOS version`, `device arch`, `steps to reproduce`, `expected`, `actual`, `severity`, and `attachments/log bundle`.
+- Include privacy reminder: no secrets/tokens in ticket body.
+- Include severity selector constrained to `P0`, `P1`, `P2`, `P3`.
+
+**B) Triage SLA + Severity Policy**
+
+- `P0` (data loss/security/app unusable): acknowledge <= 30 minutes, owner assigned <= 1 hour, mitigation/rollback decision <= 4 hours.
+- `P1` (critical flow blocked): acknowledge <= 2 hours, owner assigned <= 4 hours, fix or workaround <= 24 hours.
+- `P2` (major but workable): acknowledge <= 1 business day, triage <= 2 business days.
+- `P3` (minor/polish): acknowledge <= 2 business days, backlog prioritization in next weekly triage.
+
+Operational rules:
+- Every issue must have `severity`, `owner`, `status`, and `next update time`.
+- Any `P0` automatically triggers `@oracle` diagnostic handoff + verifier follow-up.
+
+**C) Hotfix + Rollback Path (emergency repackage)**
+
+1. Branch from last known-good release commit.
+2. Apply minimal fix scoped to blocker.
+3. Re-run release pipeline: `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter @flowstate/desktop package:mac`.
+4. Stage deterministic artifacts in `packages/desktop/out/release/` and regenerate checksums + manifest.
+5. Publish new GitHub draft pre-release (`v<version>-beta+<build>-hotfix.<n>`) and update beta docs changelog.
+
+Rollback communication requirements:
+- Prewritten message template must include: affected build, risk summary, immediate action, replacement build ETA, and support channel.
+
+**D) Release Cadence + Operations Rituals**
+
+- Beta cadence: one scheduled drop per week + emergency hotfixes as needed.
+- Triage rhythm: daily 15-minute triage standup during active beta week.
+- Weekly ops review must output: open P0/P1 count, mean time to acknowledge, mean time to mitigation, top friction themes.
+
+**E) Exit Evidence Checklist**
+
+- [ ] Issue templates exist and are usable in GitHub UI.
+- [ ] SLA policy is published in repo docs and referenced in beta guide set.
+- [ ] Hotfix dry-run completed at least once (artifact restage + checksum verification).
+- [ ] Rollback communication template drafted and stored in docs.
+
+#### `phase.beta.5_launch-gate`
+- Scope: final go/no-go review and beta cohort handoff.
+- Outputs:
+  - Release checklist with sign-offs.
+  - Published beta artifacts + checksums + release notes.
+  - Draft GitHub Release containing DMG + SHA256 manifest + release notes.
+  - Completed first-run validation report (5 non-technical sessions + rubric outcome summary).
+  - Tester invite packet.
+- Exit criteria:
+  - Gate reviewers approve quality/security/UX readiness.
+  - First cohort receives validated install package.
+  - Cohort coverage gate passes: minimum 2 Apple Silicon testers + 1 Intel tester across at least 2 macOS versions.
+  - First-run rubric passes: >=4/5 sessions complete in <=15 minutes, no reproducible P0/P1 onboarding blockers, and 5/5 feedback capture success.
+
+##### `phase.beta.5` execution spec (required)
+
+**A) Launch Readiness Inputs (must be present before review)**
+
+- Deterministic artifacts from `packages/desktop/out/release/`:
+  - `FlowState-v<version>-beta+<build>-macos-<arch>.dmg`
+  - `FlowState-v<version>-beta+<build>-macos-<arch>.zip`
+  - `SHA256SUMS.txt`
+  - `artifact-manifest.json`
+- Beta docs set at `docs/beta/v0.1.0-beta/` including guide, privacy, feedback, operations, rollout/rollback, and first-run validation.
+- Final known-issues list with severity labels and explicit waiver decisions.
+
+**B) Cohort Matrix + First-Run Evidence (hard gate)**
+
+Required matrix minimum:
+- 2 Apple Silicon tester runs
+- 1 Intel tester run
+- Coverage across at least 2 macOS versions
+
+Required first-run evidence:
+- Complete `docs/beta/v0.1.0-beta/FIRST_RUN_VALIDATION.md` for T1-T5 with timestamps, duration, assistance level, blocker type, and feedback submission path.
+- Include aggregated rubric summary and explicit pass/fail decision.
+
+**C) Draft GitHub Release Procedure (private distribution)**
+
+From repo root:
+1. `gh release create "v0.1.0-beta+b<build>" --draft --prerelease --title "FlowState v0.1.0 Beta (b<build>)" --notes-file "docs/beta/v0.1.0-beta/RELEASE_NOTES.md"`
+2. `gh release upload "v0.1.0-beta+b<build>" packages/desktop/out/release/*.dmg packages/desktop/out/release/*.zip packages/desktop/out/release/SHA256SUMS.txt packages/desktop/out/release/artifact-manifest.json --clobber`
+3. Confirm draft visibility is restricted to approved private collaborators.
+
+**D) Final Reviewer Sign-Off Packet**
+
+- Reviewer roles: release owner, verifier owner, product owner.
+- Required sign-off blocks:
+  - `Quality`: tests/package evidence + install validation
+  - `Security/Privacy`: no telemetry default + redaction behavior validated
+  - `UX`: first-run rubric pass + known workarounds documented
+
+**E) Go/No-Go Rules**
+
+- `GO` only when all required inputs exist, cohort matrix and first-run rubric pass, and all reviewer sign-offs are complete.
+- `NO-GO` if any P0 exists, any unresolved/expired P1 waiver exists, or any required cohort/evidence slot is missing.
+
+### Required Gates
+
+1. Verification gate per phase (`@verifier`): tests, packaging reproducibility, doc completeness.
+2. Security/privacy gate (final): token handling, redaction behavior, no accidental telemetry.
+3. Final review gate: launch readiness review before tester distribution.
+
+### Subagent Registry
+
+- Core:
+  - `@general`: implementation and doc updates.
+  - `@verifier`: acceptance checks and release gates.
+  - `@uiux`: install/onboarding clarity and beta UX messaging.
+  - `@oracle`: deep debugging for blockers and flaky behavior.
+- Project-specific:
+  - None added for this program (current scope covered by core roster).
+
+### Routing Matrix (`task_type x risk_level -> subagent`)
+
+| Task Type | Low Risk | Medium Risk | High Risk |
+| --- | --- | --- | --- |
+| Build/test command hardening | `@general` | `@general` | `@oracle` |
+| Packaging config/artifacts | `@general` | `@general` | `@oracle` |
+| Install docs + tester guide | `@general` | `@uiux` | `@uiux` |
+| Release validation | `@verifier` | `@verifier` | `@verifier` |
+| Security/privacy checks | `@verifier` | `@verifier` | `@oracle` + `@verifier` |
+| Blocker diagnosis | `@general` | `@oracle` | `@oracle` |
+
+### Delegation Triggers
+
+- Route to `@oracle` when:
+  - Packaging fails non-deterministically.
+  - Build/test failures cannot be resolved in one iteration.
+  - Crash/hang is reproducible but root cause is unclear.
+- Route to `@uiux` when:
+  - First-run friction is reported by >2 testers.
+  - Installation instructions produce confusion or drop-off.
+- Route to `@verifier` when:
+  - Any phase declares completion.
+  - A release artifact is ready for distribution.
+
+### Verification Owner Rules
+
+- Any artifact intended for external testers requires `@verifier` approval.
+- Any high-risk fix requires `@oracle` diagnosis notes plus `@verifier` confirmation.
+
+### Worktree + Risk Policy
+
+- High-risk tasks (packaging config, auth, update flow) execute in isolated worktrees/branches.
+- Medium-risk tasks may share a branch only if files do not overlap.
+- One in-progress high-risk task at a time.
+
+### Model Routing Policy
+
+- Low risk: fast model tier.
+- Medium risk: balanced model tier.
+- High risk: highest-reasoning model tier; mandatory verification gate.
+
+### Subagent Lifecycle Policy
+
+- Create new specialist only if a domain repeats >=3 times with poor handoffs.
+- Evaluate specialist usefulness at end of each beta phase.
+- Prune specialist if no owned tasks in two consecutive phases.
+
+### Beta Launch Deliverables Checklist
+
+- Build and test are green on clean environment.
+- Unsigned DMG + zip app artifacts produced.
+- Checksums + artifact manifest published.
+- Install guide + known issues + troubleshooting published.
+- Feedback intake path verified.
+- Rollback and hotfix procedure documented.
+- Go/no-go review completed.
+
+---
+
+## Build-to-DMG Parity Stabilization Program (Immediate Priority)
+
+This program is now the immediate execution focus before expanding feature scope.
+
+### Program Goal
+
+Ensure all behavior validated in `pnpm build` is reproducible from the downloaded DMG in GitHub draft releases, then lock that parity with a full test pyramid (unit + mocks/contracts + integration + packaged e2e).
+
+### Stable Demo Definition (Locked)
+
+`Stable demo` means:
+
+1. The downloaded DMG install behaves the same as the local validated build for all in-scope capabilities.
+2. No critical regression exists between `pnpm build` verification and packaged runtime behavior.
+3. Release draft creation is blocked unless parity and test gates pass.
+
+### In-Scope Capabilities for Parity Gate (v0.1.0-beta)
+
+- App install/launch/relaunch from `/Applications/FlowState.app`
+- Home + Chat + Tasks + Workflows + Integrations mode navigation
+- Core process startup (OpenCode headless + enabled MCP server processes)
+- One workflow run to terminal status with timeline events
+- Approval flow (`Approve`, `Always Approve`, `Deny`) in one session
+- Config and auth persistence across restart
+
+### Explicit Non-Goals (for this program)
+
+- New end-user feature additions unrelated to parity or testability
+- Cross-platform packaging beyond macOS
+- Telemetry additions (must remain opt-in and local-first)
+
+### Phase DAG (PM-Executable)
+
+```text
+phase.parity.1_capability-baseline
+  -> phase.parity.2_packaged-runtime-hardening
+  -> phase.parity.3_dmg-smoke-automation
+  -> phase.parity.5_release-gate-enforcement
+
+phase.parity.1_capability-baseline
+  -> phase.parity.4_test-pyramid-buildout
+  -> phase.parity.5_release-gate-enforcement
+```
+
+### Phase Details
+
+#### `phase.parity.1_capability-baseline`
+- Scope: codify the exact `build vs DMG` parity contract and establish reproducible failure evidence.
+- Outputs:
+  - `docs/release/PARITY_CAPABILITIES.md` (authoritative checklist)
+  - Failure matrix with reproducible steps (`dev-build`, `packaged-dmg`, expected, actual)
+  - Startup diagnostics schema (required fields and redaction rules)
+- Exit criteria:
+  - Every parity capability has an objective pass/fail check.
+  - At least one DMG run and one local build run captured with comparable evidence.
+
+#### `phase.parity.2_packaged-runtime-hardening`
+- Scope: eliminate runtime differences caused by packaging/build environment assumptions.
+- Outputs:
+  - Production-safe path resolution policy (no `cwd` dependency for packaged runtime)
+  - Packaged spawn policy for OpenCode + MCP child processes
+  - Startup preflight checks (resources, config, permissions, keychain readiness)
+  - Structured packaged diagnostics in local logs
+- Exit criteria:
+  - Known DMG-only blockers are fixed or formally waived with owner/date.
+  - No P0/P1 crash/blocker in first-launch and relaunch parity flows.
+
+#### `phase.parity.3_dmg-smoke-automation`
+- Scope: automate DMG-first validation as the default release confidence path.
+- Outputs:
+  - `pnpm smoke:dmg` command: build -> package -> install -> launch -> run parity checks -> collect artifacts
+  - Artifact bundle for each smoke run (logs, checklist results, screenshots if needed)
+  - Deterministic failure codes (so CI and humans can interpret outcomes quickly)
+- Exit criteria:
+  - Smoke automation passes on clean local state.
+  - Smoke automation is CI-runnable and fails release flow on parity break.
+
+#### `phase.parity.4_test-pyramid-buildout`
+- Scope: establish durable confidence for continuous refactoring and release safety.
+- Outputs:
+  - Unit tests for core stores/policies/transformers/validators
+  - Mock/contract tests for MCP adapters and IPC boundaries
+  - Integration tests for main-renderer-process-manager flows
+  - Packaged e2e tests for critical user journeys from installed app
+- Exit criteria:
+  - Minimum required suite passes in CI on every release candidate.
+  - Critical-path test map links each parity capability to at least one automated test.
+
+#### `phase.parity.5_release-gate-enforcement`
+- Scope: enforce parity and quality gates before any GitHub draft release is considered valid.
+- Outputs:
+  - Release gate definition in CI (blocking checks)
+  - Draft release policy: create/update draft only after parity + test gates pass
+  - Maintainer runbook for local pre-release verification
+- Exit criteria:
+  - A release candidate cannot produce an accepted draft without passing all required gates.
+  - One full dry-run completes from commit -> artifacts -> gated draft release.
+
+### Required Gates (Strict)
+
+1. `Gate A - Build/Type/Test`: lint + typecheck + required automated tests.
+2. `Gate B - Parity Smoke`: DMG install/launch/relaunch + capability checklist.
+3. `Gate C - Packaged E2E`: critical user journeys in installed app.
+4. `Gate D - Final Verification`: `@verifier` sign-off with parity evidence.
+
+### Command Contract (to implement)
+
+- `pnpm build:release` -> deterministic release build + package artifacts.
+- `pnpm smoke:dmg` -> execute DMG parity smoke sequence.
+- `pnpm test:contracts` -> MCP/IPC contract tests.
+- `pnpm test:packaged-e2e` -> installed app journey tests.
+- `pnpm gate:release` -> aggregate gates A-D; non-zero exit on any failure.
+
+### PM Routing Policy (Task Type x Risk)
+
+| Task Type | Low Risk | Medium Risk | High Risk |
+| --- | --- | --- | --- |
+| Parity checklist/docs | `@general` | `@general` | `@verifier` |
+| Packaging/runtime fixes | `@general` | `@oracle` | `@oracle` |
+| DMG smoke automation | `@general` | `@general` | `@oracle` |
+| Test harness buildout | `@general` | `@general` | `@verifier` |
+| Release gate wiring | `@general` | `@verifier` | `@verifier` + `@oracle` |
+
+### Delegation Triggers
+
+- Route to `@oracle` when a bug appears only in packaged runtime or is non-deterministic.
+- Route to `@verifier` when any gate is introduced/modified or a phase declares completion.
+- Route to `@uiux` if parity failures are caused by onboarding/install interaction confusion.
+
+### Verification Owner Rule
+
+- Any DMG artifact intended for testers is invalid until `@verifier` confirms parity checklist + smoke output + packaged e2e evidence.
+
+### Worktree and Risk Policy
+
+- High-risk packaging/auth/runtime tasks run in isolated branches/worktrees.
+- One high-risk parity task in progress at a time.
+- No release-branch merges without passing `pnpm gate:release`.
+
+### Subagent Lifecycle Policy (for this program)
+
+- Use core roster first (`@general`, `@oracle`, `@verifier`, `@uiux`).
+- Propose a project-specific specialist only if the same parity/packaging failure pattern repeats in 3+ tasks with poor handoffs.
+- Re-evaluate specialist need at end of each parity phase.
+
+---
+
 ## Open Questions for Future Discussion
 
 1. **Code Signing Timeline**: When will Apple Developer account be available?

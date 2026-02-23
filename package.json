@@ -13,7 +13,12 @@
     "start:tui": "opencode . --agent flowstate-assistant",
     "build": "turbo build",
     "test": "turbo test",
+    "test:contracts": "node scripts/test-contracts.js",
+    "test:packaged-e2e": "node scripts/test-packaged-e2e.js",
     "test:mcp": "node scripts/test-mcp.js",
+    "build:release": "node scripts/build-release.js",
+    "smoke:dmg": "node scripts/smoke-dmg.js",
+    "gate:release": "node scripts/gate-release.js",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
     "typecheck": "turbo typecheck"

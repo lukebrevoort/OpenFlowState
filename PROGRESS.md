@@ -9,6 +9,25 @@
 
 Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
 
+---
+
+## Tasks Completed (Feb 23, 2026 - Build-to-DMG Parity Program Kickoff)
+
+- ✅ Added parity contract documentation at `docs/release/PARITY_CAPABILITIES.md` with explicit build-vs-DMG capability checks and evidence requirements.
+- ✅ Added root release command contract scaffolding: `build:release`, `smoke:dmg`, `test:contracts`, `test:packaged-e2e`, and `gate:release`.
+- ✅ Added deterministic script entrypoints under `scripts/` for release build orchestration, DMG smoke validation, contract tests, packaged e2e tests, and aggregate gate execution.
+- ✅ Defined phase-start known gaps so upcoming parity phases can focus on packaged runtime hardening and deeper DMG automation.
+
+---
+
+## Tasks Completed (Feb 23, 2026 - Parity Phase 2/3/4/5 Execution Wave)
+
+- ✅ Hardened packaged prompt loading and bundled `agents/` into desktop release resources with deterministic candidate path resolution.
+- ✅ Made packaged model-sync path safe by skipping bundled resource mutations and persisting selected model via user config only.
+- ✅ Added runtime path regression coverage (`process-manager-paths.test.ts`) and parity capability-to-test mapping (`docs/release/PARITY_TEST_MAP.md`).
+- ✅ Upgraded `smoke:dmg` to assert app launch, write deterministic step/status artifacts, and handle DMG detach retries/force fallback for CI reliability.
+- ✅ Added release gate runbook (`docs/release/RELEASE_GATE_RUNBOOK.md`) and re-validated command wiring with `pnpm gate:release -- --dry-run`.
+
 ### What's Working:
 - Electron main process with macOS window management
 - Preload script with secure IPC bridge (CommonJS for Electron compatibility)

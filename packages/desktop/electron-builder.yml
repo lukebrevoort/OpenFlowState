@@ -13,6 +13,8 @@ files:
   - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme,test,__tests__,tests,powered-test,example,examples}"
 
 extraResources:
+  - from: ../../agents
+    to: agents
   - from: ../mcp-gmail/dist
     to: mcp-servers/mcp-gmail/dist
   - from: ../mcp-gcal/dist
@@ -28,7 +30,7 @@ mac:
       arch: [universal]
     - target: zip
       arch: [universal]
-  icon: assets/flowstate-main-logo.png
+  icon: assets/flowstate-main-logo.icns
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -38,7 +40,7 @@ mac:
 
 dmg:
   background: null
-  icon: assets/flowstate-main-logo.png
+  icon: assets/flowstate-main-logo.icns
   iconSize: 100
   contents:
     - x: 130

@@ -31,6 +31,7 @@ import { workflowRunStore } from './workflow-run-store.js';
 import { clampText, parseResponseHeader, requiresUserInput } from './workflow-response-utils.js';
 import type { TaskRunRecord } from './task-types.js';
 import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
+import { buildFlowstatePromptCandidatePaths } from './process-manager-paths.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -1348,6 +1349,18 @@ class ProcessManager {
   }
 
   private async updateAgentModelFiles(model: string): Promise<void> {
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+    if (!isDev) {
+      try {
+        // Packaged builds must avoid mutating bundled resources (app.asar / extraResources).
+        // Persist the selected model only in user-writable runtime config.
+        await configStore.setProvider(model);
+      } catch (error) {
+        console.warn('[ProcessManager] Failed to persist packaged model selection', error);
+      }
+      return;
+    }
+
     const repoRoot = this.getRepoRoot();
     const agentPaths = [
       path.join(repoRoot, '.opencode', 'agent', 'flowstate.md'),
@@ -1461,10 +1474,13 @@ class ProcessManager {
    * Build MCP configuration with auth tokens from auth-manager
    */
   private loadFlowstatePrompt(packagesDir: string): string | null {
-    const candidatePaths = [
-      path.join(path.resolve(packagesDir, '..', 'agents'), 'flowstate.md'),
-      path.join(this.getRepoRoot(), 'agents', 'flowstate.md'),
-    ];
+    const candidatePaths = buildFlowstatePromptCandidatePaths({
+      envAgentsDir: typeof process.env.FLOWSTATE_AGENTS_DIR === 'string' ? process.env.FLOWSTATE_AGENTS_DIR : '',
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      repoRoot: this.getRepoRoot(),
+      packagesDir,
+    });
 
     for (const agentPath of candidatePaths) {
       try {
