@@ -4,9 +4,32 @@
  * Desktop notification system for approvals, completions, and alerts.
  */
 
-import notifier from 'node-notifier';
 import crypto from 'crypto';
-import path from 'path';
+import { createRequire } from 'node:module';
+
+type NodeNotifier = {
+  notify: (options: Record<string, unknown>, callback?: (err: Error | null, response: string, metadata: unknown) => void) => void;
+};
+
+let cachedNotifier: NodeNotifier | null | undefined;
+
+function getNotifier(): NodeNotifier | null {
+  if (cachedNotifier !== undefined) {
+    return cachedNotifier;
+  }
+
+  try {
+    const require = createRequire(import.meta.url);
+    const loaded = require('node-notifier') as NodeNotifier;
+    cachedNotifier = loaded;
+  } catch (error) {
+    cachedNotifier = null;
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[Notification] node-notifier unavailable; desktop notifications disabled (${message})`);
+  }
+
+  return cachedNotifier;
+}
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error' | 'approval';
 
@@ -33,13 +56,16 @@ export class NotificationService {
     console.log(`[Notification] ${notification.type}: ${notification.title} - ${notification.message}`);
     
     // Send desktop notification
-    notifier.notify({
-      title: `FlowState: ${notification.title}`,
-      message: notification.message,
-      sound: notification.type === 'error' || notification.type === 'approval',
-      wait: notification.type === 'approval', // Wait for interaction if it's an approval
-      timeout: notification.type === 'approval' ? 30 : 5, // 30s for approval, 5s for others
-    });
+    const notifier = getNotifier();
+    if (notifier) {
+      notifier.notify({
+        title: `FlowState: ${notification.title}`,
+        message: notification.message,
+        sound: notification.type === 'error' || notification.type === 'approval',
+        wait: notification.type === 'approval', // Wait for interaction if it's an approval
+        timeout: notification.type === 'approval' ? 30 : 5, // 30s for approval, 5s for others
+      });
+    }
 
     return id;
   }
@@ -53,6 +79,12 @@ export class NotificationService {
     return new Promise((resolve) => {
       console.log(`[Approval Required] ${title}: ${message}`);
       
+      const notifier = getNotifier();
+      if (!notifier) {
+        resolve(false);
+        return;
+      }
+
       notifier.notify({
         title: `APPROVAL NEEDED: ${title}`,
         message: message,

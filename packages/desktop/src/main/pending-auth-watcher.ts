@@ -8,8 +8,8 @@
  */
 
 import fs from 'fs/promises';
+import { watch as watchFs, type FSWatcher as NodeFSWatcher } from 'node:fs';
 import path from 'path';
-import { watch, FSWatcher } from 'chokidar';
 import { authManager } from './auth-manager.js';
 import { processManager } from './process-manager.js';
 
@@ -26,8 +26,9 @@ interface PendingCanvasAuth {
 
 type PendingAuth = PendingCanvasAuth;
 
-let watcher: FSWatcher | null = null;
+let watcher: NodeFSWatcher | null = null;
 let pendingAuthDir: string | null = null;
+const queuedFiles = new Set<string>();
 
 /**
  * Process a pending auth file
@@ -121,22 +122,32 @@ export async function startPendingAuthWatcher(dataDir: string): Promise<void> {
     console.error('[PendingAuth] Error processing existing files:', error);
   }
 
-  // Start watching for new files
-  watcher = watch(pendingAuthDir, {
-    persistent: true,
-    ignoreInitial: true, // We already processed existing files
-    awaitWriteFinish: {
-      stabilityThreshold: 500,
-      pollInterval: 100,
-    },
-  });
-
-  watcher.on('add', async (filePath) => {
-    if (filePath.endsWith('.json') && !path.basename(filePath).startsWith('.')) {
-      // Small delay to ensure file is fully written
-      await new Promise((r) => setTimeout(r, 100));
-      await processPendingAuthFile(filePath);
+  // Start watching for new/changed files
+  watcher = watchFs(pendingAuthDir, { persistent: true }, (_eventType, filename) => {
+    if (!filename) {
+      return;
     }
+
+    const fileName = filename.toString();
+    if (!fileName.endsWith('.json') || fileName.startsWith('.')) {
+      return;
+    }
+
+    const fullPath = path.join(pendingAuthDir!, fileName);
+    if (queuedFiles.has(fullPath)) {
+      return;
+    }
+
+    queuedFiles.add(fullPath);
+    setTimeout(async () => {
+      try {
+        await processPendingAuthFile(fullPath);
+      } catch (error) {
+        console.error('[PendingAuth] Watcher processing error:', error);
+      } finally {
+        queuedFiles.delete(fullPath);
+      }
+    }, 150);
   });
 
   watcher.on('error', (error) => {

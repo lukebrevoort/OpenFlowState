@@ -814,6 +814,9 @@ export interface FlowstateConfig {
       readCalendarIds?: string[];
       writeCalendarId?: string;
     };
+    canvas?: {
+      apiUrl?: string;
+    };
   };
   onboardingComplete?: boolean;
 }

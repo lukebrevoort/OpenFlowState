@@ -530,6 +530,25 @@ function CanvasConnectionForm({
   const [browserLoginConfirmPath, setBrowserLoginConfirmPath] = useState<string | null>(null);
   const [browserLoginAwaitingConfirm, setBrowserLoginAwaitingConfirm] = useState(false);
 
+  // Load saved Canvas URL on mount
+  useEffect(() => {
+    let mounted = true;
+    const loadSavedUrl = async () => {
+      try {
+        const config = await window.flowstate.config.get();
+        if (mounted && config.integrations?.canvas?.apiUrl) {
+          setApiUrl(config.integrations.canvas.apiUrl);
+        }
+      } catch (e) {
+        console.error("Failed to load saved Canvas URL:", e);
+      }
+    };
+    loadSavedUrl();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const handlePickStoragePath = async () => {
     const defaultPath = `canvas.json`;
     const picked = await window.flowstate.app.showSaveDialog({
@@ -557,15 +576,37 @@ function CanvasConnectionForm({
       ? apiToken.trim().length > 0
       : storageStatePath.trim().length > 0);
 
+  // Save Canvas URL to config for future sessions
+  const saveCanvasUrl = async (url: string) => {
+    try {
+      const current = await window.flowstate.config.get();
+      await window.flowstate.config.set({
+        integrations: {
+          ...(current.integrations ?? {}),
+          canvas: {
+            ...(current.integrations?.canvas ?? {}),
+            apiUrl: url,
+          },
+        },
+      });
+    } catch (e) {
+      console.error("Failed to save Canvas URL:", e);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!canSubmit) return;
 
+    const trimmedUrl = apiUrl.trim();
+    
+    // Save URL to config first
+    await saveCanvasUrl(trimmedUrl);
+
     if (authMode === "browser") {
       setBrowserLoginRunning(true);
       setBrowserLoginError(null);
-      const trimmedUrl = apiUrl.trim();
       let trimmedPath = storageStatePath.trim();
       if (trimmedPath && !trimmedPath.endsWith(".json")) {
         trimmedPath = `${trimmedPath.replace(/\/+$/g, "")}/canvas.json`;
@@ -605,7 +646,7 @@ function CanvasConnectionForm({
     }
 
     onSubmit(apiToken.trim(), {
-      canvasApiUrl: apiUrl.trim(),
+      canvasApiUrl: trimmedUrl,
       canvasAuthMode: "token",
     });
   };
