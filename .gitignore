@@ -38,3 +38,5 @@ tmp/
 temp/
 .opencode/pm.db
 .opencode/pm-phase6.db
+.opencode/artifacts/
+packages/desktop/out/
