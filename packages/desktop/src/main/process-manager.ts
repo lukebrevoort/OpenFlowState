@@ -836,6 +836,183 @@ class ProcessManager {
 
   private readonly defaultAgent = 'flowstate-assistant';
 
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object') return null;
+    return value as Record<string, unknown>;
+  }
+
+  private normalizeResponseParts(parts: unknown): Array<{ type: string; text?: string }> {
+    if (!Array.isArray(parts)) return [];
+
+    const normalized: Array<{ type: string; text?: string }> = [];
+
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        const text = part.trim();
+        if (text.length > 0) {
+          normalized.push({ type: 'text', text: part });
+        }
+        continue;
+      }
+
+      const record = this.asRecord(part);
+      if (!record) continue;
+
+      const type = typeof record.type === 'string' ? record.type : 'unknown';
+
+      const directText =
+        typeof record.text === 'string'
+          ? record.text
+          : typeof record.content === 'string'
+            ? record.content
+            : undefined;
+
+      if (directText && directText.length > 0) {
+        normalized.push({ type, text: directText });
+        continue;
+      }
+
+      const textRecord = this.asRecord(record.text);
+      if (textRecord && typeof textRecord.value === 'string' && textRecord.value.length > 0) {
+        normalized.push({ type, text: textRecord.value });
+        continue;
+      }
+
+      const nestedParts = this.normalizeResponseParts(record.parts);
+      if (nestedParts.length > 0) {
+        normalized.push(...nestedParts);
+        continue;
+      }
+
+      const nestedContent = this.normalizeResponseParts(record.content);
+      if (nestedContent.length > 0) {
+        normalized.push(...nestedContent);
+        continue;
+      }
+
+      normalized.push({ type });
+    }
+
+    return normalized;
+  }
+
+  private extractPromptPayload(data: unknown): {
+    parts: Array<{ type: string; text?: string }>;
+    text: string;
+    assistantMessageId?: string;
+  } {
+    const record = this.asRecord(data);
+    if (!record) {
+      return { parts: [], text: '' };
+    }
+
+    const infoRecord = this.asRecord(record.info);
+    const messageRecord = this.asRecord(record.message);
+    const responseRecord = this.asRecord(record.response);
+
+    const partCandidates: unknown[] = [
+      record.parts,
+      messageRecord?.parts,
+      messageRecord?.content,
+      record.content,
+      record.output,
+      responseRecord?.parts,
+      responseRecord?.content,
+      responseRecord?.output,
+    ];
+
+    const messages = Array.isArray(record.messages) ? record.messages : [];
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = this.asRecord(messages[i]);
+      if (!message) continue;
+      const role = typeof message.role === 'string' ? message.role : this.asRecord(message.info)?.role;
+      if (role !== 'assistant') continue;
+      partCandidates.push(message.parts, message.content);
+      break;
+    }
+
+    for (const candidate of partCandidates) {
+      const parts = this.normalizeResponseParts(candidate);
+      const text = parts
+        .filter((part) => part.type === 'text' || part.type === 'output_text')
+        .map((part) => part.text ?? '')
+        .join('');
+      if (text.trim().length > 0 || parts.length > 0) {
+        const assistantMessageId =
+          typeof infoRecord?.id === 'string'
+            ? infoRecord.id
+            : typeof messageRecord?.id === 'string'
+              ? messageRecord.id
+              : undefined;
+        return {
+          parts,
+          text,
+          ...(assistantMessageId ? { assistantMessageId } : {}),
+        };
+      }
+    }
+
+    if (typeof record.text === 'string' && record.text.trim().length > 0) {
+      return {
+        parts: [{ type: 'text', text: record.text }],
+        text: record.text,
+        ...(typeof infoRecord?.id === 'string' ? { assistantMessageId: infoRecord.id } : {}),
+      };
+    }
+
+    return {
+      parts: [],
+      text: '',
+      ...(typeof infoRecord?.id === 'string' ? { assistantMessageId: infoRecord.id } : {}),
+    };
+  }
+
+  private async recoverLatestAssistantPayload(sessionId: string): Promise<{
+    parts: Array<{ type: string; text?: string }>;
+    text: string;
+    assistantMessageId?: string;
+  } | null> {
+    if (!this.instance?.client) {
+      return null;
+    }
+
+    try {
+      const history = await this.instance.client.session.messages({
+        path: { id: sessionId },
+      });
+
+      if (history.error || !Array.isArray(history.data)) {
+        return null;
+      }
+
+      for (let i = history.data.length - 1; i >= 0; i -= 1) {
+        const message = this.asRecord(history.data[i]);
+        if (!message) continue;
+        const info = this.asRecord(message.info);
+        const role = typeof info?.role === 'string' ? info.role : undefined;
+        if (role !== 'assistant') continue;
+
+        const parts = this.normalizeResponseParts(message.parts ?? message.content);
+        const text = parts
+          .filter((part) => part.type === 'text' || part.type === 'output_text')
+          .map((part) => part.text ?? '')
+          .join('');
+
+        if (text.trim().length > 0 || parts.length > 0) {
+          return {
+            parts,
+            text,
+            ...(typeof info?.id === 'string' ? { assistantMessageId: info.id } : {}),
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('[ProcessManager] Failed to recover latest assistant payload:', error);
+    }
+
+    return null;
+  }
+
   private extractToolService(payload: unknown): string | null {
     const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
     const candidates = [record?.service, record?.tool, record?.toolName, record?.name, record?.provider];
@@ -1027,12 +1204,7 @@ class ProcessManager {
         return fallback;
       }
 
-      const parts = (result.data as { parts?: Array<{ type: string; text?: string }> }).parts ?? [];
-      const textContent = parts
-        .filter((p) => p.type === 'text')
-        .map((p) => p.text || '')
-        .join('')
-        .trim();
+      const textContent = this.extractPromptPayload(result.data).text.trim();
 
       const sanitized = sanitizeTaskTitle(textContent);
       if (!sanitized) return fallback;
@@ -2140,18 +2312,16 @@ class ProcessManager {
         throw new Error('No data in prompt result');
       }
 
-      const parts = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
-      const textContent = (parts as Array<{ type?: string; text?: string }>)
-        .filter((p) => p?.type === 'text')
-        .map((p) => p.text || '')
-        .join('');
-
-      const assistantMessageId = (result.data as { info?: { id?: string } })?.info?.id;
+      let extracted = this.extractPromptPayload(result.data);
+      if (extracted.text.trim().length === 0) {
+        const recovered = await this.recoverLatestAssistantPayload(sessionId);
+        if (recovered) extracted = recovered;
+      }
 
       return {
-        content: textContent,
-        parts,
-        ...(assistantMessageId ? { assistantMessageId } : {}),
+        content: extracted.text,
+        parts: extracted.parts,
+        ...(extracted.assistantMessageId ? { assistantMessageId: extracted.assistantMessageId } : {}),
       };
     } catch (error) {
       const errorPayload =
@@ -2222,14 +2392,15 @@ class ProcessManager {
         throw new Error('No data in prompt result');
       }
 
-      // Extract text content from parts
-      const partsUnknown = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
-      const parts = partsUnknown as Array<{ type: string; text?: string }>;
+      let extracted = this.extractPromptPayload(result.data);
+      if (extracted.text.trim().length === 0) {
+        const recovered = await this.recoverLatestAssistantPayload(this.activeSessionId!);
+        if (recovered) extracted = recovered;
+      }
+
+      const parts = extracted.parts;
       console.log('[ProcessManager] Response parts count:', parts.length);
-      const textContent = parts
-        .filter((p) => p.type === 'text')
-        .map((p) => p.text || '')
-        .join('') || '';
+      const textContent = extracted.text || '';
 
       console.log('[ProcessManager] Response text length:', textContent.length);
       if (textContent.length > 0) {
@@ -2238,7 +2409,7 @@ class ProcessManager {
 
       // Send the complete message to renderer
       const assistantMessage = {
-        id: (result.data as { info?: { id?: string } })?.info?.id || Date.now().toString(),
+        id: extracted.assistantMessageId || Date.now().toString(),
         role: 'assistant' as const,
         content: textContent || ' ',
         timestamp: new Date().toISOString(),
@@ -2392,14 +2563,15 @@ class ProcessManager {
         throw new Error('No data in prompt result');
       }
 
-      // Extract text content from parts
-      const partsUnknown = (result.data as { parts?: unknown[] } | undefined)?.parts ?? [];
-      const parts = partsUnknown as Array<{ type: string; text?: string }>;
+      let extracted = this.extractPromptPayload(result.data);
+      if (extracted.text.trim().length === 0) {
+        const recovered = await this.recoverLatestAssistantPayload(requestSessionId);
+        if (recovered) extracted = recovered;
+      }
+
+      const parts = extracted.parts;
       console.log('[ProcessManager] Response parts count:', parts.length);
-      const textContent = parts
-        .filter((p) => p.type === 'text')
-        .map((p) => p.text || '')
-        .join('') || '';
+      const textContent = extracted.text || '';
 
       console.log('[ProcessManager] Response text length:', textContent.length);
       if (textContent.length > 0) {
@@ -2410,7 +2582,7 @@ class ProcessManager {
 
       // Send the complete message to renderer
       const assistantMessage = {
-        id: (result.data as { info?: { id?: string } })?.info?.id || Date.now().toString(),
+        id: extracted.assistantMessageId || Date.now().toString(),
         role: 'assistant' as const,
         content: textContent || ' ',
         timestamp: new Date().toISOString(),
@@ -2688,15 +2860,28 @@ class ProcessManager {
         return [];
       }
 
-      return (result.data as Array<{ info: { id: string; role: string; createdAt?: string; sessionId?: string }; parts: Array<{ type: string; text?: string }> }>).map((msg) => ({
-        id: msg.info.id,
-        role: msg.info.role,
-        content: (msg.parts
-          .filter((p) => p.type === 'text')
-          .map((p) => p.text || '')
-          .join('')) || ' ',
-        timestamp: msg.info.createdAt || new Date().toISOString(),
-      }));
+      return (result.data as unknown[])
+        .map((rawMsg) => {
+          const msg = this.asRecord(rawMsg);
+          if (!msg) return null;
+          const info = this.asRecord(msg.info);
+          const id = typeof info?.id === 'string' ? info.id : Date.now().toString();
+          const role = typeof info?.role === 'string' ? info.role : 'assistant';
+          const timestamp = typeof info?.createdAt === 'string' ? info.createdAt : new Date().toISOString();
+          const parts = this.normalizeResponseParts(msg.parts ?? msg.content);
+          const content = parts
+            .filter((part) => part.type === 'text' || part.type === 'output_text')
+            .map((part) => part.text ?? '')
+            .join('');
+
+          return {
+            id,
+            role,
+            content: content.length > 0 ? content : ' ',
+            timestamp,
+          };
+        })
+        .filter((msg): msg is { id: string; role: string; content: string; timestamp: string } => Boolean(msg));
     } catch (error) {
       console.error('Error getting session messages:', error);
       return [];
