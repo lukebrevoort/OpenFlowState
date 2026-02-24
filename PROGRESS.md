@@ -28,6 +28,14 @@ Phase 8 execution is complete, including implementation and verification through
 - ✅ Upgraded `smoke:dmg` to assert app launch, write deterministic step/status artifacts, and handle DMG detach retries/force fallback for CI reliability.
 - ✅ Added release gate runbook (`docs/release/RELEASE_GATE_RUNBOOK.md`) and re-validated command wiring with `pnpm gate:release -- --dry-run`.
 
+---
+
+## Tasks Completed (Feb 23, 2026 - DMG runtime follow-up fixes)
+
+- ✅ Bundled default `workflows/` into packaged desktop resources and seeded bundled workflows into user data on first list load.
+- ✅ Added persistent startup diagnostics logging at `~/Library/Application Support/@flowstate/desktop/logs/startup.log` for initialize/startup steps and OpenCode startup failures.
+- ✅ Exposed OpenCode startup failure text via `opencode:status` (`startError`) and surfaced it in the renderer shell when OpenCode is unavailable.
+
 ### What's Working:
 - Electron main process with macOS window management
 - Preload script with secure IPC bridge (CommonJS for Electron compatibility)

@@ -412,6 +412,15 @@ function App() {
     return 'ready';
   }, [chatStatus, openCodeStatus]);
 
+  const openCodeStartupError = useMemo(() => {
+    const value = openCodeStatus?.startError;
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }, [openCodeStatus]);
+
   const navigation = useMemo(() => {
     if (!isOnMainPage) return null;
     return (
@@ -639,6 +648,12 @@ function App() {
             activityEvents={timeline}
           />
         )}
+
+        {showMainShell && openCodeStartupError && (!openCodeStatus?.running || !openCodeStatus?.healthy) ? (
+          <div className="mx-4 mt-3 rounded-lg border border-semantic-denied/30 bg-semantic-denied/10 px-3 py-2 text-sm text-semantic-denied">
+            OpenCode failed to start: {openCodeStartupError}
+          </div>
+        ) : null}
 
         <div className="flex-1 flex flex-col overflow-hidden">{mainContent}</div>
       </div>

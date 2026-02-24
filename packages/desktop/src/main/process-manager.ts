@@ -173,6 +173,7 @@ const redactSecrets = (input: string): string => {
 class ProcessManager {
   private instance: OpenCodeInstance | null = null;
   private isRunning: boolean = false;
+  private lastStartError: string | null = null;
   private activeSessionId: string | null = null;
   private eventStreamAbortController: AbortController | null = null;
   private eventStreamWebContents: Electron.WebContents | null = null;
@@ -1293,6 +1294,10 @@ class ProcessManager {
     return this.isRunning;
   }
 
+  get startError(): string | null {
+    return this.lastStartError;
+  }
+
   /**
    * Get the active session ID
    */
@@ -1811,6 +1816,8 @@ class ProcessManager {
       return;
     }
 
+    this.lastStartError = null;
+
     console.log('Starting OpenCode server...');
 
     try {
@@ -1862,6 +1869,7 @@ class ProcessManager {
 
     } catch (error) {
       console.error('Failed to start OpenCode:', error);
+      this.lastStartError = error instanceof Error ? error.message : String(error);
       this.isRunning = false;
       this.instance = null;
       throw error;

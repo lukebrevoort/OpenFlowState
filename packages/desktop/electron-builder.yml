@@ -15,6 +15,8 @@ files:
 extraResources:
   - from: ../../agents
     to: agents
+  - from: ../../workflows
+    to: workflows
   - from: ../mcp-gmail/dist
     to: mcp-servers/mcp-gmail/dist
   - from: ../mcp-gcal/dist

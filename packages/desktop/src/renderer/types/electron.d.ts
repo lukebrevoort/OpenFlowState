@@ -26,6 +26,7 @@ export interface OpenCodeStatus {
   sessionId: string | null;
   healthy: boolean;
   version?: string;
+  startError?: string | null;
 }
 
 export interface OpenCodeMessage {

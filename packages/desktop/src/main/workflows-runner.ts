@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import type { WebContents } from 'electron';
+import { app, type WebContents } from 'electron';
 import type { WorkflowDefinition, WorkflowRun } from '../renderer/types/electron';
 import { approvalPolicyStore } from './approval-policy-store.js';
 import { configStore } from './config-store.js';
@@ -114,6 +114,41 @@ const parseFrontmatter = (
 };
 
 class WorkflowsRunner {
+  private async seedBundledWorkflows(userDataDir: string): Promise<void> {
+    if (!app?.isPackaged) {
+      return;
+    }
+
+    const bundledWorkflowsDir = path.join(process.resourcesPath, 'workflows');
+    let entries: Array<{ name: string; isDirectory: () => boolean }> = [];
+
+    try {
+      entries = (await fs.readdir(bundledWorkflowsDir, { withFileTypes: true })).filter((entry) => entry.isDirectory());
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const sourceSkillPath = path.join(bundledWorkflowsDir, entry.name, 'SKILL.md');
+      const targetSkillPath = path.join(userDataDir, 'workflows', entry.name, 'SKILL.md');
+
+      try {
+        await fs.access(targetSkillPath);
+        continue;
+      } catch {
+        // Missing in user directory; seed from bundled defaults.
+      }
+
+      try {
+        const sourceRaw = await fs.readFile(sourceSkillPath, 'utf8');
+        await fs.mkdir(path.dirname(targetSkillPath), { recursive: true });
+        await fs.writeFile(targetSkillPath, sourceRaw, 'utf8');
+      } catch (error) {
+        console.warn(`[WorkflowsRunner] Failed to seed bundled workflow ${entry.name}:`, error);
+      }
+    }
+  }
+
   private async workflowIdExists(workflowId: string): Promise<boolean> {
     if (workflowsStore.getDefinition(workflowId)) {
       return true;
@@ -445,6 +480,10 @@ class WorkflowsRunner {
   async listDefinitions(): Promise<{ ok: true; data: WorkflowDefinition[] } | { ok: false; code: IpcErrorCode; message: string }>{
     const directory = processManager.getProjectDirectory?.() ?? undefined;
     const userDataDir = configStore.getDataDir();
+
+    if (userDataDir) {
+      await this.seedBundledWorkflows(userDataDir);
+    }
 
     const fromDisk = directory ? await this.loadWorkflowSkillsFromDir(directory) : [];
     const fromUserData = userDataDir ? await this.loadWorkflowSkillsFromDir(userDataDir) : [];

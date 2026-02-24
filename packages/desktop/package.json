@@ -82,6 +82,10 @@
         "to": "agents"
       },
       {
+        "from": "../../workflows",
+        "to": "workflows"
+      },
+      {
         "from": "../mcp-gmail/dist",
         "to": "mcp-servers/mcp-gmail/dist"
       },

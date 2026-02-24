@@ -76,6 +76,31 @@ const TERMINAL_COMMAND_PREFIX = 'opencode auth login';
 const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
+let startupLogPath: string | null = null;
+
+const serializeError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return `${error.message}${error.stack ? `\n${error.stack}` : ''}`;
+  }
+  return String(error);
+};
+
+const appendStartupLog = async (message: string, error?: unknown): Promise<void> => {
+  if (!startupLogPath) {
+    return;
+  }
+
+  const timestamp = new Date().toISOString();
+  const suffix = error === undefined ? '' : `\n${serializeError(error)}`;
+  const line = `[${timestamp}] ${message}${suffix}\n`;
+
+  try {
+    await fs.appendFile(startupLogPath, line, 'utf8');
+  } catch {
+    // Never block runtime on diagnostics logging failures.
+  }
+};
+
 const approvedEnsureFilePaths = new Set<string>();
 const approvedEnsureFileDirectories = new Set<string>();
 
@@ -251,24 +276,31 @@ async function initialize(): Promise<void> {
   // Load configuration
   await configStore.load();
   const dataDir = configStore.getDataDir();
+  startupLogPath = path.join(dataDir, 'logs', 'startup.log');
+  await appendStartupLog('FlowState initialize() started');
   process.env.FLOWSTATE_DATA_DIR = dataDir;
   userProfile.configure({ dataDir });
   console.log('Configuration loaded');
+  await appendStartupLog(`Configuration loaded (dataDir=${dataDir})`);
 
   // Initialize auth manager
   try {
     await authManager.initialize();
     console.log('Auth manager initialized');
+    await appendStartupLog('Auth manager initialized');
   } catch (error) {
     console.error('Failed to initialize auth manager:', error);
+    await appendStartupLog('Failed to initialize auth manager', error);
   }
 
   // Start pending auth watcher (for MCP tools that trigger auth flows)
   try {
     await startPendingAuthWatcher(dataDir);
     console.log('Pending auth watcher started');
+    await appendStartupLog('Pending auth watcher started');
   } catch (error) {
     console.error('Failed to start pending auth watcher:', error);
+    await appendStartupLog('Failed to start pending auth watcher', error);
   }
 
   // Set main window reference for OAuth server
@@ -280,13 +312,16 @@ async function initialize(): Promise<void> {
   try {
     await processManager.start();
     console.log('OpenCode server initialized');
+    await appendStartupLog('OpenCode server initialized');
 
     // Start event stream if we have a window
     if (mainWindow?.webContents) {
       await processManager.startEventStream(mainWindow.webContents);
+      await appendStartupLog('OpenCode event stream started');
     }
   } catch (error) {
     console.error('Failed to start OpenCode:', error);
+    await appendStartupLog('Failed to start OpenCode', error);
     // Continue anyway - the app can still function, just without AI
   }
 }
@@ -922,6 +957,7 @@ ipcMain.handle('opencode:status', async () => {
       sessionId: processManager.sessionId,
       healthy: health.healthy,
       version: health.version,
+      startError: processManager.startError,
     };
   } catch (error) {
     console.error('Failed to get OpenCode status:', error);
@@ -931,6 +967,7 @@ ipcMain.handle('opencode:status', async () => {
       sessionId: null,
       healthy: false,
       version: undefined,
+      startError: processManager.startError ?? (error instanceof Error ? error.message : String(error)),
     };
   }
 });
