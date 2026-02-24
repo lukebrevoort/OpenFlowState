@@ -19,12 +19,28 @@ extraResources:
     to: workflows
   - from: ../mcp-gmail/dist
     to: mcp-servers/mcp-gmail/dist
+  - from: ../mcp-gmail/package.json
+    to: node_modules/@flowstate/mcp-gmail/package.json
+  - from: ../mcp-gmail/dist
+    to: node_modules/@flowstate/mcp-gmail/dist
   - from: ../mcp-gcal/dist
     to: mcp-servers/mcp-gcal/dist
+  - from: ../mcp-gcal/package.json
+    to: node_modules/@flowstate/mcp-gcal/package.json
+  - from: ../mcp-gcal/dist
+    to: node_modules/@flowstate/mcp-gcal/dist
   - from: ../mcp-system/dist
     to: mcp-servers/mcp-system/dist
+  - from: ../mcp-system/package.json
+    to: node_modules/@flowstate/mcp-system/package.json
+  - from: ../mcp-system/dist
+    to: node_modules/@flowstate/mcp-system/dist
   - from: ../mcp-canvas/dist
     to: mcp-servers/mcp-canvas/dist
+  - from: ../mcp-canvas/package.json
+    to: node_modules/@flowstate/mcp-canvas/package.json
+  - from: ../mcp-canvas/dist
+    to: node_modules/@flowstate/mcp-canvas/dist
   - from: vendor/opencode/darwin-arm64/opencode
     to: bin/opencode-darwin-arm64
   - from: vendor/opencode/darwin-x64/opencode

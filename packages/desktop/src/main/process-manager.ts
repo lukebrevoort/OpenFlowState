@@ -181,6 +181,15 @@ class ProcessManager {
   private eventStreamWebContents: Electron.WebContents | null = null;
   private flowstatePrompt: string | null = null;
   private timelineInitialized = false;
+  private mcpDiagnostics: {
+    updatedAt: number;
+    errors: Record<string, string>;
+    skipped: Record<string, string>;
+  } = {
+    updatedAt: Date.now(),
+    errors: {},
+    skipped: {},
+  };
 
   private redactMcpConfigForLog(config: OpencodeMcpConfig): Record<string, unknown> {
     const redacted: Record<string, unknown> = {};
@@ -1768,6 +1777,31 @@ class ProcessManager {
     return exists ? serverPath : null;
   }
 
+  private resolveNpxRuntimeCommand(): string[] | null {
+    const envPath = process.env.PATH ?? '';
+    const pathEntries = envPath
+      .split(path.delimiter)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    const candidates: string[] = [];
+    for (const entry of pathEntries) {
+      candidates.push(path.join(entry, 'npx'));
+    }
+    candidates.push('/opt/homebrew/bin/npx', '/usr/local/bin/npx', '/usr/bin/npx');
+
+    const uniqueCandidates = Array.from(new Set(candidates));
+    for (const candidate of uniqueCandidates) {
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return [candidate, '-y'];
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return null;
+  }
+
   private resolveManagedMcpRuntime(
     serverName: 'mcp-gmail' | 'mcp-gcal' | 'mcp-system' | 'mcp-canvas',
     _serverPathFromConfiguredPackagesDir: string | null
@@ -1787,11 +1821,14 @@ class ProcessManager {
 
     const asarPath = path.join(app.getAppPath(), 'node_modules', '@flowstate', serverName, 'dist', 'index.js');
     const asarExists = fs.existsSync(asarPath);
+    const mcpRunnerPath = path.join(PROCESS_MANAGER_DIR, 'mcp-runner.js');
+    const mcpRunnerExists = fs.existsSync(mcpRunnerPath);
     console.log(`[ProcessManager] Packaged MCP runtime for ${serverName}: ${asarPath} (exists: ${asarExists})`);
+    console.log(`[ProcessManager] MCP runner path: ${mcpRunnerPath} (exists: ${mcpRunnerExists})`);
 
-    if (asarExists) {
+    if (asarExists && mcpRunnerExists) {
       return {
-        command: [process.execPath, asarPath],
+        command: [process.execPath, mcpRunnerPath, serverName],
         environment: { ELECTRON_RUN_AS_NODE: '1' },
       };
     }
@@ -1801,8 +1838,8 @@ class ProcessManager {
     if (!legacyExists) return null;
 
     return {
-      command: ['node', legacyServerPath],
-      environment: {},
+      command: [process.execPath, legacyServerPath],
+      environment: { ELECTRON_RUN_AS_NODE: '1' },
     };
   }
 
@@ -1947,6 +1984,8 @@ class ProcessManager {
       } satisfies McpLocalConfig;
       console.log('[ProcessManager] Gmail MCP configured with token and credentials');
     } else if (gmailToken && !gmailPath) {
+      const message = 'Gmail is authenticated but the packaged Gmail MCP runtime was not found.';
+      errors['flowstate-gmail'] = message;
       console.error('[ProcessManager] Gmail token found but MCP server not built!');
     }
 
@@ -2002,23 +2041,32 @@ class ProcessManager {
       } satisfies McpLocalConfig;
       console.log('[ProcessManager] Google Calendar MCP configured with token and credentials');
     } else if (gcalToken && !gcalPath) {
+      const message = 'Google Calendar is authenticated but the packaged Google Calendar MCP runtime was not found.';
+      errors['flowstate-gcal'] = message;
       console.error('[ProcessManager] GCal token found but MCP server not built!');
     }
+
+    const npxCommand = this.resolveNpxRuntimeCommand();
 
     // Notion MCP (remote package via npx)
     const notionToken = await authManager.getToken('notion');
     if (notionToken) {
-      mcpConfig['notion'] = {
-        type: 'local',
-        command: ['npx', '-y', '@notionhq/notion-mcp-server'],
-        environment: {
-          FLOWSTATE_DATA_DIR: flowstateDataDir,
-          NOTION_TOKEN: notionToken.accessToken,
-        },
-        enabled: true,
-        timeout: 10000,
-      } satisfies McpLocalConfig;
-      console.log('[ProcessManager] Notion MCP configured with token');
+      if (!npxCommand) {
+        errors['notion'] =
+          'Notion MCP requires npx, but no executable was found in PATH. Install Node.js (with npm/npx) or reconnect with a bundled MCP runtime.';
+      } else {
+        mcpConfig['notion'] = {
+          type: 'local',
+          command: [...npxCommand, '@notionhq/notion-mcp-server'],
+          environment: {
+            FLOWSTATE_DATA_DIR: flowstateDataDir,
+            NOTION_TOKEN: notionToken.accessToken,
+          },
+          enabled: true,
+          timeout: 10000,
+        } satisfies McpLocalConfig;
+        console.log('[ProcessManager] Notion MCP configured with token');
+      }
     }
 
     // Outlook MCP (OAuth + browser-session mode)
@@ -2028,17 +2076,22 @@ class ProcessManager {
       const useBrowserAuth = outlookAuthMode === 'browser';
 
       if (!useBrowserAuth && outlookToken.accessToken) {
-        mcpConfig['flowstate-outlook'] = {
-          type: 'local',
-          command: ['npx', '-y', '@softeria/ms-365-mcp-server', '--org-mode', '--preset', 'mail'],
-          environment: {
-            FLOWSTATE_DATA_DIR: flowstateDataDir,
-            MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
-          },
-          enabled: true,
-          timeout: 10000,
-        } satisfies McpLocalConfig;
-        console.log('[ProcessManager] Outlook MCP configured with OAuth token');
+        if (!npxCommand) {
+          errors['flowstate-outlook'] =
+            'Outlook OAuth MCP requires npx, but no executable was found in PATH. Install Node.js (with npm/npx) or use Browser Session mode.';
+        } else {
+          mcpConfig['flowstate-outlook'] = {
+            type: 'local',
+            command: [...npxCommand, '@softeria/ms-365-mcp-server', '--org-mode', '--preset', 'mail'],
+            environment: {
+              FLOWSTATE_DATA_DIR: flowstateDataDir,
+              MS365_MCP_OAUTH_TOKEN: outlookToken.accessToken,
+            },
+            enabled: true,
+            timeout: 10000,
+          } satisfies McpLocalConfig;
+          console.log('[ProcessManager] Outlook MCP configured with OAuth token');
+        }
       } else if (useBrowserAuth) {
         const outlookStorageStatePath = outlookToken.additionalData?.outlookStorageStatePath?.trim();
         const outlookMailboxUrl = outlookToken.additionalData?.outlookMailboxUrl?.trim();
@@ -2133,6 +2186,8 @@ class ProcessManager {
         `[ProcessManager] Canvas LMS MCP configured (${useBrowserAuth ? 'browser' : 'token'} auth)`
       );
     } else if (canvasToken && !canvasPath) {
+      const message = 'Canvas is authenticated but the packaged Canvas MCP runtime was not found.';
+      errors['flowstate-canvas'] = message;
       console.error('[ProcessManager] Canvas token found but MCP server not built!');
     }
 
@@ -2154,6 +2209,11 @@ class ProcessManager {
     if (Object.keys(errors).length > 0) {
       console.warn('[ProcessManager] MCP config validation errors:', JSON.stringify(errors, null, 2));
     }
+    this.mcpDiagnostics = {
+      updatedAt: Date.now(),
+      errors: { ...errors },
+      skipped: { ...skipped },
+    };
     return { config: mcpConfig, errors, skipped };
   }
 
@@ -2189,7 +2249,7 @@ class ProcessManager {
         JSON.stringify(this.redactMcpConfigForLog(mcpConfig), null, 2)
       );
       if (Object.keys(errors).length > 0) {
-        console.warn('[ProcessManager] Some custom MCP servers are invalid and were not added');
+        console.warn('[ProcessManager] Some MCP servers are invalid and were not added');
       }
 
       // Start OpenCode (both server and client)
@@ -2276,6 +2336,14 @@ class ProcessManager {
       console.error('[ProcessManager] Error getting MCP status:', error);
       return null;
     }
+  }
+
+  getMcpDiagnostics(): { updatedAt: number; errors: Record<string, string>; skipped: Record<string, string> } {
+    return {
+      updatedAt: this.mcpDiagnostics.updatedAt,
+      errors: { ...this.mcpDiagnostics.errors },
+      skipped: { ...this.mcpDiagnostics.skipped },
+    };
   }
 
   /**

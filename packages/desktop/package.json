@@ -80,7 +80,39 @@
     },
     "files": [
       "dist/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      {
+        "from": "../mcp-gmail/dist",
+        "to": "node_modules/@flowstate/mcp-gmail/dist"
+      },
+      {
+        "from": "../mcp-gmail/package.json",
+        "to": "node_modules/@flowstate/mcp-gmail/package.json"
+      },
+      {
+        "from": "../mcp-gcal/dist",
+        "to": "node_modules/@flowstate/mcp-gcal/dist"
+      },
+      {
+        "from": "../mcp-gcal/package.json",
+        "to": "node_modules/@flowstate/mcp-gcal/package.json"
+      },
+      {
+        "from": "../mcp-system/dist",
+        "to": "node_modules/@flowstate/mcp-system/dist"
+      },
+      {
+        "from": "../mcp-system/package.json",
+        "to": "node_modules/@flowstate/mcp-system/package.json"
+      },
+      {
+        "from": "../mcp-canvas/dist",
+        "to": "node_modules/@flowstate/mcp-canvas/dist"
+      },
+      {
+        "from": "../mcp-canvas/package.json",
+        "to": "node_modules/@flowstate/mcp-canvas/package.json"
+      }
     ],
     "extraResources": [
       {

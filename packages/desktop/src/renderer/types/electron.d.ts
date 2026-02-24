@@ -495,6 +495,12 @@ export interface McpServerStatus {
   error?: string;
 }
 
+export interface McpDiagnostics {
+  updatedAt: number;
+  errors: Record<string, string>;
+  skipped: Record<string, string>;
+}
+
 export interface IntegrationHealthCheckResult {
   ok: boolean;
   checkedAt: string;
@@ -623,6 +629,7 @@ export interface FlowstateAPI {
 
     // Get MCP server status
     status: () => Promise<Record<string, McpServerStatus> | null>;
+    diagnostics: () => Promise<McpDiagnostics>;
   };
 
   canvas: {
@@ -739,6 +746,7 @@ export interface FlowstateAPI {
   integrations: {
     listAuthStatuses: () => Promise<AuthStatus[]>;
     getMcpStatus: () => Promise<Record<string, McpServerStatus> | null>;
+    getMcpDiagnostics: () => Promise<McpDiagnostics>;
     reloadMcp: () => Promise<{ success: boolean; error?: string }>;
     healthCheck: (service: string) => Promise<IntegrationHealthCheckResult>;
     healthCheckOAuthBatch: () => Promise<OAuthBatchHealthCheckResult>;

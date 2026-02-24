@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand';
+import type { McpDiagnostics } from '../types/electron';
 
 export type AuthMethod = 'oauth' | 'api_token';
 
@@ -195,17 +196,45 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
     set({ isLoading: true });
     
     try {
-      // Get status from main process
-      const statuses = await window.flowstate.auth.getAllStatuses();
+      // Get auth and MCP status from main process
+      const [statuses, mcpStatuses, mcpDiagnostics] = await Promise.all([
+        window.flowstate.auth.getAllStatuses(),
+        window.flowstate.integrations.getMcpStatus().catch(() => null),
+        window.flowstate.integrations.getMcpDiagnostics().catch((): McpDiagnostics => ({
+          updatedAt: Date.now(),
+          errors: {},
+          skipped: {},
+        })),
+      ]);
+
+      const mcpNameByService: Record<string, string> = {
+        gmail: 'flowstate-gmail',
+        gcal: 'flowstate-gcal',
+        notion: 'notion',
+        outlook: 'flowstate-outlook',
+        canvas: 'flowstate-canvas',
+      };
       
       // Update integrations with status
       set((state) => ({
         integrations: state.integrations.map((integration) => {
           const status = statuses.find((s: { service: string }) => s.service === integration.id);
           const previouslyConnected = integration.status === 'connected';
+          const mcpName = mcpNameByService[integration.id];
+          const mcpStatus = mcpName && mcpStatuses ? mcpStatuses[mcpName] : undefined;
+          const mcpState = typeof mcpStatus?.status === 'string' ? mcpStatus.status : undefined;
+          const mcpError =
+            typeof mcpStatus?.error === 'string' && mcpStatus.error.trim().length > 0
+              ? mcpStatus.error.trim()
+              : undefined;
+          const mcpDiagnosticsMessage =
+            (mcpName ? mcpDiagnostics.errors[mcpName] : undefined) ??
+            (mcpName ? mcpDiagnostics.skipped[mcpName] : undefined);
 
           if (status) {
             const isConnected = Boolean(status.connected);
+            const mcpMissing = isConnected && Boolean(mcpName) && !mcpStatus;
+            const mcpFailed = mcpState === 'failed' || mcpState === 'disabled' || mcpMissing;
             const statusLastRefresh = status.lastRefresh
               ? new Date(status.lastRefresh)
               : undefined;
@@ -220,9 +249,11 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
               ...integration,
               status: isConnected ? 'connected' : 'disconnected',
               healthStatus: isConnected
-                ? previouslyConnected
-                  ? integration.healthStatus ?? 'unverified'
-                  : 'unverified'
+                ? mcpFailed
+                  ? 'needs_reconnect'
+                  : previouslyConnected
+                    ? integration.healthStatus ?? 'unverified'
+                    : 'unverified'
                 : undefined,
               isCheckingHealth: integration.isCheckingHealth ?? false,
               email: status.email ?? integration.email,
@@ -230,7 +261,9 @@ export const useIntegrationsStore = create<IntegrationsState>((set, get) => ({
               lastCheckedAt: isConnected ? integration.lastCheckedAt : undefined,
               healthMessage: isConnected ? integration.healthMessage : undefined,
               error:
-                isConnected && integration.healthStatus === 'needs_reconnect'
+                isConnected && mcpFailed
+                  ? `MCP unavailable${mcpError ? `: ${mcpError}` : mcpDiagnosticsMessage ? `: ${mcpDiagnosticsMessage}` : mcpMissing ? ': MCP did not register in this session.' : ''}`
+                  : isConnected && integration.healthStatus === 'needs_reconnect'
                   ? integration.error
                   : status.error,
               activeAuthMethod: status.authMethod,

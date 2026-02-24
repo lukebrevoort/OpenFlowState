@@ -360,6 +360,56 @@ const copyBundledAgentsToWorkspace = async (workspaceDir: string): Promise<{ sou
   };
 };
 
+const installWorkspaceOpencodeBinary = async (workspaceDir: string): Promise<string | null> => {
+  const bundledCliPath = await resolvePackagedOpencodeBinaryPath();
+  if (!bundledCliPath) {
+    return null;
+  }
+
+  const workspaceBinDir = path.join(workspaceDir, 'bin');
+  const workspaceCliPath = path.join(workspaceBinDir, 'opencode');
+
+  await fs.mkdir(workspaceBinDir, { recursive: true });
+  await fs.copyFile(bundledCliPath, workspaceCliPath);
+  await fs.chmod(workspaceCliPath, 0o755);
+
+  if (process.platform === 'darwin') {
+    try {
+      await execFileAsync('/usr/bin/xattr', ['-d', 'com.apple.quarantine', workspaceCliPath]);
+    } catch {
+      // Attribute may be absent; ignore.
+    }
+    try {
+      await execFileAsync('/usr/bin/xattr', ['-d', 'com.apple.provenance', workspaceCliPath]);
+    } catch {
+      // Attribute may be absent; ignore.
+    }
+    try {
+      await execFileAsync('/usr/bin/codesign', [
+        '--force',
+        '--sign',
+        '-',
+        '--timestamp=none',
+        workspaceCliPath,
+      ]);
+    } catch (error) {
+      await appendStartupLog('Failed to ad-hoc sign packaged OpenCode binary', error);
+    }
+  }
+
+  const existingPathEntries = process.env.PATH?.split(path.delimiter).filter((entry) => entry.trim().length > 0) ?? [];
+  const fallbackPathEntries = ['/opt/homebrew/bin', '/usr/local/bin'];
+  const mergedPathEntries = [workspaceBinDir, ...existingPathEntries];
+  for (const fallbackEntry of fallbackPathEntries) {
+    if (!mergedPathEntries.includes(fallbackEntry)) {
+      mergedPathEntries.push(fallbackEntry);
+    }
+  }
+  process.env.PATH = mergedPathEntries.join(path.delimiter);
+
+  return workspaceCliPath;
+};
+
 const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> => {
   if (!isPackagedBuild) {
     return;
@@ -371,9 +421,9 @@ const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> =>
   const { source, agentsDir } = await copyBundledAgentsToWorkspace(workspaceDir);
   process.env.FLOWSTATE_AGENTS_DIR = agentsDir;
 
-  const bundledCliPath = await resolvePackagedOpencodeBinaryPath();
-  if (bundledCliPath) {
-    process.env.OPENCODE_BIN = bundledCliPath;
+  const workspaceCliPath = await installWorkspaceOpencodeBinary(workspaceDir);
+  if (workspaceCliPath) {
+    process.env.OPENCODE_BIN = workspaceCliPath;
   }
 
   process.chdir(workspaceDir);
@@ -383,6 +433,7 @@ const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> =>
   await appendStartupLog(`Copied packaged agents from ${source} to ${agentsDir}`);
   await appendStartupLog(`FLOWSTATE_AGENTS_DIR=${agentsDir}`);
   await appendStartupLog(`OPENCODE_BIN=${process.env.OPENCODE_BIN ?? '(not set)'}`);
+  await appendStartupLog(`PATH=${process.env.PATH ?? '(unset)'}`);
   await appendStartupLog(`process.cwd()=${process.cwd()}`);
 };
 
@@ -1044,6 +1095,10 @@ ipcMain.handle('mcp:status', async () => {
   }
 });
 
+ipcMain.handle('mcp:diagnostics', async () => {
+  return processManager.getMcpDiagnostics();
+});
+
 // ============================================================================
 // OpenCode Integration
 // ============================================================================
@@ -1329,6 +1384,10 @@ ipcMain.handle('integrations:getMcpStatus', async () => {
     console.error('[Integrations] Error getting MCP status:', error);
     return null;
   }
+});
+
+ipcMain.handle('integrations:getMcpDiagnostics', async () => {
+  return processManager.getMcpDiagnostics();
 });
 
 ipcMain.handle('integrations:reloadMcp', async () => {

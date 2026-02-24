@@ -221,6 +221,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
 
     // Get MCP server status
     status: () => ipcRenderer.invoke('mcp:status'),
+    diagnostics: () => ipcRenderer.invoke('mcp:diagnostics'),
   },
 
   canvas: {
@@ -358,6 +359,7 @@ const flowstateAPI: FlowstateAPIDefinition = {
   integrations: {
     listAuthStatuses: () => ipcRenderer.invoke('integrations:listAuthStatuses'),
     getMcpStatus: () => ipcRenderer.invoke('integrations:getMcpStatus'),
+    getMcpDiagnostics: () => ipcRenderer.invoke('integrations:getMcpDiagnostics'),
     reloadMcp: () => ipcRenderer.invoke('integrations:reloadMcp'),
     healthCheck: (service: string) => ipcRenderer.invoke('integrations:healthCheck', service),
     healthCheckOAuthBatch: () => ipcRenderer.invoke('integrations:healthCheckOAuthBatch'),
