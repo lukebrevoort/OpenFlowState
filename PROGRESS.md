@@ -36,6 +36,15 @@ Phase 8 execution is complete, including implementation and verification through
 - ✅ Added persistent startup diagnostics logging at `~/Library/Application Support/@flowstate/desktop/logs/startup.log` for initialize/startup steps and OpenCode startup failures.
 - ✅ Exposed OpenCode startup failure text via `opencode:status` (`startError`) and surfaced it in the renderer shell when OpenCode is unavailable.
 
+---
+
+## Tasks Completed (Feb 23, 2026 - DMG startup path + browser runtime hardening)
+
+- ✅ Added packaged-safe OpenCode CLI resolution (`opencode-cli.ts`) that searches known binary paths, validates executability, and patches runtime PATH before SDK startup.
+- ✅ Updated OpenCode model listing IPC to use resolved CLI path instead of assuming `opencode` is already on PATH.
+- ✅ Added shared Playwright runtime loader (`playwright-runtime.ts`) with clearer missing-runtime and missing-Chromium-binaries guidance.
+- ✅ Updated Canvas browser login, Outlook browser session flows, and Canvas browser health checks to use shared Playwright runtime loading.
+
 ### What's Working:
 - Electron main process with macOS window management
 - Preload script with secure IPC bridge (CommonJS for Electron compatibility)

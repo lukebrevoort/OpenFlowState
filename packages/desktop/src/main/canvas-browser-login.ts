@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { createRequire } from 'node:module';
+import { loadChromiumRuntime } from './playwright-runtime.js';
 
 const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '');
 
@@ -15,20 +15,7 @@ export async function runCanvasBrowserLogin(options: {
   const timeoutMs = options.timeoutMs ?? 300000;
   const confirmationFilePath = options.confirmationFilePath;
 
-  const require = createRequire(import.meta.url);
-  let chromium: any;
-  try {
-    const playwright = require('playwright');
-    chromium = playwright?.chromium;
-  } catch {
-    throw new Error(
-      "Playwright is required for browser login but isn't installed. Install it (e.g. `pnpm add -w playwright`) and re-run."
-    );
-  }
-
-  if (!chromium) {
-    throw new Error('Playwright chromium runtime not available.');
-  }
+  const chromium = loadChromiumRuntime('Canvas browser login');
 
   await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
 

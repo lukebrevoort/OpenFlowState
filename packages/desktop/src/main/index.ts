@@ -67,6 +67,7 @@ import { runIntegrationHealthCheck, runOAuthBatchHealthCheck } from './integrati
 import { validateLocalStudyMaterialSource } from './study-material-source-validation.js';
 import { classifyStudyMaterialFallback } from './study-material-fallback.js';
 import { evaluateStudyMaterialQualityGate } from './study-material-quality-gate.js';
+import { ensureOpencodeCliAvailable } from './opencode-cli.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -277,6 +278,7 @@ async function initialize(): Promise<void> {
   await configStore.load();
   const dataDir = configStore.getDataDir();
   startupLogPath = path.join(dataDir, 'logs', 'startup.log');
+  await fs.mkdir(path.dirname(startupLogPath), { recursive: true });
   await appendStartupLog('FlowState initialize() started');
   process.env.FLOWSTATE_DATA_DIR = dataDir;
   userProfile.configure({ dataDir });
@@ -2412,6 +2414,7 @@ ipcMain.handle('workflows:delete', async (_event, workflowId: string) => {
 
 ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
   try {
+    const opencodeCliPath = ensureOpencodeCliAvailable();
     const args = ['models'];
     if (typeof provider === 'string') {
       const normalizedProvider = provider.trim();
@@ -2422,7 +2425,7 @@ ipcMain.handle('opencode:listModels', async (_event, provider?: string) => {
         args.push(normalizedProvider);
       }
     }
-    const { stdout } = await execFileAsync('opencode', args);
+    const { stdout } = await execFileAsync(opencodeCliPath, args);
     const models = stdout
       .split('\n')
       .map((line) => line.trim())

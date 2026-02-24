@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { createRequire } from 'node:module';
+import { loadChromiumRuntime } from './playwright-runtime.js';
 
 const DEFAULT_OUTLOOK_MAILBOX_URL = 'https://outlook.office.com/mail/';
 
@@ -23,12 +23,6 @@ export type OutlookComposeResult = {
   ok: boolean;
   message?: string;
   draftOnly: boolean;
-};
-
-type BrowserRuntime = {
-  chromium: {
-    launch: (options: { headless: boolean }) => Promise<any>;
-  };
 };
 
 const normalizeMailboxUrl = (input?: string): string => {
@@ -86,22 +80,6 @@ const OUTLOOK_MESSAGE_BODY_SELECTORS = [
 ] as const;
 
 const MAX_BODY_HTML_LENGTH = 200_000;
-
-const loadBrowserRuntime = (): BrowserRuntime => {
-  const require = createRequire(import.meta.url);
-  try {
-    const playwright = require('playwright');
-    const chromium = playwright?.chromium;
-    if (!chromium) {
-      throw new Error('Playwright chromium runtime is unavailable.');
-    }
-    return { chromium } as BrowserRuntime;
-  } catch {
-    throw new Error(
-      "Playwright is required for Outlook browser session mode but isn't installed. Install it (e.g. `pnpm add -w playwright`) and re-run."
-    );
-  }
-};
 
 const isLikelyLoginUrl = (url: string): boolean => {
   const lower = url.toLowerCase();
@@ -442,7 +420,7 @@ export async function runOutlookBrowserLogin(options: {
   const storageStatePath = options.storageStatePath;
   const timeoutMs = options.timeoutMs ?? 300000;
   const confirmationFilePath = options.confirmationFilePath;
-  const { chromium } = loadBrowserRuntime();
+  const chromium = loadChromiumRuntime('Outlook browser session');
 
   await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
 
@@ -514,7 +492,7 @@ export async function checkOutlookBrowserSession(options: {
     };
   }
 
-  const { chromium } = loadBrowserRuntime();
+  const chromium = loadChromiumRuntime('Outlook browser session');
   let browser: any | null = null;
   let context: any | null = null;
   let page: any | null = null;
@@ -579,7 +557,7 @@ export async function readOutlookInboxWithBrowserSession(options: {
     };
   }
 
-  const { chromium } = loadBrowserRuntime();
+  const chromium = loadChromiumRuntime('Outlook browser session');
   let browser: any | null = null;
   let context: any | null = null;
   let page: any | null = null;
@@ -656,7 +634,7 @@ export async function readOutlookMessageBodyWithBrowserSession(options: {
     };
   }
 
-  const { chromium } = loadBrowserRuntime();
+  const chromium = loadChromiumRuntime('Outlook browser session');
   let browser: any | null = null;
   let context: any | null = null;
   let page: any | null = null;
@@ -818,7 +796,7 @@ export async function composeOutlookMessageWithBrowserSession(options: {
     };
   }
 
-  const { chromium } = loadBrowserRuntime();
+  const chromium = loadChromiumRuntime('Outlook browser session');
   let browser: any | null = null;
   let context: any | null = null;
   let page: any | null = null;

@@ -1,8 +1,8 @@
 import fs from 'fs/promises';
-import { createRequire } from 'node:module';
 import { authManager } from './auth-manager.js';
 import { oauthServer } from './oauth-server.js';
 import { checkOutlookBrowserSession } from './outlook-browser-session.js';
+import { loadChromiumRuntime } from './playwright-runtime.js';
 
 export type IntegrationHealthCheckResult = {
   ok: boolean;
@@ -325,17 +325,11 @@ async function checkCanvasBrowser(): Promise<IntegrationHealthCheckResult> {
     return fail('Canvas browser session file is invalid. Run browser login again.');
   }
 
-  const require = createRequire(import.meta.url);
-  let chromium: any;
+  let chromium: ReturnType<typeof loadChromiumRuntime>;
   try {
-    const playwright = require('playwright');
-    chromium = playwright?.chromium;
-  } catch {
-    return fail("Playwright is required for Canvas browser checks but isn't installed.");
-  }
-
-  if (!chromium) {
-    return fail('Playwright chromium runtime is unavailable for Canvas checks.');
+    chromium = loadChromiumRuntime('Canvas browser health check');
+  } catch (error) {
+    return fail(extractErrorMessage(error));
   }
 
   const baseUrl = normalizeBaseUrl(canvasApiUrl);

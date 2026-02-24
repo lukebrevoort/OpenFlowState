@@ -32,6 +32,7 @@ import { clampText, parseResponseHeader, requiresUserInput } from './workflow-re
 import type { TaskRunRecord } from './task-types.js';
 import { heuristicTaskTitleFromPrompt, sanitizeTaskTitle, shouldAttemptLlmTitle } from './task-title.js';
 import { buildFlowstatePromptCandidatePaths } from './process-manager-paths.js';
+import { ensureOpencodeCliAvailable } from './opencode-cli.js';
 
 // Use the return type of createOpencode for proper typing
 type OpenCodeInstance = Awaited<ReturnType<typeof createOpencode>>;
@@ -1821,6 +1822,9 @@ class ProcessManager {
     console.log('Starting OpenCode server...');
 
     try {
+      const opencodeCliPath = ensureOpencodeCliAvailable();
+      console.log(`[ProcessManager] Using OpenCode CLI at: ${opencodeCliPath}`);
+
       const selectedModel = configStore.get()?.provider.default ?? 'opencode/grok-code';
       await this.updateAgentModelFiles(selectedModel);
 
