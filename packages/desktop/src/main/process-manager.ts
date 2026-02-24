@@ -175,6 +175,7 @@ class ProcessManager {
   private instance: OpenCodeInstance | null = null;
   private isRunning: boolean = false;
   private lastStartError: string | null = null;
+  private packagedWorkspaceDirectory: string | null = null;
   private activeSessionId: string | null = null;
   private eventStreamAbortController: AbortController | null = null;
   private eventStreamWebContents: Electron.WebContents | null = null;
@@ -967,6 +968,32 @@ class ProcessManager {
     };
   }
 
+  private summarizePromptData(data: unknown): string {
+    const record = this.asRecord(data);
+    if (!record) return '[non-object payload]';
+
+    const keys = Object.keys(record);
+    const summary: Record<string, unknown> = { keys };
+
+    if (Array.isArray(record.parts)) {
+      summary.partsCount = record.parts.length;
+      summary.partTypes = record.parts
+        .map((part) => this.asRecord(part)?.type)
+        .filter((value) => typeof value === 'string')
+        .slice(0, 12);
+    }
+
+    if (Array.isArray(record.messages)) {
+      summary.messagesCount = record.messages.length;
+      const last = this.asRecord(record.messages[record.messages.length - 1]);
+      const info = this.asRecord(last?.info);
+      summary.lastMessageRole = typeof info?.role === 'string' ? info.role : undefined;
+      summary.lastMessageId = typeof info?.id === 'string' ? info.id : undefined;
+    }
+
+    return JSON.stringify(summary);
+  }
+
   private async recoverLatestAssistantPayload(sessionId: string): Promise<{
     parts: Array<{ type: string; text?: string }>;
     text: string;
@@ -977,37 +1004,119 @@ class ProcessManager {
     }
 
     try {
-      const history = await this.instance.client.session.messages({
-        path: { id: sessionId },
-      });
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-      if (history.error || !Array.isArray(history.data)) {
-        return null;
-      }
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const history = await this.instance.client.session.messages({
+          path: { id: sessionId },
+        });
 
-      for (let i = history.data.length - 1; i >= 0; i -= 1) {
-        const message = this.asRecord(history.data[i]);
-        if (!message) continue;
-        const info = this.asRecord(message.info);
-        const role = typeof info?.role === 'string' ? info.role : undefined;
-        if (role !== 'assistant') continue;
+        if (!history.error && Array.isArray(history.data)) {
+          for (let i = history.data.length - 1; i >= 0; i -= 1) {
+            const message = this.asRecord(history.data[i]);
+            if (!message) continue;
+            const info = this.asRecord(message.info);
+            const role = typeof info?.role === 'string' ? info.role : undefined;
+            if (role !== 'assistant') continue;
 
-        const parts = this.normalizeResponseParts(message.parts ?? message.content);
-        const text = parts
-          .filter((part) => part.type === 'text' || part.type === 'output_text')
-          .map((part) => part.text ?? '')
-          .join('');
+            const parts = this.normalizeResponseParts(message.parts ?? message.content);
+            const text = parts
+              .filter((part) => part.type === 'text' || part.type === 'output_text')
+              .map((part) => part.text ?? '')
+              .join('');
 
-        if (text.trim().length > 0 || parts.length > 0) {
-          return {
-            parts,
-            text,
-            ...(typeof info?.id === 'string' ? { assistantMessageId: info.id } : {}),
-          };
+            if (text.trim().length > 0 || parts.length > 0) {
+              return {
+                parts,
+                text,
+                ...(typeof info?.id === 'string' ? { assistantMessageId: info.id } : {}),
+              };
+            }
+          }
+        }
+
+        if (attempt < 9) {
+          await sleep(150);
         }
       }
     } catch (error) {
       console.warn('[ProcessManager] Failed to recover latest assistant payload:', error);
+    }
+
+    return null;
+  }
+
+  private async waitForAssistantPayload(args: {
+    sessionId: string;
+    startedAtMs: number;
+    previousAssistantMessageId?: string;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }): Promise<{
+    parts: Array<{ type: string; text?: string }>;
+    text: string;
+    assistantMessageId?: string;
+  } | null> {
+    if (!this.instance?.client) return null;
+
+    const timeoutMs = args.timeoutMs ?? 45000;
+    const deadline = Date.now() + timeoutMs;
+
+    const parseTs = (value: unknown): number | null => {
+      if (typeof value !== 'string') return null;
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    while (Date.now() < deadline) {
+      if (args.signal?.aborted) {
+        return null;
+      }
+
+      try {
+        const history = await this.instance.client.session.messages({
+          path: { id: args.sessionId },
+        });
+
+        if (!history.error && Array.isArray(history.data)) {
+          for (let i = history.data.length - 1; i >= 0; i -= 1) {
+            const message = this.asRecord(history.data[i]);
+            if (!message) continue;
+
+            const info = this.asRecord(message.info);
+            const role = typeof info?.role === 'string' ? info.role : undefined;
+            if (role !== 'assistant') continue;
+
+            const id = typeof info?.id === 'string' ? info.id : undefined;
+            if (id && args.previousAssistantMessageId && id === args.previousAssistantMessageId) {
+              continue;
+            }
+
+            const createdAtMs = parseTs(info?.createdAt);
+            if (createdAtMs !== null && createdAtMs < args.startedAtMs - 1000) {
+              continue;
+            }
+
+            const parts = this.normalizeResponseParts(message.parts ?? message.content);
+            const text = parts
+              .filter((part) => part.type === 'text' || part.type === 'output_text')
+              .map((part) => part.text ?? '')
+              .join('');
+
+            if (text.trim().length > 0 || parts.length > 0) {
+              return {
+                parts,
+                text,
+                ...(id ? { assistantMessageId: id } : {}),
+              };
+            }
+          }
+        }
+      } catch {
+        // Keep polling until timeout.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
     return null;
@@ -1471,6 +1580,11 @@ class ProcessManager {
     return this.lastStartError;
   }
 
+  setPackagedWorkspaceDirectory(directory: string | null): void {
+    const normalized = typeof directory === 'string' ? directory.trim() : '';
+    this.packagedWorkspaceDirectory = normalized.length > 0 ? path.resolve(normalized) : null;
+  }
+
   /**
    * Get the active session ID
    */
@@ -1494,7 +1608,13 @@ class ProcessManager {
         ? path.resolve(appPath, '../../..')
         : path.resolve(appPath, '..');
     } else {
-      packagesDir = path.join(process.resourcesPath, 'mcp-servers');
+      const asarPackagesDir = path.join(appPath, 'node_modules', '@flowstate');
+      const legacyPackagesDir = path.join(process.resourcesPath, 'mcp-servers');
+      packagesDir = fs.existsSync(asarPackagesDir) ? asarPackagesDir : legacyPackagesDir;
+      console.log('[ProcessManager] MCP packages (asar) exists:', fs.existsSync(asarPackagesDir));
+      if (packagesDir === legacyPackagesDir) {
+        console.log('[ProcessManager] Falling back to legacy extraResources MCP directory');
+      }
     }
     
     console.log('[ProcessManager] App path:', appPath);
@@ -1509,7 +1629,7 @@ class ProcessManager {
     const appPath = app.getAppPath();
 
     if (!isDev) {
-      return appPath;
+      return this.packagedWorkspaceDirectory ?? appPath;
     }
 
     const isDistMain = appPath.endsWith(`${path.sep}dist${path.sep}main`);
@@ -1648,6 +1768,44 @@ class ProcessManager {
     return exists ? serverPath : null;
   }
 
+  private resolveManagedMcpRuntime(
+    serverName: 'mcp-gmail' | 'mcp-gcal' | 'mcp-system' | 'mcp-canvas',
+    _serverPathFromConfiguredPackagesDir: string | null
+  ): { command: string[]; environment: Record<string, string> } | null {
+    const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+    const legacyServerPath = path.join(process.resourcesPath, 'mcp-servers', serverName, 'dist', 'index.js');
+    const legacyExists = fs.existsSync(legacyServerPath);
+
+    if (isDev) {
+      if (!_serverPathFromConfiguredPackagesDir) return null;
+      return {
+        command: ['node', _serverPathFromConfiguredPackagesDir],
+        environment: {},
+      };
+    }
+
+    const asarPath = path.join(app.getAppPath(), 'node_modules', '@flowstate', serverName, 'dist', 'index.js');
+    const asarExists = fs.existsSync(asarPath);
+    console.log(`[ProcessManager] Packaged MCP runtime for ${serverName}: ${asarPath} (exists: ${asarExists})`);
+
+    if (asarExists) {
+      return {
+        command: [process.execPath, asarPath],
+        environment: { ELECTRON_RUN_AS_NODE: '1' },
+      };
+    }
+
+    console.log(`[ProcessManager] Legacy MCP runtime for ${serverName}: ${legacyServerPath} (exists: ${legacyExists})`);
+
+    if (!legacyExists) return null;
+
+    return {
+      command: ['node', legacyServerPath],
+      environment: {},
+    };
+  }
+
   /**
    * Build MCP configuration with auth tokens from auth-manager
    */
@@ -1771,12 +1929,14 @@ class ProcessManager {
     const gmailToken = await authManager.getToken('gmail');
     const gmailCreds = await authManager.getClientCredentials('gmail');
     const gmailPath = this.verifyMcpServer(packagesDir, 'mcp-gmail');
-    if (gmailToken && gmailPath) {
+    const gmailRuntime = this.resolveManagedMcpRuntime('mcp-gmail', gmailPath);
+    if (gmailToken && gmailRuntime) {
       mcpConfig['flowstate-gmail'] = {
         type: 'local',
-        command: ['node', gmailPath],
+        command: gmailRuntime.command,
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          ...gmailRuntime.environment,
           GMAIL_ACCESS_TOKEN: gmailToken.accessToken,
           GMAIL_REFRESH_TOKEN: gmailToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gmailCreds?.clientId || '',
@@ -1794,7 +1954,8 @@ class ProcessManager {
     const gcalToken = await authManager.getToken('gcal');
     const gcalCreds = await authManager.getClientCredentials('gcal');
     const gcalPath = this.verifyMcpServer(packagesDir, 'mcp-gcal');
-    if (gcalToken && gcalPath) {
+    const gcalRuntime = this.resolveManagedMcpRuntime('mcp-gcal', gcalPath);
+    if (gcalToken && gcalRuntime) {
       const gcalPrefs = loadedConfig.integrations?.gcal;
       const readCalendarIds = Array.isArray(gcalPrefs?.readCalendarIds)
         ? gcalPrefs?.readCalendarIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
@@ -1821,9 +1982,10 @@ class ProcessManager {
 
       mcpConfig['flowstate-gcal'] = {
         type: 'local',
-        command: ['node', gcalPath],
+        command: gcalRuntime.command,
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          ...gcalRuntime.environment,
           GCAL_ACCESS_TOKEN: gcalToken.accessToken,
           GCAL_REFRESH_TOKEN: gcalToken.refreshToken || '',
           GOOGLE_CLIENT_ID: gcalCreds?.clientId || '',
@@ -1882,17 +2044,28 @@ class ProcessManager {
         const outlookMailboxUrl = outlookToken.additionalData?.outlookMailboxUrl?.trim();
         const outlookWriteEnabled = outlookToken.additionalData?.outlookWriteEnabled === 'true';
         const outlookBrowserMcpPath = path.join(PROCESS_MANAGER_DIR, 'outlook-browser-mcp.js');
+        const packagedOutlookBrowserMcpPath = path.join(app.getAppPath(), 'dist', 'main', 'outlook-browser-mcp.js');
+        const isPackagedBuild = app.isPackaged && process.env.NODE_ENV !== 'development';
+        const packagedOutlookExists = isPackagedBuild && fs.existsSync(packagedOutlookBrowserMcpPath);
+        const outlookCommand = packagedOutlookExists
+          ? [process.execPath, packagedOutlookBrowserMcpPath]
+          : ['node', outlookBrowserMcpPath];
+        const outlookRuntimeEnv: Record<string, string> = {};
+        if (packagedOutlookExists) {
+          outlookRuntimeEnv.ELECTRON_RUN_AS_NODE = '1';
+        }
 
         if (!outlookStorageStatePath) {
           console.warn('[ProcessManager] Outlook browser mode missing storage state path; MCP not configured');
-        } else if (!fs.existsSync(outlookBrowserMcpPath)) {
+        } else if (!packagedOutlookExists && !fs.existsSync(outlookBrowserMcpPath)) {
           console.warn('[ProcessManager] Outlook browser MCP executable missing; run desktop main build');
         } else {
           mcpConfig['flowstate-outlook'] = {
             type: 'local',
-            command: ['node', outlookBrowserMcpPath],
+            command: outlookCommand,
             environment: {
               FLOWSTATE_DATA_DIR: flowstateDataDir,
+              ...outlookRuntimeEnv,
               OUTLOOK_AUTH_MODE: 'browser',
               OUTLOOK_STORAGE_STATE_PATH: outlookStorageStatePath,
               OUTLOOK_BROWSER_WRITE_ENABLED: outlookWriteEnabled ? 'true' : 'false',
@@ -1910,14 +2083,16 @@ class ProcessManager {
 
     // System MCP (no auth needed)
     const systemPath = this.verifyMcpServer(packagesDir, 'mcp-system');
-    if (systemPath) {
+    const systemRuntime = this.resolveManagedMcpRuntime('mcp-system', systemPath);
+    if (systemRuntime) {
       const systemNotificationsEnabled =
         this.getApprovalsNotificationEnabled() || this.getTaskCompletionNotificationEnabled();
       mcpConfig['flowstate-system'] = {
         type: 'local',
-        command: ['node', systemPath],
+        command: systemRuntime.command,
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          ...systemRuntime.environment,
           FLOWSTATE_NOTIFY_SYSTEM_ENABLED: String(systemNotificationsEnabled),
         },
         enabled: true,
@@ -1929,15 +2104,17 @@ class ProcessManager {
     // Canvas LMS MCP (token or browser session auth)
     const canvasToken = await authManager.getToken('canvas');
     const canvasPath = this.verifyMcpServer(packagesDir, 'mcp-canvas');
-    if (canvasToken && canvasPath) {
+    const canvasRuntime = this.resolveManagedMcpRuntime('mcp-canvas', canvasPath);
+    if (canvasToken && canvasRuntime) {
       const canvasAuthMode = canvasToken.additionalData?.canvasAuthMode;
       const useBrowserAuth = canvasAuthMode === 'browser';
 
       mcpConfig['flowstate-canvas'] = {
         type: 'local',
-        command: ['node', canvasPath],
+        command: canvasRuntime.command,
         environment: {
           FLOWSTATE_DATA_DIR: flowstateDataDir,
+          ...canvasRuntime.environment,
           CANVAS_API_URL: canvasToken.additionalData?.canvasApiUrl || '',
           CANVAS_AUTH_MODE: useBrowserAuth ? 'browser' : 'token',
           ...(useBrowserAuth
@@ -1996,6 +2173,10 @@ class ProcessManager {
     try {
       const opencodeCliPath = ensureOpencodeCliAvailable();
       console.log(`[ProcessManager] Using OpenCode CLI at: ${opencodeCliPath}`);
+      console.log(`[ProcessManager] OpenCode startup cwd: ${process.cwd()}`);
+      if (this.packagedWorkspaceDirectory) {
+        console.log(`[ProcessManager] Packaged workspace directory: ${this.packagedWorkspaceDirectory}`);
+      }
 
       const selectedModel = configStore.get()?.provider.default ?? 'opencode/grok-code';
       await this.updateAgentModelFiles(selectedModel);
@@ -2288,6 +2469,8 @@ class ProcessManager {
 
     const systemPrompt = await this.getSystemPrompt();
     this.registerTaskSession(sessionId, content);
+    const previousAssistant = await this.recoverLatestAssistantPayload(sessionId);
+    const promptStartedAtMs = Date.now();
 
     try {
       const result = await this.promptWithReliabilityPolicy({
@@ -2316,6 +2499,18 @@ class ProcessManager {
       if (extracted.text.trim().length === 0) {
         const recovered = await this.recoverLatestAssistantPayload(sessionId);
         if (recovered) extracted = recovered;
+      }
+      if (extracted.text.trim().length === 0) {
+        const waited = await this.waitForAssistantPayload({
+          sessionId,
+          startedAtMs: promptStartedAtMs,
+          previousAssistantMessageId: previousAssistant?.assistantMessageId,
+          timeoutMs: 60000,
+        });
+        if (waited) extracted = waited;
+      }
+      if (extracted.text.trim().length === 0 && extracted.parts.length === 0) {
+        throw new Error('OpenCode returned no assistant output for this prompt');
       }
 
       return {
@@ -2365,6 +2560,9 @@ class ProcessManager {
       webContents.send('opencode:progress', { status: 'thinking', sessionId: this.activeSessionId });
     }
 
+    const previousAssistant = await this.recoverLatestAssistantPayload(this.activeSessionId!);
+    const promptStartedAtMs = Date.now();
+
     try {
       const result = await this.promptWithReliabilityPolicy({
         sessionId: this.activeSessionId!,
@@ -2396,6 +2594,18 @@ class ProcessManager {
       if (extracted.text.trim().length === 0) {
         const recovered = await this.recoverLatestAssistantPayload(this.activeSessionId!);
         if (recovered) extracted = recovered;
+      }
+      if (extracted.text.trim().length === 0) {
+        const waited = await this.waitForAssistantPayload({
+          sessionId: this.activeSessionId!,
+          startedAtMs: promptStartedAtMs,
+          previousAssistantMessageId: previousAssistant?.assistantMessageId,
+          timeoutMs: 60000,
+        });
+        if (waited) extracted = waited;
+      }
+      if (extracted.text.trim().length === 0 && extracted.parts.length === 0) {
+        throw new Error('OpenCode returned no assistant output for this prompt');
       }
 
       const parts = extracted.parts;
@@ -2534,6 +2744,9 @@ class ProcessManager {
     // Notify renderer that we're processing
     webContents.send('opencode:progress', { status: 'thinking', sessionId: requestSessionId });
 
+    const previousAssistant = await this.recoverLatestAssistantPayload(requestSessionId);
+    const promptStartedAtMs = Date.now();
+
     try {
       // Send the prompt
       console.log('[ProcessManager] Calling session.prompt()...');
@@ -2567,6 +2780,23 @@ class ProcessManager {
       if (extracted.text.trim().length === 0) {
         const recovered = await this.recoverLatestAssistantPayload(requestSessionId);
         if (recovered) extracted = recovered;
+      }
+      if (extracted.text.trim().length === 0) {
+        const waited = await this.waitForAssistantPayload({
+          sessionId: requestSessionId,
+          startedAtMs: promptStartedAtMs,
+          previousAssistantMessageId: previousAssistant?.assistantMessageId,
+          signal: promptAbortController.signal,
+          timeoutMs: 60000,
+        });
+        if (waited) extracted = waited;
+      }
+      if (extracted.text.trim().length === 0 && extracted.parts.length === 0) {
+        throw new Error('OpenCode returned no assistant output for this prompt');
+      }
+
+      if (extracted.text.trim().length === 0) {
+        console.warn('[ProcessManager] Empty assistant text after prompt extraction', this.summarizePromptData(result.data));
       }
 
       const parts = extracted.parts;

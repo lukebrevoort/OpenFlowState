@@ -16,7 +16,8 @@ import {
   runOutlookBrowserLogin,
 } from './outlook-browser-session.js';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { inspect, promisify } from 'node:util';
+import fsSync from 'node:fs';
 import { configStore } from './config-store.js';
 import { processManager } from './process-manager.js';
 import { timelineStore } from './timeline-store.js';
@@ -78,6 +79,19 @@ const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
 const ALLOWED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
 let startupLogPath: string | null = null;
+let runtimeLogPath: string | null = null;
+
+const runtimeLogBuffer: string[] = [];
+const maxRuntimeBufferLines = 500;
+let consoleCaptureInstalled = false;
+
+const originalConsole = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+  debug: console.debug.bind(console),
+};
 
 const serializeError = (error: unknown): string => {
   if (error instanceof Error) {
@@ -101,6 +115,75 @@ const appendStartupLog = async (message: string, error?: unknown): Promise<void>
     // Never block runtime on diagnostics logging failures.
   }
 };
+
+const stringifyConsoleArg = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return serializeError(value);
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return inspect(value, { depth: 6, breakLength: Infinity });
+  }
+};
+
+const appendRuntimeLogLine = (line: string): void => {
+  if (runtimeLogPath) {
+    try {
+      fsSync.appendFileSync(runtimeLogPath, line, 'utf8');
+      return;
+    } catch {
+      // Fall through to in-memory buffering if disk writes fail.
+    }
+  }
+
+  if (runtimeLogBuffer.length >= maxRuntimeBufferLines) {
+    runtimeLogBuffer.shift();
+  }
+  runtimeLogBuffer.push(line);
+};
+
+const flushRuntimeLogBuffer = (): void => {
+  if (!runtimeLogPath || runtimeLogBuffer.length === 0) return;
+  try {
+    fsSync.appendFileSync(runtimeLogPath, runtimeLogBuffer.join(''), 'utf8');
+    runtimeLogBuffer.length = 0;
+  } catch {
+    // Keep buffer for a later retry.
+  }
+};
+
+const installMainProcessConsoleCapture = (): void => {
+  if (consoleCaptureInstalled) return;
+  consoleCaptureInstalled = true;
+
+  const patch = (level: 'log' | 'info' | 'warn' | 'error' | 'debug'): void => {
+    console[level] = (...args: unknown[]) => {
+      originalConsole[level](...args);
+
+      const timestamp = new Date().toISOString();
+      const message = args.map((arg) => stringifyConsoleArg(arg)).join(' ');
+      appendRuntimeLogLine(`[${timestamp}] [${level}] ${message}\n`);
+    };
+  };
+
+  patch('log');
+  patch('info');
+  patch('warn');
+  patch('error');
+  patch('debug');
+};
+
+const configureRuntimeLogging = async (dataDir: string): Promise<void> => {
+  runtimeLogPath = path.join(dataDir, 'logs', 'runtime.log');
+  await fs.mkdir(path.dirname(runtimeLogPath), { recursive: true });
+  flushRuntimeLogBuffer();
+
+  const timestamp = new Date().toISOString();
+  appendRuntimeLogLine(`[${timestamp}] [system] Runtime logging initialized at ${runtimeLogPath}\n`);
+};
+
+installMainProcessConsoleCapture();
 
 const approvedEnsureFilePaths = new Set<string>();
 const approvedEnsureFileDirectories = new Set<string>();
@@ -213,6 +296,96 @@ let mainWindow: BrowserWindow | null = null;
 // Determine if we're in development mode
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
+const isPackagedBuild = app.isPackaged && process.env.NODE_ENV !== 'development';
+
+const resolvePackagedOpencodeBinaryPath = async (): Promise<string | null> => {
+  if (!isPackagedBuild) {
+    return null;
+  }
+
+  const targetArch = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  const candidates = [
+    path.join(process.resourcesPath, 'bin', `opencode-${targetArch}`),
+    path.join(process.resourcesPath, 'bin', 'opencode'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate, fsSync.constants.X_OK);
+      return candidate;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  return null;
+};
+
+const copyBundledAgentsToWorkspace = async (workspaceDir: string): Promise<{ source: string; agentsDir: string }> => {
+  const bundledAgentsDir = path.join(process.resourcesPath, 'agents');
+  const workspaceAgentsDir = path.join(workspaceDir, 'agents');
+
+  await fs.access(bundledAgentsDir, fsSync.constants.R_OK);
+  await fs.mkdir(workspaceAgentsDir, { recursive: true });
+  await fs.cp(bundledAgentsDir, workspaceAgentsDir, { recursive: true, force: true });
+
+  const opencodeAgentDir = path.join(workspaceDir, '.opencode', 'agent');
+  await fs.mkdir(opencodeAgentDir, { recursive: true });
+
+  const primaryAgentSource = path.join(workspaceAgentsDir, 'flowstate.md');
+  await fs.copyFile(primaryAgentSource, path.join(opencodeAgentDir, 'flowstate.md'));
+
+  const subagentsSourceDir = path.join(workspaceAgentsDir, 'subagents');
+  try {
+    const entries = await fs.readdir(subagentsSourceDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      if (!entry.name.endsWith('.md')) {
+        continue;
+      }
+
+      const source = path.join(subagentsSourceDir, entry.name);
+      const destination = path.join(opencodeAgentDir, entry.name);
+      await fs.copyFile(source, destination);
+    }
+  } catch {
+    // Subagents are optional for startup; primary agent is required.
+  }
+
+  return {
+    source: bundledAgentsDir,
+    agentsDir: workspaceAgentsDir,
+  };
+};
+
+const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> => {
+  if (!isPackagedBuild) {
+    return;
+  }
+
+  const workspaceDir = path.join(dataDir, 'opencode-workspace');
+  await fs.mkdir(workspaceDir, { recursive: true });
+
+  const { source, agentsDir } = await copyBundledAgentsToWorkspace(workspaceDir);
+  process.env.FLOWSTATE_AGENTS_DIR = agentsDir;
+
+  const bundledCliPath = await resolvePackagedOpencodeBinaryPath();
+  if (bundledCliPath) {
+    process.env.OPENCODE_BIN = bundledCliPath;
+  }
+
+  process.chdir(workspaceDir);
+  processManager.setPackagedWorkspaceDirectory(workspaceDir);
+
+  await appendStartupLog(`Prepared packaged OpenCode workspace at ${workspaceDir}`);
+  await appendStartupLog(`Copied packaged agents from ${source} to ${agentsDir}`);
+  await appendStartupLog(`FLOWSTATE_AGENTS_DIR=${agentsDir}`);
+  await appendStartupLog(`OPENCODE_BIN=${process.env.OPENCODE_BIN ?? '(not set)'}`);
+  await appendStartupLog(`process.cwd()=${process.cwd()}`);
+};
+
 /**
  * Create the main application window
  */
@@ -277,6 +450,7 @@ async function initialize(): Promise<void> {
   // Load configuration
   await configStore.load();
   const dataDir = configStore.getDataDir();
+  await configureRuntimeLogging(dataDir);
   startupLogPath = path.join(dataDir, 'logs', 'startup.log');
   await fs.mkdir(path.dirname(startupLogPath), { recursive: true });
   await appendStartupLog('FlowState initialize() started');
@@ -284,6 +458,13 @@ async function initialize(): Promise<void> {
   userProfile.configure({ dataDir });
   console.log('Configuration loaded');
   await appendStartupLog(`Configuration loaded (dataDir=${dataDir})`);
+
+  try {
+    await preparePackagedOpenCodeRuntime(dataDir);
+  } catch (error) {
+    await appendStartupLog('Failed to prepare packaged OpenCode runtime', error);
+    throw error;
+  }
 
   // Initialize auth manager
   try {

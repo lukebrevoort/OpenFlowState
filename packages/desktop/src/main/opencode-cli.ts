@@ -26,8 +26,15 @@ export const resolveOpencodeCliPath = (): string | null => {
 
   const envOverride = process.env.OPENCODE_BIN?.trim();
   const pathEntries = splitPathEntries(process.env.PATH);
+  const packagedCandidates = process.resourcesPath
+    ? [
+        path.join(process.resourcesPath, 'bin', `opencode-${process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64'}`),
+        path.join(process.resourcesPath, 'bin', 'opencode'),
+      ]
+    : [];
   const candidates = [
     ...(envOverride ? [envOverride] : []),
+    ...packagedCandidates,
     ...pathEntries.map((entry) => path.join(entry, 'opencode')),
     '/opt/homebrew/bin/opencode',
     '/usr/local/bin/opencode',

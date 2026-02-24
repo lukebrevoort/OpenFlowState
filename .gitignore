@@ -40,3 +40,4 @@ temp/
 .opencode/pm-phase6.db
 .opencode/artifacts/
 packages/desktop/out/
+packages/desktop/vendor/opencode/

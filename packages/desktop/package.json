@@ -18,8 +18,9 @@
     "build:renderer": "vite build",
     "start": "electron dist/main/index.js",
     "preview": "npm run build && npm run start",
-    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && electron-builder",
-    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && electron-builder --mac",
+    "prepare:opencode-binaries": "node scripts/ensure-opencode-binaries.mjs",
+    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder",
+    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder --mac",
     "clean": "rm -rf dist out",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -28,6 +29,10 @@
   },
   "dependencies": {
     "@flowstate/core": "workspace:*",
+    "@flowstate/mcp-canvas": "workspace:*",
+    "@flowstate/mcp-gcal": "workspace:*",
+    "@flowstate/mcp-gmail": "workspace:*",
+    "@flowstate/mcp-system": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@opencode-ai/sdk": "^1.1.20",
     "better-sqlite3": "^11.10.0",
@@ -101,6 +106,14 @@
       {
         "from": "../mcp-canvas/dist",
         "to": "mcp-servers/mcp-canvas/dist"
+      },
+      {
+        "from": "vendor/opencode/darwin-arm64/opencode",
+        "to": "bin/opencode-darwin-arm64"
+      },
+      {
+        "from": "vendor/opencode/darwin-x64/opencode",
+        "to": "bin/opencode-darwin-x64"
       }
     ],
     "mac": {

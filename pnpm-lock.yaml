@@ -52,6 +52,18 @@ importers:
       '@flowstate/core':
         specifier: workspace:*
         version: link:../core
+      '@flowstate/mcp-canvas':
+        specifier: workspace:*
+        version: link:../mcp-canvas
+      '@flowstate/mcp-gcal':
+        specifier: workspace:*
+        version: link:../mcp-gcal
+      '@flowstate/mcp-gmail':
+        specifier: workspace:*
+        version: link:../mcp-gmail
+      '@flowstate/mcp-system':
+        specifier: workspace:*
+        version: link:../mcp-system
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.25.2(hono@4.11.4)(zod@4.3.5)
