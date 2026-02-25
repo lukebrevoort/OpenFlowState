@@ -1,13 +1,23 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 20, 2026 (Phase 8 + ChatMode Live Updates merged)
+> **Last Updated**: February 25, 2026 (Phase 9.1 packaging baseline audit)
 
 ---
 
 ## Current Status: ✅ Phase 8 COMPLETE (Academic Intelligence study-pack scope)
 
 Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
+
+Phase 9 packaging hardening has started with `phase.9.1_packaging-baseline-audit`.
+
+---
+
+## Tasks Completed (Feb 25, 2026 - Phase 9.1 Packaging Baseline Audit)
+
+- ✅ Added `docs/release/PHASE_9_1_PACKAGING_BASELINE_AUDIT.md` with packaging entrypoint inventory, config drift matrix, baseline findings, and source-of-truth decision.
+- ✅ Added `docs/release/PHASE_9_1_PACKAGING_IO_MAP.md` with current command graph, packaging inputs, transform stages, outputs, and known mapping gaps.
+- ✅ Locked Phase 9.1 builder source-of-truth policy to `packages/desktop/electron-builder.yml` and documented carry-forward risks for Phase 9.2 normalization.
 
 ---
 
