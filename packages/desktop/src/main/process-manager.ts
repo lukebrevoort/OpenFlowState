@@ -1803,7 +1803,7 @@ class ProcessManager {
   }
 
   private resolveManagedMcpRuntime(
-    serverName: 'mcp-gmail' | 'mcp-gcal' | 'mcp-system' | 'mcp-canvas',
+    serverName: 'mcp-gmail' | 'mcp-gcal' | 'mcp-system' | 'mcp-canvas' | 'mcp-notion',
     _serverPathFromConfiguredPackagesDir: string | null
   ): { command: string[]; environment: Record<string, string> } | null {
     const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -2048,12 +2048,27 @@ class ProcessManager {
 
     const npxCommand = this.resolveNpxRuntimeCommand();
 
-    // Notion MCP (remote package via npx)
+    // Notion MCP (prefer bundled @flowstate/mcp-notion; fallback to npx)
     const notionToken = await authManager.getToken('notion');
-    if (notionToken) {
+    const notionPath = this.verifyMcpServer(packagesDir, 'mcp-notion');
+    const notionRuntime = this.resolveManagedMcpRuntime('mcp-notion', notionPath);
+    if (notionToken && notionRuntime) {
+      mcpConfig['notion'] = {
+        type: 'local',
+        command: notionRuntime.command,
+        environment: {
+          FLOWSTATE_DATA_DIR: flowstateDataDir,
+          ...notionRuntime.environment,
+          NOTION_ACCESS_TOKEN: notionToken.accessToken,
+        },
+        enabled: true,
+        timeout: 10000,
+      } satisfies McpLocalConfig;
+      console.log('[ProcessManager] Notion MCP configured with token (bundled runtime)');
+    } else if (notionToken) {
       if (!npxCommand) {
         errors['notion'] =
-          'Notion MCP requires npx, but no executable was found in PATH. Install Node.js (with npm/npx) or reconnect with a bundled MCP runtime.';
+          'Notion MCP requires npx or the bundled FlowState Notion MCP runtime, but neither was found. Install Node.js (with npm/npx) or rebuild FlowState MCP packages.';
       } else {
         mcpConfig['notion'] = {
           type: 'local',
@@ -2065,7 +2080,7 @@ class ProcessManager {
           enabled: true,
           timeout: 10000,
         } satisfies McpLocalConfig;
-        console.log('[ProcessManager] Notion MCP configured with token');
+        console.log('[ProcessManager] Notion MCP configured with token (npx fallback)');
       }
     }
 

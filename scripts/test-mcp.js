@@ -18,6 +18,7 @@ const MCP_SERVERS = [
   { name: 'mcp-gmail', entrypoint: 'packages/mcp-gmail/dist/index.js' },
   { name: 'mcp-gcal', entrypoint: 'packages/mcp-gcal/dist/index.js' },
   { name: 'mcp-system', entrypoint: 'packages/mcp-system/dist/index.js' },
+  { name: 'mcp-canvas', entrypoint: 'packages/mcp-canvas/dist/index.js' },
 ];
 
 const colors = {

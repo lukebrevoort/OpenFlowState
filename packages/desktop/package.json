@@ -19,8 +19,8 @@
     "start": "electron dist/main/index.js",
     "preview": "npm run build && npm run start",
     "prepare:opencode-binaries": "node scripts/ensure-opencode-binaries.mjs",
-    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder",
-    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder --mac",
+    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder",
+    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder --mac",
     "clean": "rm -rf dist out",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -90,6 +90,14 @@
         "to": "node_modules/@flowstate/mcp-gmail/package.json"
       },
       {
+        "from": "../mcp-notion/dist",
+        "to": "node_modules/@flowstate/mcp-notion/dist"
+      },
+      {
+        "from": "../mcp-notion/package.json",
+        "to": "node_modules/@flowstate/mcp-notion/package.json"
+      },
+      {
         "from": "../mcp-gcal/dist",
         "to": "node_modules/@flowstate/mcp-gcal/dist"
       },
@@ -126,6 +134,10 @@
       {
         "from": "../mcp-gmail/dist",
         "to": "mcp-servers/mcp-gmail/dist"
+      },
+      {
+        "from": "../mcp-notion/dist",
+        "to": "mcp-servers/mcp-notion/dist"
       },
       {
         "from": "../mcp-gcal/dist",

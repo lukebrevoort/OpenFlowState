@@ -8,6 +8,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "turbo dev",
+    "predev:desktop": "pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build",
     "dev:desktop": "pnpm --filter @flowstate/desktop exec concurrently \"pnpm --filter @flowstate/desktop dev\" \"pnpm --filter @flowstate/desktop build:main && pnpm --filter @flowstate/desktop build:preload && pnpm --filter @flowstate/desktop exec electron dist/main/index.js\"",
     "start": "node scripts/start-all.js",
     "start:tui": "opencode . --agent flowstate-assistant",
@@ -15,6 +16,7 @@
     "test": "turbo test",
     "test:contracts": "node scripts/test-contracts.js",
     "test:packaged-e2e": "node scripts/test-packaged-e2e.js",
+    "pretest:mcp": "pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build",
     "test:mcp": "node scripts/test-mcp.js",
     "build:release": "node scripts/build-release.js",
     "smoke:dmg": "node scripts/smoke-dmg.js",

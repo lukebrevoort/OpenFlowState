@@ -3,6 +3,7 @@ const SERVER_IMPORTS: Record<string, string> = {
   'mcp-gcal': '@flowstate/mcp-gcal/dist/index.js',
   'mcp-system': '@flowstate/mcp-system/dist/index.js',
   'mcp-canvas': '@flowstate/mcp-canvas/dist/index.js',
+  'mcp-notion': '@flowstate/mcp-notion/dist/index.js',
 };
 
 async function main(): Promise<void> {
