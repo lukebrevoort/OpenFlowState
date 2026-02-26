@@ -15,6 +15,7 @@ const TARGETS = [
   { target: 'darwin-arm64', output: path.join(outputRoot, 'darwin-arm64') },
   { target: 'darwin-x64', output: path.join(outputRoot, 'darwin-x64') },
 ];
+const DEFAULT_NODE_VERSION = '24.14.0';
 
 function canExecute(candidate) {
   try {
@@ -41,32 +42,6 @@ async function run(command, args, options = {}) {
       reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
     });
   });
-}
-
-async function fetchLatestLtsVersion() {
-  const response = await fetch('https://nodejs.org/dist/index.json', {
-    headers: {
-      Accept: 'application/json',
-      'User-Agent': 'flowstate-desktop-build',
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch Node dist index: ${response.status} ${response.statusText}`);
-  }
-
-  const body = await response.json();
-  if (!Array.isArray(body)) {
-    throw new Error('Unexpected Node dist index payload');
-  }
-
-  const firstLts = body.find((entry) => entry && typeof entry === 'object' && entry.lts);
-  const version = firstLts?.version;
-  if (typeof version !== 'string' || !version.startsWith('v')) {
-    throw new Error(`Unexpected Node LTS version: ${version ?? '(missing)'}`);
-  }
-
-  return version.slice(1);
 }
 
 async function downloadAndExtract(target, outputDir, version) {
@@ -132,7 +107,12 @@ async function main() {
     return;
   }
 
-  const version = process.env.FLOWSTATE_NODE_VERSION?.trim() || (await fetchLatestLtsVersion());
+  const version = process.env.FLOWSTATE_NODE_VERSION?.trim() || DEFAULT_NODE_VERSION;
+  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(
+      `Invalid Node version "${version}". Expected semver like "${DEFAULT_NODE_VERSION}".`
+    );
+  }
   console.log(
     `[ensure-node-runtime] Downloading Node v${version} for ${missing.map((m) => m.target).join(', ')}`
   );

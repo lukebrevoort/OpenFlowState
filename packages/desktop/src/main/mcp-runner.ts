@@ -33,15 +33,24 @@ function appendRunnerLog(logPath: string | null, line: string): void {
 async function main(): Promise<void> {
   const serverName = process.argv[2]?.trim();
   const logPath = getRunnerLogPath(serverName);
+  let terminating = false;
+
+  const terminateOnFatalError = (kind: 'uncaughtException' | 'unhandledRejection', error: unknown): void => {
+    if (terminating) return;
+    terminating = true;
+
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    appendRunnerLog(logPath, `[${new Date().toISOString()}] ${kind} ${message}\n`);
+    console.error(`[flowstate-mcp-runner] ${kind}:`, message);
+    process.exit(1);
+  };
 
   appendRunnerLog(logPath, `[${new Date().toISOString()}] start ${serverName ?? ''}\n`);
-  process.on('uncaughtException', (error) => {
-    const message = error instanceof Error ? error.stack ?? error.message : String(error);
-    appendRunnerLog(logPath, `[${new Date().toISOString()}] uncaughtException ${message}\n`);
+  process.once('uncaughtException', (error) => {
+    terminateOnFatalError('uncaughtException', error);
   });
-  process.on('unhandledRejection', (reason) => {
-    const message = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
-    appendRunnerLog(logPath, `[${new Date().toISOString()}] unhandledRejection ${message}\n`);
+  process.once('unhandledRejection', (reason) => {
+    terminateOnFatalError('unhandledRejection', reason);
   });
   process.on('exit', (code) => {
     appendRunnerLog(logPath, `[${new Date().toISOString()}] exit ${code}\n`);
