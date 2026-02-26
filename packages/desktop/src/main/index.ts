@@ -298,6 +298,27 @@ const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 const isPackagedBuild = app.isPackaged && process.env.NODE_ENV !== 'development';
 
+const resolvePackagedNodeRuntimeRoot = async (): Promise<string | null> => {
+  if (!isPackagedBuild) {
+    return null;
+  }
+
+  if (process.platform !== 'darwin') {
+    return null;
+  }
+
+  const targetArch = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64';
+  const candidate = path.join(process.resourcesPath, 'node-runtime', targetArch);
+  const nodeBinary = path.join(candidate, 'bin', 'node');
+
+  try {
+    await fs.access(nodeBinary, fsSync.constants.X_OK);
+    return candidate;
+  } catch {
+    return null;
+  }
+};
+
 const resolvePackagedOpencodeBinaryPath = async (): Promise<string | null> => {
   if (!isPackagedBuild) {
     return null;
@@ -410,6 +431,60 @@ const installWorkspaceOpencodeBinary = async (workspaceDir: string): Promise<str
   return workspaceCliPath;
 };
 
+const installWorkspaceNodeRuntime = async (workspaceDir: string): Promise<string | null> => {
+  const bundledRuntimeRoot = await resolvePackagedNodeRuntimeRoot();
+  if (!bundledRuntimeRoot) {
+    return null;
+  }
+
+  const workspaceRuntimeDir = path.join(workspaceDir, 'node-runtime');
+  const workspaceRuntimeBinDir = path.join(workspaceRuntimeDir, 'bin');
+  const workspaceNodePath = path.join(workspaceRuntimeBinDir, 'node');
+
+  try {
+    await fs.access(workspaceNodePath, fsSync.constants.X_OK);
+  } catch {
+    await fs.mkdir(workspaceRuntimeDir, { recursive: true });
+    await fs.cp(bundledRuntimeRoot, workspaceRuntimeDir, { recursive: true, force: true });
+  }
+
+  if (process.platform === 'darwin') {
+    try {
+      await execFileAsync('/usr/bin/xattr', ['-d', 'com.apple.quarantine', workspaceNodePath]);
+    } catch {
+      // Attribute may be absent; ignore.
+    }
+    try {
+      await execFileAsync('/usr/bin/xattr', ['-d', 'com.apple.provenance', workspaceNodePath]);
+    } catch {
+      // Attribute may be absent; ignore.
+    }
+    try {
+      await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', '--timestamp=none', workspaceNodePath]);
+    } catch (error) {
+      await appendStartupLog('Failed to ad-hoc sign packaged Node runtime binary', error);
+    }
+  }
+
+  try {
+    const { stdout } = await execFileAsync(workspaceNodePath, ['--version']);
+    const version = typeof stdout === 'string' ? stdout.trim() : '';
+    if (version) {
+      await appendStartupLog(`Bundled Node runtime available: ${version}`);
+    }
+  } catch (error) {
+    await appendStartupLog('Failed to validate bundled Node runtime', error);
+  }
+
+  const existingPathEntries = process.env.PATH?.split(path.delimiter).filter((entry) => entry.trim().length > 0) ?? [];
+  if (!existingPathEntries.includes(workspaceRuntimeBinDir)) {
+    process.env.PATH = [workspaceRuntimeBinDir, ...existingPathEntries].join(path.delimiter);
+  }
+
+  process.env.FLOWSTATE_NODE_RUNTIME_BIN = workspaceRuntimeBinDir;
+  return workspaceRuntimeBinDir;
+};
+
 const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> => {
   if (!isPackagedBuild) {
     return;
@@ -420,6 +495,8 @@ const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> =>
 
   const { source, agentsDir } = await copyBundledAgentsToWorkspace(workspaceDir);
   process.env.FLOWSTATE_AGENTS_DIR = agentsDir;
+
+  const nodeRuntimeBinDir = await installWorkspaceNodeRuntime(workspaceDir);
 
   const workspaceCliPath = await installWorkspaceOpencodeBinary(workspaceDir);
   if (workspaceCliPath) {
@@ -432,6 +509,7 @@ const preparePackagedOpenCodeRuntime = async (dataDir: string): Promise<void> =>
   await appendStartupLog(`Prepared packaged OpenCode workspace at ${workspaceDir}`);
   await appendStartupLog(`Copied packaged agents from ${source} to ${agentsDir}`);
   await appendStartupLog(`FLOWSTATE_AGENTS_DIR=${agentsDir}`);
+  await appendStartupLog(`FLOWSTATE_NODE_RUNTIME_BIN=${nodeRuntimeBinDir ?? '(not installed)'}`);
   await appendStartupLog(`OPENCODE_BIN=${process.env.OPENCODE_BIN ?? '(not set)'}`);
   await appendStartupLog(`PATH=${process.env.PATH ?? '(unset)'}`);
   await appendStartupLog(`process.cwd()=${process.cwd()}`);

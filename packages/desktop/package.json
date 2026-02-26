@@ -19,8 +19,9 @@
     "start": "electron dist/main/index.js",
     "preview": "npm run build && npm run start",
     "prepare:opencode-binaries": "node scripts/ensure-opencode-binaries.mjs",
-    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder",
-    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && electron-builder --mac",
+    "prepare:node-runtime": "node scripts/ensure-node-runtime.mjs",
+    "package": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && npm run prepare:node-runtime && electron-builder --config electron-builder.yml",
+    "package:mac": "pnpm -w --filter @flowstate/core build && pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build && npm run build && npm run prepare:opencode-binaries && npm run prepare:node-runtime && electron-builder --mac --config electron-builder.yml",
     "clean": "rm -rf dist out",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -32,15 +33,50 @@
     "@flowstate/mcp-canvas": "workspace:*",
     "@flowstate/mcp-gcal": "workspace:*",
     "@flowstate/mcp-gmail": "workspace:*",
+    "@flowstate/mcp-notion": "workspace:*",
     "@flowstate/mcp-system": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@notionhq/client": "^2.2.0",
     "@opencode-ai/sdk": "^1.1.20",
+    "argparse": "~1.0.3",
+    "bluebird": "^3.7.2",
+    "bignumber.js": "^9.1.2",
     "better-sqlite3": "^11.10.0",
     "bindings": "^1.5.0",
+    "ecdsa-sig-formatter": "^1.0.11",
+    "safe-buffer": "^5.2.1",
+    "@xmldom/xmldom": "^0.8.10",
+    "extend": "^3.0.2",
     "file-uri-to-path": "^1.0.0",
+    "gaxios": "^6.7.1",
+    "gtoken": "^7.0.0",
+    "google-auth-library": "^9.15.1",
+    "google-logging-utils": "^0.0.2",
+    "googleapis": "^140.0.0",
+    "googleapis-common": "^7.2.0",
+    "is-stream": "^2.0.1",
+    "jws": "^4.0.0",
+    "jwa": "^2.0.1",
+    "json-bigint": "^1.0.0",
+    "jszip": "^3.10.1",
+    "lop": "^0.4.2",
+    "mammoth": "^1.10.0",
+    "path-is-absolute": "^1.0.1",
+    "pako": "^2.1.0",
     "playwright": "^1.58.1",
     "pdf-parse": "^1.1.1",
+    "setimmediate": "^1.0.5",
     "shellwords": "^0.1.1",
+    "underscore": "^1.13.6",
+    "option": "~0.2.1",
+    "tr46": "^0.0.3",
+    "url-template": "^2.0.8",
+    "dingbat-to-unicode": "^1.0.1",
+    "duck": "^0.1.12",
+    "uuid": "^9.0.1",
+    "webidl-conversions": "^3.0.1",
+    "whatwg-url": "^5.0.0",
+    "xmlbuilder": "^15.1.1",
     "yauzl": "^2.10.0"
   },
   "devDependencies": {
@@ -71,102 +107,5 @@
     "vite-plugin-electron-renderer": "^0.14.5",
     "vitest": "^2.0.0",
     "zustand": "^4.5.0"
-  },
-  "build": {
-    "appId": "com.flowstate.app",
-    "productName": "FlowState",
-    "directories": {
-      "output": "out"
-    },
-    "files": [
-      "dist/**/*",
-      "assets/**/*",
-      {
-        "from": "../mcp-gmail/dist",
-        "to": "node_modules/@flowstate/mcp-gmail/dist"
-      },
-      {
-        "from": "../mcp-gmail/package.json",
-        "to": "node_modules/@flowstate/mcp-gmail/package.json"
-      },
-      {
-        "from": "../mcp-notion/dist",
-        "to": "node_modules/@flowstate/mcp-notion/dist"
-      },
-      {
-        "from": "../mcp-notion/package.json",
-        "to": "node_modules/@flowstate/mcp-notion/package.json"
-      },
-      {
-        "from": "../mcp-gcal/dist",
-        "to": "node_modules/@flowstate/mcp-gcal/dist"
-      },
-      {
-        "from": "../mcp-gcal/package.json",
-        "to": "node_modules/@flowstate/mcp-gcal/package.json"
-      },
-      {
-        "from": "../mcp-system/dist",
-        "to": "node_modules/@flowstate/mcp-system/dist"
-      },
-      {
-        "from": "../mcp-system/package.json",
-        "to": "node_modules/@flowstate/mcp-system/package.json"
-      },
-      {
-        "from": "../mcp-canvas/dist",
-        "to": "node_modules/@flowstate/mcp-canvas/dist"
-      },
-      {
-        "from": "../mcp-canvas/package.json",
-        "to": "node_modules/@flowstate/mcp-canvas/package.json"
-      }
-    ],
-    "extraResources": [
-      {
-        "from": "../../agents",
-        "to": "agents"
-      },
-      {
-        "from": "../../workflows",
-        "to": "workflows"
-      },
-      {
-        "from": "../mcp-gmail/dist",
-        "to": "mcp-servers/mcp-gmail/dist"
-      },
-      {
-        "from": "../mcp-notion/dist",
-        "to": "mcp-servers/mcp-notion/dist"
-      },
-      {
-        "from": "../mcp-gcal/dist",
-        "to": "mcp-servers/mcp-gcal/dist"
-      },
-      {
-        "from": "../mcp-system/dist",
-        "to": "mcp-servers/mcp-system/dist"
-      },
-      {
-        "from": "../mcp-canvas/dist",
-        "to": "mcp-servers/mcp-canvas/dist"
-      },
-      {
-        "from": "vendor/opencode/darwin-arm64/opencode",
-        "to": "bin/opencode-darwin-arm64"
-      },
-      {
-        "from": "vendor/opencode/darwin-x64/opencode",
-        "to": "bin/opencode-darwin-x64"
-      }
-    ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "assets/flowstate-main-logo.icns",
-      "category": "public.app-category.productivity"
-    }
   }
 }

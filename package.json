@@ -35,6 +35,9 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "base64-js": "^1.5.1",
+    "gcp-metadata": "^6.1.1",
+    "node-fetch": "2.6.9",
     "playwright": "^1.58.1"
   }
 }

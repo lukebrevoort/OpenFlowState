@@ -1618,10 +1618,18 @@ class ProcessManager {
         : path.resolve(appPath, '..');
     } else {
       const asarPackagesDir = path.join(appPath, 'node_modules', '@flowstate');
+      const resourcesPackagesDir = path.join(process.resourcesPath, 'node_modules', '@flowstate');
       const legacyPackagesDir = path.join(process.resourcesPath, 'mcp-servers');
-      packagesDir = fs.existsSync(asarPackagesDir) ? asarPackagesDir : legacyPackagesDir;
-      console.log('[ProcessManager] MCP packages (asar) exists:', fs.existsSync(asarPackagesDir));
-      if (packagesDir === legacyPackagesDir) {
+
+      const asarExists = fs.existsSync(asarPackagesDir);
+      const resourcesExists = fs.existsSync(resourcesPackagesDir);
+      const legacyExists = fs.existsSync(legacyPackagesDir);
+
+      packagesDir = asarExists ? asarPackagesDir : resourcesExists ? resourcesPackagesDir : legacyPackagesDir;
+      console.log('[ProcessManager] MCP packages (asar) exists:', asarExists);
+      console.log('[ProcessManager] MCP packages (resources/node_modules) exists:', resourcesExists);
+      console.log('[ProcessManager] MCP packages (legacy mcp-servers) exists:', legacyExists);
+      if (packagesDir === legacyPackagesDir && !resourcesExists) {
         console.log('[ProcessManager] Falling back to legacy extraResources MCP directory');
       }
     }
@@ -1811,6 +1819,24 @@ class ProcessManager {
     const legacyServerPath = path.join(process.resourcesPath, 'mcp-servers', serverName, 'dist', 'index.js');
     const legacyExists = fs.existsSync(legacyServerPath);
 
+    const resourcesPackagePath = path.join(
+      process.resourcesPath,
+      'node_modules',
+      '@flowstate',
+      serverName,
+      'dist',
+      'index.js'
+    );
+    const resourcesPackageExists = fs.existsSync(resourcesPackagePath);
+
+    const nodePathEntries: string[] = [];
+    // app.getAppPath() points at app.asar in packaged builds.
+    // Electron's ASAR-aware fs implementation can resolve modules from this path
+    // when running with ELECTRON_RUN_AS_NODE.
+    nodePathEntries.push(path.join(app.getAppPath(), 'node_modules'));
+    nodePathEntries.push(path.join(process.resourcesPath, 'node_modules'));
+    const nodePath = nodePathEntries.join(path.delimiter);
+
     if (isDev) {
       if (!_serverPathFromConfiguredPackagesDir) return null;
       return {
@@ -1824,12 +1850,21 @@ class ProcessManager {
     const mcpRunnerPath = path.join(PROCESS_MANAGER_DIR, 'mcp-runner.js');
     const mcpRunnerExists = fs.existsSync(mcpRunnerPath);
     console.log(`[ProcessManager] Packaged MCP runtime for ${serverName}: ${asarPath} (exists: ${asarExists})`);
+    console.log(
+      `[ProcessManager] Packaged MCP runtime (resources/node_modules) for ${serverName}: ${resourcesPackagePath} (exists: ${resourcesPackageExists})`
+    );
     console.log(`[ProcessManager] MCP runner path: ${mcpRunnerPath} (exists: ${mcpRunnerExists})`);
 
-    if (asarExists && mcpRunnerExists) {
+    // Prefer running through our MCP runner so imports resolve consistently in packaged builds.
+    // This avoids relying on `node` existing on the user's PATH.
+    if ((asarExists || resourcesPackageExists) && mcpRunnerExists) {
       return {
         command: [process.execPath, mcpRunnerPath, serverName],
-        environment: { ELECTRON_RUN_AS_NODE: '1' },
+        environment: {
+          ELECTRON_RUN_AS_NODE: '1',
+          NODE_PATH: nodePath,
+          FLOWSTATE_MCP_PACKAGED: '1',
+        },
       };
     }
 
@@ -1839,7 +1874,11 @@ class ProcessManager {
 
     return {
       command: [process.execPath, legacyServerPath],
-      environment: { ELECTRON_RUN_AS_NODE: '1' },
+      environment: {
+        ELECTRON_RUN_AS_NODE: '1',
+        NODE_PATH: nodePath,
+        FLOWSTATE_MCP_PACKAGED: '1',
+      },
     };
   }
 
@@ -2320,16 +2359,32 @@ class ProcessManager {
     try {
       const result = await this.instance.client.mcp.status({});
       console.log('[ProcessManager] MCP Status:', JSON.stringify(result.data, null, 2));
+
+      const runtimeErrors: Record<string, string> = {};
       
       // Log any failed servers
       if (result.data) {
         for (const [name, status] of Object.entries(result.data)) {
           if (status.status === 'failed') {
-            console.error(`[ProcessManager] MCP server ${name} FAILED:`, (status as { error?: string }).error);
+            const message = (status as { error?: string }).error ?? 'Unknown MCP error';
+            runtimeErrors[name] = message;
+            console.error(`[ProcessManager] MCP server ${name} FAILED:`, message);
           } else if (status.status === 'connected') {
             console.log(`[ProcessManager] MCP server ${name} connected successfully`);
           }
         }
+      }
+
+      if (Object.keys(runtimeErrors).length > 0) {
+        // Merge runtime failures into diagnostics so the Integrations UI can surface actionable info.
+        this.mcpDiagnostics = {
+          updatedAt: Date.now(),
+          errors: {
+            ...this.mcpDiagnostics.errors,
+            ...runtimeErrors,
+          },
+          skipped: { ...this.mcpDiagnostics.skipped },
+        };
       }
     } catch (error) {
       console.error('[ProcessManager] Error checking MCP status:', error);

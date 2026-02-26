@@ -41,3 +41,4 @@ temp/
 .opencode/artifacts/
 packages/desktop/out/
 packages/desktop/vendor/opencode/
+packages/desktop/vendor/node/

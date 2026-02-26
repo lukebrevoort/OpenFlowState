@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 25, 2026 (Phase 9.1 packaging baseline audit)
+> **Last Updated**: February 25, 2026 (Phase 9.2 config normalization)
 
 ---
 
@@ -10,6 +10,20 @@
 Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
 
 Phase 9 packaging hardening has started with `phase.9.1_packaging-baseline-audit`.
+
+---
+
+## Tasks Completed (Feb 25, 2026 - Phase 9.2 Config Normalization)
+
+- ✅ Normalized packaging command path to explicit config by updating desktop package scripts to use `electron-builder --config electron-builder.yml`.
+- ✅ Removed duplicate `electron-builder` `build` config block from `packages/desktop/package.json` so `packages/desktop/electron-builder.yml` is the only active packaging source.
+- ✅ Addressed primary Notion packaging risk by adding explicit Notion runtime copy rules in `packages/desktop/electron-builder.yml` (`mcp-servers` + `node_modules` paths).
+- ✅ Added missing desktop dependency on `@flowstate/mcp-notion` and refreshed lockfile metadata.
+- ✅ Added Phase 9.2 implementation record: `docs/release/PHASE_9_2_CONFIG_NORMALIZATION.md`.
+- ✅ Normalized mac packaging arch policy from `universal` to explicit `arm64` + `x64` outputs after reproducing a universal merge failure related to packaged OpenCode binaries.
+- ✅ Verified packaging succeeds with `pnpm --filter @flowstate/desktop package:mac` and validated arm64 DMG launch/install path with `pnpm smoke:dmg -- --dmg packages/desktop/out/FlowState-0.1.0-arm64.dmg`.
+- ✅ Re-validated release checks post-normalization: `pnpm test:contracts` and `pnpm test:packaged-e2e` pass.
+- ✅ Added Phase 9.2 MCP runtime startup research/best-practices brief at `docs/release/PHASE_9_2_MCP_STARTUP_BEST_PRACTICES.md` (stdio hygiene, spawn strategy, packaged path/env/dependency closure, readiness and diagnostics patterns).
 
 ---
 
