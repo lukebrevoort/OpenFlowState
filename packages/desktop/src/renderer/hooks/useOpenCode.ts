@@ -441,6 +441,7 @@ export function useOpenCode() {
       useChatStore.getState().clearMessages();
       useChatStore.getState().clearTimeline();
       useChatStore.getState().setActiveTask(null);
+      useChatStore.getState().setHandoffTask(null);
       return result.sessionId;
     } catch (err) {
       console.error('Failed to create session:', err);
