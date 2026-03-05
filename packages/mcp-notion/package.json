@@ -18,9 +18,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@flowstate/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@notionhq/client": "^2.2.0",
-    "@flowstate/core": "workspace:*"
+    "node-fetch": "2.6.9"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

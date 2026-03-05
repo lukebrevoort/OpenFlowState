@@ -18,9 +18,10 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@flowstate/core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "googleapis": "^140.0.0",
-    "@flowstate/core": "workspace:*"
+    "gcp-metadata": "^6.1.0",
+    "googleapis": "^140.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

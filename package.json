@@ -19,7 +19,10 @@
     "pretest:mcp": "pnpm -w --filter @flowstate/mcp-gmail build && pnpm -w --filter @flowstate/mcp-notion build && pnpm -w --filter @flowstate/mcp-gcal build && pnpm -w --filter @flowstate/mcp-system build && pnpm -w --filter @flowstate/mcp-canvas build",
     "test:mcp": "node scripts/test-mcp.js",
     "build:release": "node scripts/build-release.js",
+    "prepare:release-artifacts": "node scripts/prepare-release-artifacts.js",
     "smoke:dmg": "node scripts/smoke-dmg.js",
+    "check:notarization-env": "node scripts/check-notarization-env.js",
+    "verify:apple-artifact": "node scripts/verify-apple-artifact.js",
     "gate:release": "node scripts/gate-release.js",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
@@ -35,6 +38,9 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "base64-js": "^1.5.1",
+    "gcp-metadata": "^6.1.1",
+    "node-fetch": "2.6.9",
     "playwright": "^1.58.1"
   }
 }

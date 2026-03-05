@@ -1,13 +1,111 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: February 20, 2026 (Phase 8 + ChatMode Live Updates merged)
+> **Last Updated**: March 1, 2026 (Bug fix: clear handoffTask on new session)
+
+---
+
+## Bug Fix (Mar 1, 2026 - Task Promoted Not Leaving)
+
+- ✅ Fixed stale `TaskHandoffCard` persisting across new sessions in ChatMode.
+- ✅ Added `useChatStore.getState().setHandoffTask(null)` to `createSession()` in `useOpenCode.ts` so the task promotion modal is cleared when the user starts a new chat.
+- ✅ Root cause: `createSession()` cleared `messages`, `timeline`, and `activeTask` but not `handoffTask`, causing the card from the previous session to bleed into the next one.
 
 ---
 
 ## Current Status: ✅ Phase 8 COMPLETE (Academic Intelligence study-pack scope)
 
 Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
+
+Phase 9 packaging hardening is complete through `phase.9.8_demo-release-readiness` (lean path).
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.8 Demo Release Readiness)
+
+- ✅ Updated release runbook to include demo distribution packet requirements and explicit GO sign-off expectations.
+- ✅ Added tester-facing installer guide at `docs/release/DEMO_INSTALLER_INSTRUCTIONS.md` for signed/notarized install path and first-run checks.
+- ✅ Added final demo checklist at `docs/release/DEMO_RELEASE_CHECKLIST.md` covering artifacts, checksums, install proof, known issues, and rollback linkage.
+- ✅ Added standardized release packet template at `docs/release/DEMO_RELEASE_PACKET_TEMPLATE.md` for evidence/approval capture.
+- ✅ Captured Phase 9.8 implementation record: `docs/release/PHASE_9_8_DEMO_RELEASE_READINESS.md`.
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.7 CI Gate + Automation)
+
+- ✅ Added structured release-gate reporting in `scripts/gate-release.js` with fail-closed status, per-step pass/fail metadata, and output artifact `.opencode/artifacts/release-gate-<timestamp>.json`.
+- ✅ Added failure-class mapping for fast triage (`packaging`, `smoke`, `contracts`, `packaged_e2e`, `apple_verification`) surfaced directly in gate report output.
+- ✅ Added GitHub Actions workflow `.github/workflows/release-gate.yml` to run macOS dry-run gates on pull requests to `main`.
+- ✅ Added manual CI release path via `workflow_dispatch` input `full_release=true` to run full `pnpm gate:release` when Apple secrets are configured.
+- ✅ Added CI artifact upload of `.opencode/artifacts/` for post-failure diagnostics.
+- ✅ Updated release runbook with CI automation and failure-class triage guidance.
+- ✅ Captured Phase 9.7 implementation record: `docs/release/PHASE_9_7_CI_GATE_AND_RELEASE_AUTOMATION.md`.
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.6 Installer Smoke + Runtime Parity)
+
+- ✅ Expanded `scripts/smoke-dmg.js` from mount-only checks to install/relaunch flow by copying app bundle from DMG to a temporary install directory via `ditto`.
+- ✅ Added dual launch assertions (`launch_1` + `launch_2`) with deterministic process detection and teardown.
+- ✅ Added packaged runtime parity signal checks in smoke evidence for startup log events (`FlowState initialize() started`, `OpenCode server initialized`).
+- ✅ Added system MCP startup parity checks by asserting new `mcp-mcp-system.log` runner events (`start mcp-system`, `import @flowstate/mcp-system/dist/index.js`).
+- ✅ Hardened smoke cleanup behavior to always remove temporary installed app directories on both success and failure paths.
+- ✅ Captured Phase 9.6 implementation record: `docs/release/PHASE_9_6_INSTALLER_SMOKE_AND_RUNTIME_PARITY.md`.
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.5 Artifact Integrity + Naming)
+
+- ✅ Added `scripts/prepare-release-artifacts.js` to enforce deterministic DMG/ZIP naming with build-id suffixes (`FlowState-<version>-<arch>-<build-id>.<ext>`).
+- ✅ Added release metadata generation with manifest output at `.opencode/artifacts/release-manifest-<build-id>.json` including `gitSha`, `buildId`, `version`, `generatedAt`, per-artifact `sizeBytes`, and `sha256`.
+- ✅ Added checksum output at `.opencode/artifacts/release-checksums-<build-id>.txt` and read-after-write checksum verification that fails on mismatch.
+- ✅ Integrated artifact preparation into `scripts/build-release.js` (`pnpm prepare:release-artifacts`) and added root script entrypoint in `package.json`.
+- ✅ Updated release gate evidence requirements in `docs/release/RELEASE_GATE_RUNBOOK.md` to require manifest + checksum files.
+- ✅ Captured Phase 9.5 implementation record: `docs/release/PHASE_9_5_ARTIFACT_INTEGRITY_AND_NAMING.md`.
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.4 Notarization + Stapling Wiring)
+
+- ✅ Added release preflight script `scripts/check-notarization-env.js` to enforce signing/notarization env contract (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`) and validate file-backed secrets.
+- ✅ Integrated notarization preflight into release build pipeline by adding `pnpm check:notarization-env` to `scripts/build-release.js`.
+- ✅ Added Apple artifact verification script `scripts/verify-apple-artifact.js` to run `codesign --verify --deep --strict --verbose=2`, `spctl --assess --type execute --verbose=4`, and `xcrun stapler validate`.
+- ✅ Expanded Apple artifact verification to validate all packaged `mac*/FlowState.app` bundles (arm64 + x64) by default instead of a single latest app.
+- ✅ Integrated Apple verification into release gate sequencing in `scripts/gate-release.js` and added root script entrypoints in `package.json`.
+- ✅ Updated release runbook command sequence/evidence requirements in `docs/release/RELEASE_GATE_RUNBOOK.md`.
+- ✅ Captured Phase 9.4 implementation record: `docs/release/PHASE_9_4_NOTARIZATION_AND_STAPLING.md`.
+
+---
+
+## Tasks Completed (Feb 27, 2026 - Phase 9.3 Signing + Entitlements)
+
+- ✅ Added explicit macOS entitlements files for app and inherited helper signing scopes: `packages/desktop/assets/entitlements.mac.plist` and `packages/desktop/assets/entitlements.mac.inherit.plist`.
+- ✅ Wired hardened runtime entitlement paths in `packages/desktop/electron-builder.yml` (`mac.entitlements` + `mac.entitlementsInherit`) and added `afterSign` hook registration.
+- ✅ Added post-sign hardening hook `packages/desktop/scripts/sign-nested-binaries.mjs` to codesign executable binaries bundled under app resources (`bin/` + `node-runtime/`).
+- ✅ Added signing contract regression coverage in `packages/desktop/src/main/signing-config.test.ts` and included it in `scripts/test-contracts.js`.
+- ✅ Captured Phase 9.3 implementation record: `docs/release/PHASE_9_3_SIGNING_ENTITLEMENTS.md`.
+
+---
+
+## Tasks Completed (Feb 25, 2026 - Phase 9.2 Config Normalization)
+
+- ✅ Normalized packaging command path to explicit config by updating desktop package scripts to use `electron-builder --config electron-builder.yml`.
+- ✅ Removed duplicate `electron-builder` `build` config block from `packages/desktop/package.json` so `packages/desktop/electron-builder.yml` is the only active packaging source.
+- ✅ Addressed primary Notion packaging risk by adding explicit Notion runtime copy rules in `packages/desktop/electron-builder.yml` (`mcp-servers` + `node_modules` paths).
+- ✅ Added missing desktop dependency on `@flowstate/mcp-notion` and refreshed lockfile metadata.
+- ✅ Added Phase 9.2 implementation record: `docs/release/PHASE_9_2_CONFIG_NORMALIZATION.md`.
+- ✅ Normalized mac packaging arch policy from `universal` to explicit `arm64` + `x64` outputs after reproducing a universal merge failure related to packaged OpenCode binaries.
+- ✅ Verified packaging succeeds with `pnpm --filter @flowstate/desktop package:mac` and validated arm64 DMG launch/install path with `pnpm smoke:dmg -- --dmg packages/desktop/out/FlowState-0.1.0-arm64.dmg`.
+- ✅ Re-validated release checks post-normalization: `pnpm test:contracts` and `pnpm test:packaged-e2e` pass.
+- ✅ Added Phase 9.2 MCP runtime startup research/best-practices brief at `docs/release/PHASE_9_2_MCP_STARTUP_BEST_PRACTICES.md` (stdio hygiene, spawn strategy, packaged path/env/dependency closure, readiness and diagnostics patterns).
+
+---
+
+## Tasks Completed (Feb 25, 2026 - Phase 9.1 Packaging Baseline Audit)
+
+- ✅ Added `docs/release/PHASE_9_1_PACKAGING_BASELINE_AUDIT.md` with packaging entrypoint inventory, config drift matrix, baseline findings, and source-of-truth decision.
+- ✅ Added `docs/release/PHASE_9_1_PACKAGING_IO_MAP.md` with current command graph, packaging inputs, transform stages, outputs, and known mapping gaps.
+- ✅ Locked Phase 9.1 builder source-of-truth policy to `packages/desktop/electron-builder.yml` and documented carry-forward risks for Phase 9.2 normalization.
 
 ---
 

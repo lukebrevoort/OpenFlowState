@@ -20,7 +20,16 @@ function createSmokeReport(dmgPath) {
     dmgPath,
     mountPoint: null,
     appPath: null,
+    installDir: null,
+    installedAppPath: null,
     steps: [],
+    launches: [],
+    runtimeChecks: {
+      startupLogPath: null,
+      startupSignals: [],
+      mcpSystemLogPath: null,
+      mcpSystemSignals: [],
+    },
     launch: {
       attempted: false,
       started: false,
@@ -76,6 +85,68 @@ function findLatestDmg() {
     .sort((a, b) => b.mtime - a.mtime);
 
   return files.length > 0 ? files[0].fullPath : null;
+}
+
+function getDataDir() {
+  const homeDir = process.env.HOME || os.homedir();
+  return path.join(homeDir, 'Library', 'Application Support', '@flowstate', 'desktop');
+}
+
+function getStartupLogPath() {
+  return path.join(getDataDir(), 'logs', 'startup.log');
+}
+
+function getMcpSystemLogPath() {
+  return path.join(getDataDir(), 'mcp-mcp-system.log');
+}
+
+function getFileSize(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return 0;
+  }
+  return fs.statSync(filePath).size;
+}
+
+function readFileFromOffset(filePath, offset) {
+  if (!fs.existsSync(filePath)) {
+    return '';
+  }
+  const data = fs.readFileSync(filePath);
+  if (offset >= data.length) {
+    return '';
+  }
+  return data.subarray(offset).toString('utf8');
+}
+
+async function launchAndAssert({ appPath, label, report }) {
+  const beforePids = await getFlowStatePids();
+  await run('open', ['-n', appPath]);
+  await sleep(2500);
+  const afterPids = await getFlowStatePids();
+  const newPids = afterPids.filter((pid) => !beforePids.includes(pid));
+
+  if (newPids.length === 0) {
+    throw new Error(`${label}: no new FlowState process detected after launch attempt.`);
+  }
+
+  await terminatePids(newPids);
+  report.launches.push({
+    label,
+    beforePids,
+    afterPids,
+    newPids,
+    success: true,
+  });
+
+  if (!report.launch.attempted) {
+    report.launch.attempted = true;
+    report.launch.started = true;
+    report.launch.beforePids = beforePids;
+    report.launch.afterPids = afterPids;
+    report.launch.newPids = newPids;
+  }
+
+  return newPids;
 }
 
 function run(command, args, input) {
@@ -274,7 +345,12 @@ async function main() {
       `Validate DMG exists: ${resolvedDmg}`,
       'Attach DMG with hdiutil',
       'Confirm FlowState.app exists in mounted volume',
-      'Open mounted app and assert process start',
+      'Copy app bundle from DMG into a temporary install directory',
+      'Launch installed app and assert process start',
+      'Relaunch installed app and assert process start',
+      'Check startup log for OpenCode initialization signals',
+      'Check system MCP runner log for startup signals',
+      'Delete temporary installed app directory',
       'Detach mounted DMG',
     ];
 
@@ -293,6 +369,18 @@ async function main() {
   const report = createSmokeReport(dmgPath);
   let detachTarget = null;
   let resultPath = '';
+  const installDir = path.join(os.tmpdir(), `flowstate-smoke-${Date.now()}`);
+  const installedAppPath = path.join(installDir, 'FlowState.app');
+  report.installDir = installDir;
+  report.installedAppPath = installedAppPath;
+
+  const startupLogPath = getStartupLogPath();
+  const mcpSystemLogPath = getMcpSystemLogPath();
+  report.runtimeChecks.startupLogPath = startupLogPath;
+  report.runtimeChecks.mcpSystemLogPath = mcpSystemLogPath;
+
+  const startupLogOffset = getFileSize(startupLogPath);
+  const mcpLogOffset = getFileSize(mcpSystemLogPath);
 
   try {
     console.log(`Using DMG: ${dmgPath}`);
@@ -320,30 +408,55 @@ async function main() {
 
     pushStep(report, 'assert_app_bundle', 'pass', `Found app bundle at ${appPath}`);
 
-    const beforePids = await getFlowStatePids();
-    report.launch.beforePids = beforePids;
-    report.launch.attempted = true;
-    await run('open', ['-n', appPath]);
-    await sleep(1500);
-    const afterPids = await getFlowStatePids();
-    report.launch.afterPids = afterPids;
-    report.launch.newPids = afterPids.filter((pid) => !beforePids.includes(pid));
-
-    if (report.launch.newPids.length === 0) {
-      pushStep(
-        report,
-        'assert_app_launch',
-        'fail',
-        'No new FlowState process detected after launch attempt'
-      );
-      throw new Error('FlowState launch assertion failed: no new process detected.');
+    if (fs.existsSync(installDir)) {
+      fs.rmSync(installDir, { recursive: true, force: true });
     }
+    fs.mkdirSync(installDir, { recursive: true });
+    await run('ditto', [appPath, installedAppPath]);
+    pushStep(report, 'install_from_dmg', 'pass', `Installed app to ${installedAppPath}`);
 
-    report.launch.started = true;
-    pushStep(report, 'assert_app_launch', 'pass', `Started FlowState PID(s): ${report.launch.newPids.join(', ')}`);
+    const firstLaunchPids = await launchAndAssert({
+      appPath: installedAppPath,
+      label: 'launch_1',
+      report,
+    });
+    pushStep(report, 'assert_app_launch_1', 'pass', `Started FlowState PID(s): ${firstLaunchPids.join(', ')}`);
 
-    await terminatePids(report.launch.newPids);
-    pushStep(report, 'terminate_launched_app', 'pass', 'Stopped launched FlowState process(es)');
+    const secondLaunchPids = await launchAndAssert({
+      appPath: installedAppPath,
+      label: 'launch_2',
+      report,
+    });
+    pushStep(report, 'assert_app_launch_2', 'pass', `Started FlowState PID(s): ${secondLaunchPids.join(', ')}`);
+
+    const startupLogDelta = readFileFromOffset(startupLogPath, startupLogOffset);
+    const startupSignals = ['FlowState initialize() started', 'OpenCode server initialized'];
+    const startupMatches = startupSignals.filter((signal) => startupLogDelta.includes(signal));
+    report.runtimeChecks.startupSignals = startupMatches;
+    if (startupMatches.length !== startupSignals.length) {
+      throw new Error(
+        `Startup log missing expected signals: ${startupSignals
+          .filter((signal) => !startupMatches.includes(signal))
+          .join(', ')}`
+      );
+    }
+    pushStep(report, 'assert_startup_log_signals', 'pass', `Startup signals observed: ${startupMatches.join(', ')}`);
+
+    const mcpLogDelta = readFileFromOffset(mcpSystemLogPath, mcpLogOffset);
+    const mcpSignals = ['start mcp-system', 'import @flowstate/mcp-system/dist/index.js'];
+    const mcpMatches = mcpSignals.filter((signal) => mcpLogDelta.includes(signal));
+    report.runtimeChecks.mcpSystemSignals = mcpMatches;
+    if (mcpMatches.length !== mcpSignals.length) {
+      throw new Error(
+        `System MCP runner log missing expected signals: ${mcpSignals
+          .filter((signal) => !mcpMatches.includes(signal))
+          .join(', ')}`
+      );
+    }
+    pushStep(report, 'assert_mcp_system_signals', 'pass', `System MCP signals observed: ${mcpMatches.join(', ')}`);
+
+    fs.rmSync(installDir, { recursive: true, force: true });
+    pushStep(report, 'cleanup_installed_app', 'pass', `Removed temporary install directory ${installDir}`);
 
     report.status = 'pass';
   } catch (error) {
@@ -361,6 +474,16 @@ async function main() {
           report.status = 'fail';
           report.error = `Failed to detach DMG: ${detail}`;
         }
+      }
+    }
+
+    if (report.installDir && fs.existsSync(report.installDir)) {
+      try {
+        fs.rmSync(report.installDir, { recursive: true, force: true });
+        pushStep(report, 'cleanup_installed_app', 'pass', `Removed temporary install directory ${report.installDir}`);
+      } catch (cleanupError) {
+        const detail = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+        pushStep(report, 'cleanup_installed_app', 'fail', detail);
       }
     }
 

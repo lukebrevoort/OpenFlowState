@@ -1761,6 +1761,184 @@ gmail_get_thread({
 
 **Token savings estimate**: typical inbox scan drops from ~80K tokens (full payloads for 20 emails) to ~4K tokens (metadata only), with selective reads adding ~2K per expanded email.
 
+### Phase 9: Demo DMG Release Packaging Program
+
+Value: produce a reliable, reproducible, installable macOS demo release package from the current desktop app without regressing dev/runtime behavior.
+
+#### Phase 9 Product Goal
+
+Ship a `demo-ready` FlowState DMG release pipeline that is deterministic, signed, notarized, stapled, validated, and document-backed for repeatable private distribution.
+
+#### Architecture Decision (Locked for Phase 9)
+
+- Keep `electron-builder` as the packaging system for this phase.
+- Do not migrate to Electron Forge during packaging hardening.
+- Rationale: current repo already has working build + packaging + gate scripts, and migration risk is not justified before demo release.
+
+#### Phase 9 Scope
+
+- Deterministic artifact generation for `.dmg` and `.zip`.
+- Apple distribution path hardening (Developer ID signing + notarization + stapling).
+- DMG install/launch/relaunch verification and release gate enforcement.
+- Packaging docs, runbooks, and CI secret policy needed for repeatable execution.
+
+#### Phase 9 Explicit Non-Goals
+
+- No migration to Forge/Maker stack.
+- No Windows/Linux installer work in this phase.
+- No broad product feature additions unrelated to packaging/release reliability.
+
+#### Phase 9 Execution DAG (PM-Executable)
+
+```text
+phase.9.1_packaging-baseline-audit
+  -> phase.9.2_config-normalization
+  -> phase.9.3_signing-entitlements
+  -> phase.9.4_notarization-and-stapling
+  -> phase.9.5_artifact-integrity-and-naming
+  -> phase.9.6_installer-smoke-and-runtime-parity
+  -> phase.9.7_ci-gate-and-release-automation
+  -> phase.9.8_demo-release-readiness
+```
+
+#### Phase 9 Work Packages
+
+##### `phase.9.1_packaging-baseline-audit`
+- Scope: freeze baseline, identify config drift, and lock source-of-truth packaging files.
+- Tasks:
+  - Inventory all packaging entrypoints (`package:mac`, `build:release`, `gate:release`, `smoke:dmg`).
+  - Identify duplicate/competing `electron-builder` config between `package.json` and `electron-builder.yml`.
+  - Produce baseline artifact map (what gets bundled, where, and why).
+- Exit criteria:
+  - One authoritative builder config path is chosen and documented.
+  - Packaging input/output map is committed.
+
+##### `phase.9.2_config-normalization`
+- Scope: make packaging config deterministic and explicit.
+- Tasks:
+  - Normalize `files`, `extraResources`, and MCP packaging paths.
+  - Ensure universal/arch policy is explicit and consistent with release naming.
+  - Remove or quarantine legacy/duplicate packaging rules that can diverge.
+- Exit criteria:
+  - Clean packaging run from repo root yields predictable artifact set.
+  - No hidden fallback path is required for successful demo packaging.
+
+##### `phase.9.3_signing-entitlements`
+- Scope: enforce correct macOS code-signing posture.
+- Tasks:
+  - Add explicit `entitlements.mac.plist` and `entitlements.mac.inherit.plist`.
+  - Wire `mac.entitlements`, `mac.entitlementsInherit`, and hardened runtime expectations.
+  - Validate signed app bundle and nested binaries (OpenCode binary, helpers, MCP runtimes).
+- Exit criteria:
+  - `codesign --verify --deep --strict --verbose=2` passes on packaged app.
+  - No unsigned nested executable remains in final app bundle.
+
+##### `phase.9.4_notarization-and-stapling`
+- Scope: make Apple notarization a first-class gate.
+- Tasks:
+  - Standardize notarization auth method for CI (prefer App Store Connect API key).
+  - Integrate notarization in packaging flow via `electron-builder` compatible env contract.
+  - Add staple + validate checks to release gate.
+- Exit criteria:
+  - Notarization submission succeeds for release artifact.
+  - `xcrun stapler validate` passes for distributed app artifact.
+
+##### `phase.9.5_artifact-integrity-and-naming`
+- Scope: ensure traceable release artifacts.
+- Tasks:
+  - Enforce artifact naming convention for DMG/ZIP + build id.
+  - Generate and verify SHA256 checksums.
+  - Maintain artifact manifest with size, hash, arch, git SHA, build time.
+- Exit criteria:
+  - Checksums verify cleanly on a second machine.
+  - Manifest and checksum data exactly match uploaded artifacts.
+
+##### `phase.9.6_installer-smoke-and-runtime-parity`
+- Scope: validate the installed app behaves like validated local build.
+- Tasks:
+  - Run DMG install/launch/relaunch/uninstall smoke checks.
+  - Validate key startup capabilities (OpenCode process, MCP service spawn, mode navigation).
+  - Capture smoke evidence JSON + logs for every candidate build.
+- Exit criteria:
+  - `pnpm smoke:dmg` passes with `status: pass` evidence artifact.
+  - No P0/P1 packaged-runtime regression vs local validated baseline.
+
+##### `phase.9.7_ci-gate-and-release-automation`
+- Scope: prevent bypassing release safety gates.
+- Tasks:
+  - Require `build:release`, `smoke:dmg`, `test:contracts`, `test:packaged-e2e`, `gate:release` for demo candidates.
+  - Block release draft blessing when any gate fails.
+  - Add failure-classified outputs for fast triage.
+- Exit criteria:
+  - Gate pipeline fails closed (no partial success accepted).
+  - One full CI dry-run completes end-to-end with passing status.
+
+##### `phase.9.8_demo-release-readiness`
+- Scope: operationalize a safe demo distribution process.
+- Tasks:
+  - Update release runbook and installer instructions for signed/notarized path.
+  - Create final demo checklist (artifacts, checksums, install proof, known issues, rollback link).
+  - Execute go/no-go review with required sign-offs.
+- Exit criteria:
+  - Demo candidate can be installed by target testers without unsafe bypass instructions.
+  - Release packet includes all mandatory evidence and reviewer approvals.
+
+#### Required Secrets + Environment Contract (Phase 9)
+
+- Code signing:
+  - `CSC_LINK`
+  - `CSC_KEY_PASSWORD`
+  - optional local identity controls (`CSC_NAME`, `CSC_IDENTITY_AUTO_DISCOVERY`)
+- Notarization (preferred CI path):
+  - `APPLE_API_KEY`
+  - `APPLE_API_KEY_ID`
+  - `APPLE_API_ISSUER`
+- Rule: no plaintext credentials in repo, scripts, or committed config files.
+
+#### Required Validation Commands (Phase 9)
+
+From `flowstate/` root for release candidates:
+
+1. `pnpm build:release`
+2. `pnpm smoke:dmg`
+3. `pnpm test:contracts`
+4. `pnpm test:packaged-e2e`
+5. `pnpm gate:release`
+6. `codesign --verify --deep --strict --verbose=2 "/Applications/FlowState.app"` (or staged app path)
+7. `spctl --assess --type execute --verbose=4 "/Applications/FlowState.app"` (or staged app path)
+8. `xcrun stapler validate "/Applications/FlowState.app"` (or staged app path)
+
+#### PM Routing Matrix (Phase 9)
+
+| Task Type | Low Risk | Medium Risk | High Risk |
+| --- | --- | --- | --- |
+| Packaging config normalization | `@general` | `@general` | `@oracle` |
+| Signing/notarization wiring | `@general` | `@oracle` | `@oracle` |
+| Runtime parity/smoke fixes | `@general` | `@oracle` | `@oracle` |
+| Release docs/runbooks | `@general` | `@uiux` | `@uiux` |
+| Gate verification/evidence review | `@verifier` | `@verifier` | `@verifier` |
+
+#### Delegation Triggers (Phase 9)
+
+- Route to `@oracle` when packaging behavior is non-deterministic, signing/notarization fails without clear root cause, or packaged runtime diverges from local.
+- Route to `@verifier` at end of each `phase.9.x` and for every demo candidate artifact.
+- Route to `@uiux` when installer/user-facing docs cause confusion or failed first-install runs.
+
+#### Verification Owner Rule (Phase 9)
+
+- Any DMG labeled `demo candidate` is invalid until `@verifier` confirms all phase gates + smoke evidence + signing/notarization validation outputs.
+
+#### Go / No-Go (Phase 9)
+
+- **GO** only when all `phase.9.x` exit criteria are met and evidence is attached.
+- **NO-GO** on any failed gate, missing checksum/manifest linkage, unsigned/notarization failure, or unresolved P0/P1 packaged-runtime defect.
+
+#### Rollback Plan (Phase 9)
+
+- Keep last known-good stable commit and release artifacts pinned.
+- If packaging pipeline regresses, cut hotfix from last known-good release commit, re-run full gate sequence, and publish replacement artifact set with new build id.
+- Never overwrite prior artifact checksums; issue a new manifest for every rebuild.
+
 ### Phase 3.75: Canvas + School-Friendly Login (Folded Into Phases 3/6)
 
 Canvas is already present in the codebase (Canvas MCP + integration surface). Remaining work belongs in integrations/onboarding polish:

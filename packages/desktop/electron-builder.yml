@@ -23,6 +23,12 @@ extraResources:
     to: node_modules/@flowstate/mcp-gmail/package.json
   - from: ../mcp-gmail/dist
     to: node_modules/@flowstate/mcp-gmail/dist
+  - from: ../mcp-notion/dist
+    to: mcp-servers/mcp-notion/dist
+  - from: ../mcp-notion/package.json
+    to: node_modules/@flowstate/mcp-notion/package.json
+  - from: ../mcp-notion/dist
+    to: node_modules/@flowstate/mcp-notion/dist
   - from: ../mcp-gcal/dist
     to: mcp-servers/mcp-gcal/dist
   - from: ../mcp-gcal/package.json
@@ -45,20 +51,26 @@ extraResources:
     to: bin/opencode-darwin-arm64
   - from: vendor/opencode/darwin-x64/opencode
     to: bin/opencode-darwin-x64
+  - from: vendor/node/darwin-arm64
+    to: node-runtime/darwin-arm64
+  - from: vendor/node/darwin-x64
+    to: node-runtime/darwin-x64
 
 mac:
   target:
     - target: dmg
-      arch: [universal]
+      arch: [arm64, x64]
     - target: zip
-      arch: [universal]
+      arch: [arm64, x64]
   icon: assets/flowstate-main-logo.icns
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
-  entitlements: null
-  entitlementsInherit: null
+  entitlements: assets/entitlements.mac.plist
+  entitlementsInherit: assets/entitlements.mac.inherit.plist
   darkModeSupport: true
+
+afterSign: scripts/sign-nested-binaries.mjs
 
 dmg:
   background: null

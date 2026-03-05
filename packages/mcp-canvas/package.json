@@ -15,8 +15,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@flowstate/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "base64-js": "^1.5.1",
     "jszip": "^3.10.1",
     "mammoth": "^1.10.0",
     "pdf-parse": "^1.1.1",
