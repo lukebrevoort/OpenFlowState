@@ -69,10 +69,12 @@ import { validateLocalStudyMaterialSource } from './study-material-source-valida
 import { classifyStudyMaterialFallback } from './study-material-fallback.js';
 import { evaluateStudyMaterialQualityGate } from './study-material-quality-gate.js';
 import { ensureOpencodeCliAvailable } from './opencode-cli.js';
+import { DesktopAutoUpdater } from './auto-updater.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execFileAsync = promisify(execFile);
+const desktopAutoUpdater = new DesktopAutoUpdater();
 const SAFE_PROVIDER_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TERMINAL_COMMAND_PREFIX = 'opencode auth login';
 const UNSAFE_SHELL_CHARS_PATTERN = /[;&|`$<>\\"'(){}\[\]!]/;
@@ -537,6 +539,8 @@ function createWindow(): void {
     },
   });
 
+  desktopAutoUpdater.setMainWindow(mainWindow);
+
   // Show window when ready to prevent flashing
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -566,6 +570,7 @@ function createWindow(): void {
 
   // Cleanup on close
   mainWindow.on('closed', () => {
+    desktopAutoUpdater.setMainWindow(null);
     mainWindow = null;
   });
 }
@@ -585,6 +590,8 @@ async function initialize(): Promise<void> {
   await appendStartupLog('FlowState initialize() started');
   process.env.FLOWSTATE_DATA_DIR = dataDir;
   userProfile.configure({ dataDir });
+  desktopAutoUpdater.configure(configStore.get());
+  desktopAutoUpdater.start();
   console.log('Configuration loaded');
   await appendStartupLog(`Configuration loaded (dataDir=${dataDir})`);
 
@@ -686,6 +693,20 @@ ipcMain.handle('app:getInfo', () => {
  */
 ipcMain.handle('app:getTheme', () => {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+});
+
+ipcMain.handle('updates:getStatus', () => {
+  return desktopAutoUpdater.getStatus();
+});
+
+ipcMain.handle('updates:checkNow', async () => {
+  await desktopAutoUpdater.checkNow('manual');
+  return { success: true };
+});
+
+ipcMain.handle('updates:installNow', async () => {
+  desktopAutoUpdater.installNow();
+  return { success: true };
 });
 
 /**
@@ -930,7 +951,9 @@ ipcMain.handle('config:get', async () => {
 
 ipcMain.handle('config:set', async (_event, config: Parameters<typeof configStore.update>[0]) => {
   await configStore.update(config);
-  return configStore.get();
+  const updatedConfig = configStore.get();
+  desktopAutoUpdater.configure(updatedConfig);
+  return updatedConfig;
 });
 
 ipcMain.handle('config:path', () => {
@@ -1426,7 +1449,9 @@ ipcMain.handle('settings:get', async () => {
 
 ipcMain.handle('settings:update', async (_event, config: Parameters<typeof configStore.update>[0]) => {
   await configStore.update(config);
-  return configStore.get();
+  const updatedConfig = configStore.get();
+  desktopAutoUpdater.configure(updatedConfig);
+  return updatedConfig;
 });
 
 ipcMain.handle('settings:getTheme', () => {

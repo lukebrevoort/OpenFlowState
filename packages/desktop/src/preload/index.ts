@@ -16,6 +16,7 @@ import type {
   OAuthSuccessEvent,
   OAuthErrorEvent,
   ApiTokenSuccessEvent,
+  UpdateStatusEvent,
   FlowstateConfig,
   ClientCredentials,
   ApprovalNotificationClickEvent,
@@ -211,6 +212,17 @@ const flowstateAPI: FlowstateAPIDefinition = {
       const handler = (_event: Electron.IpcRendererEvent, data: ApprovalNotificationClickEvent) => callback(data);
       ipcRenderer.on('notifications:approvalClick', handler);
       return () => ipcRenderer.removeListener('notifications:approvalClick', handler);
+    },
+  },
+
+  updates: {
+    getStatus: () => ipcRenderer.invoke('updates:getStatus'),
+    checkNow: () => ipcRenderer.invoke('updates:checkNow'),
+    installNow: () => ipcRenderer.invoke('updates:installNow'),
+    onStatus: (callback: (event: UpdateStatusEvent) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, data: UpdateStatusEvent) => callback(data);
+      ipcRenderer.on('updates:status', handler);
+      return () => ipcRenderer.removeListener('updates:status', handler);
     },
   },
 

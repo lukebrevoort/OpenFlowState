@@ -21,7 +21,7 @@ import { useWorkflowsStore } from './stores/workflowsStore';
 import { providerDefinitions } from './data/providerData';
 import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
-import type { AuthStatus } from './types/electron';
+import type { AuthStatus, UpdateStatusEvent } from './types/electron';
 
 export type AppPage = 'home' | 'chat' | 'tasks' | 'workflows' | 'integrations' | 'settings';
 
@@ -216,6 +216,7 @@ function App() {
   const previousAuthStatusesRef = useRef<Record<string, AuthStatus | undefined>>({});
   const [onboardingPendingIntegrationId, setOnboardingPendingIntegrationId] = useState<string | null>(null);
   const [recentlyConnectedAt, setRecentlyConnectedAt] = useState<Record<string, number>>({});
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatusEvent | null>(null);
 
   useEffect(() => {
     const unsubscribe = useIntegrationsStore.subscribe((state) => {
@@ -530,6 +531,31 @@ function App() {
   useEffect(() => {
     if (isOnboarding) return;
 
+    let mounted = true;
+    void window.flowstate.updates
+      .getStatus()
+      .then((status) => {
+        if (mounted) {
+          setUpdateStatus(status);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load updater status:', error);
+      });
+
+    const removeListener = window.flowstate.updates.onStatus((status) => {
+      setUpdateStatus(status);
+    });
+
+    return () => {
+      mounted = false;
+      removeListener();
+    };
+  }, [isOnboarding]);
+
+  useEffect(() => {
+    if (isOnboarding) return;
+
     const TIMELINE_REFRESH_DEBOUNCE_MS = 250;
     let timelineDebounceTimer: number | null = null;
     let refreshInFlight = false;
@@ -601,6 +627,18 @@ function App() {
     }
   }, [isDesktop]);
 
+  const handleUpdateCheckNow = useCallback(() => {
+    void window.flowstate.updates.checkNow().catch((error) => {
+      console.error('Failed to check for updates:', error);
+    });
+  }, []);
+
+  const handleUpdateInstallNow = useCallback(() => {
+    void window.flowstate.updates.installNow().catch((error) => {
+      console.error('Failed to install downloaded update:', error);
+    });
+  }, []);
+
   return (
     <div className="size-full relative overflow-hidden">
       <div className="absolute inset-0 bg-background pointer-events-none" />
@@ -648,6 +686,42 @@ function App() {
             activityEvents={timeline}
           />
         )}
+
+        {showMainShell && updateStatus && updateStatus.phase !== 'idle' ? (
+          <div className="mx-4 mt-3 rounded-lg border border-border/70 bg-card/80 px-3 py-2 text-sm text-foreground/90 backdrop-blur-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>{updateStatus.message}</span>
+              <div className="flex items-center gap-2">
+                {updateStatus.phase === 'error' ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent/50"
+                    onClick={handleUpdateCheckNow}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+                {updateStatus.phase === 'ready' ? (
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent/50"
+                    onClick={handleUpdateInstallNow}
+                  >
+                    Restart now
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {updateStatus.phase === 'downloading' ? (
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border/70">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.max(0, Math.min(100, Math.round(updateStatus.progressPercent ?? 0)))}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {showMainShell && openCodeStartupError && (!openCodeStatus?.running || !openCodeStatus?.healthy) ? (
           <div className="mx-4 mt-3 rounded-lg border border-semantic-denied/30 bg-semantic-denied/10 px-3 py-2 text-sm text-semantic-denied">
