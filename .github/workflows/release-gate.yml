@@ -1,9 +1,6 @@
 name: Release Gate
 
 on:
-  push:
-    tags:
-      - 'v*'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -16,14 +13,6 @@ on:
         options:
           - 'false'
           - 'true'
-      release_tag:
-        description: 'Tag to publish when full_release=true (for manual dispatch)'
-        required: false
-        default: ''
-        type: string
-
-permissions:
-  contents: read
 
 jobs:
   release-gate:
@@ -58,11 +47,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run release gate (dry-run)
-        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.full_release == 'false')
+        if: github.event_name != 'workflow_dispatch' || inputs.full_release == 'false'
         run: pnpm gate:release -- --dry-run
 
       - name: Run release gate (full)
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_release == 'true')
+        if: github.event_name == 'workflow_dispatch' && inputs.full_release == 'true'
         run: pnpm gate:release
 
       - name: Upload gate artifacts
@@ -70,62 +59,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-gate-artifacts
-          path: |
-            .opencode/artifacts
-            packages/desktop/out
+          path: .opencode/artifacts
           if-no-files-found: warn
-
-  publish-release:
-    needs: release-gate
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.full_release == 'true')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-gate-artifacts
-          path: release-gate-artifacts
-
-      - name: Resolve release tag
-        id: release_tag
-        run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            TAG="${GITHUB_REF_NAME}"
-          else
-            TAG="${{ inputs.release_tag }}"
-          fi
-
-          if [ -z "$TAG" ]; then
-            echo "release_tag input is required for manual full releases." >&2
-            exit 1
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Publish desktop release artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
-        run: |
-          shopt -s nullglob
-
-          files=(
-            release-gate-artifacts/packages/desktop/out/*.dmg
-            release-gate-artifacts/packages/desktop/out/*.zip
-            release-gate-artifacts/packages/desktop/out/*.blockmap
-            release-gate-artifacts/packages/desktop/out/latest-mac.yml
-          )
-
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No release files found to publish." >&2
-            exit 1
-          fi
-
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes "Automated FlowState desktop release."
-          fi
-
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber

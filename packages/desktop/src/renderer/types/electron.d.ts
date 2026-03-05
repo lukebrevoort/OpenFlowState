@@ -484,16 +484,6 @@ export interface ApiTokenSuccessEvent {
   service: string;
 }
 
-export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
-
-export interface UpdateStatusEvent {
-  phase: UpdatePhase;
-  message: string;
-  progressPercent?: number;
-  version?: string;
-  retryAt?: number;
-}
-
 export interface ApprovalNotificationClickEvent {
   requestId: string;
   sessionId: string;
@@ -631,13 +621,6 @@ export interface FlowstateAPI {
 
   notifications: {
     onApprovalClick: (callback: (event: ApprovalNotificationClickEvent) => void) => () => void;
-  };
-
-  updates: {
-    getStatus: () => Promise<UpdateStatusEvent>;
-    checkNow: () => Promise<{ success: boolean }>;
-    installNow: () => Promise<{ success: boolean }>;
-    onStatus: (callback: (event: UpdateStatusEvent) => void) => () => void;
   };
 
   mcp: {
@@ -833,9 +816,6 @@ export interface FlowstateConfig {
         globalRetentionDays?: number;
         perCourseRetentionEnabled?: boolean;
       };
-    };
-    updates?: {
-      checkIntervalMinutes?: number;
     };
   };
   integrations?: {

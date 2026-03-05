@@ -70,10 +70,6 @@ export interface StudyMaterialPreferences {
   retention: StudyMaterialRetentionPreferences;
 }
 
-export interface UpdatePreferences {
-  checkIntervalMinutes: number;
-}
-
 /**
  * User preferences
  */
@@ -95,7 +91,6 @@ export interface UserPreferences {
   backgroundMotion?: 'animated' | 'static';
 
   studyMaterials?: StudyMaterialPreferences;
-  updates?: UpdatePreferences;
 }
 
 export interface GoogleCalendarPreferences {
@@ -171,9 +166,6 @@ const DEFAULT_CONFIG: FlowStateConfig = {
         globalRetentionDays: 30,
         perCourseRetentionEnabled: true,
       },
-    },
-    updates: {
-      checkIntervalMinutes: 60,
     },
   },
   integrations: {},
@@ -267,11 +259,6 @@ class ConfigStore {
                 loaded.preferences?.studyMaterials?.retention?.perCourseRetentionEnabled ??
                 DEFAULT_CONFIG.preferences.studyMaterials!.retention.perCourseRetentionEnabled,
             },
-          },
-          updates: {
-            checkIntervalMinutes:
-              loaded.preferences?.updates?.checkIntervalMinutes ??
-              DEFAULT_CONFIG.preferences.updates!.checkIntervalMinutes,
           },
         },
       };

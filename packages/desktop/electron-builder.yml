@@ -111,9 +111,5 @@ linux:
   icon: assets/flowstate-main-logo.png
   category: Office
 
-# Auto-update configuration
-publish:
-  provider: github
-  owner: lbrevoort
-  repo: flowstate
-  releaseType: release
+# Auto-update configuration (future)
+publish: null

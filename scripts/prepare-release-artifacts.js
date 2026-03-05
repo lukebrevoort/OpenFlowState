@@ -49,43 +49,6 @@ function parseArtifactType(fileName) {
   return null;
 }
 
-async function renameRelatedBlockmap(item) {
-  const sourceBlockmapPath = `${item.currentPath}.blockmap`;
-  const targetBlockmapPath = `${item.nextPath}.blockmap`;
-
-  if (!fs.existsSync(sourceBlockmapPath)) {
-    return null;
-  }
-
-  if (fs.existsSync(targetBlockmapPath)) {
-    await fsp.rm(targetBlockmapPath, { force: true });
-  }
-
-  await fsp.rename(sourceBlockmapPath, targetBlockmapPath);
-  return {
-    from: `${item.currentName}.blockmap`,
-    to: `${item.nextName}.blockmap`,
-  };
-}
-
-async function rewriteLatestMacFeed(renamePairs) {
-  const feedPath = path.join(outDir, 'latest-mac.yml');
-  if (!fs.existsSync(feedPath) || renamePairs.length === 0) {
-    return;
-  }
-
-  const currentFeed = await fsp.readFile(feedPath, 'utf8');
-  let nextFeed = currentFeed;
-
-  for (const pair of renamePairs) {
-    nextFeed = nextFeed.split(pair.from).join(pair.to);
-  }
-
-  if (nextFeed !== currentFeed) {
-    await fsp.writeFile(feedPath, nextFeed, 'utf8');
-  }
-}
-
 async function sha256(filePath) {
   const hash = crypto.createHash('sha256');
   const stream = fs.createReadStream(filePath);
@@ -170,19 +133,6 @@ async function main() {
     }
     await fsp.rename(item.currentPath, item.nextPath);
   }
-
-  const renamePairs = [];
-  for (const item of renamePlan) {
-    if (item.currentName !== item.nextName) {
-      renamePairs.push({ from: item.currentName, to: item.nextName });
-    }
-    const blockmapRename = await renameRelatedBlockmap(item);
-    if (blockmapRename) {
-      renamePairs.push(blockmapRename);
-    }
-  }
-
-  await rewriteLatestMacFeed(renamePairs);
 
   const manifestArtifacts = [];
   for (const item of renamePlan) {
