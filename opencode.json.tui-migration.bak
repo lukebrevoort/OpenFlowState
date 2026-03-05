@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "theme": "./themes/flowstate.json",
   "mcp": {
     "notion": {
       "type": "local",

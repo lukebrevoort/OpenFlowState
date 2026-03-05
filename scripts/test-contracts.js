@@ -9,7 +9,7 @@ const rootDir = path.resolve(__dirname, '..');
 const dryRun = process.argv.includes('--dry-run');
 
 const steps = [
-  'pnpm --filter @flowstate/desktop exec vitest run src/main/mcp-config.test.ts src/main/approval-policy-store.test.ts',
+  'pnpm --filter @flowstate/desktop exec vitest run src/main/mcp-config.test.ts src/main/approval-policy-store.test.ts src/main/signing-config.test.ts',
   'pnpm --filter @flowstate/mcp-canvas test',
 ];
 

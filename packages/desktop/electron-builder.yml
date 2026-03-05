@@ -66,9 +66,11 @@ mac:
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
-  entitlements: null
-  entitlementsInherit: null
+  entitlements: assets/entitlements.mac.plist
+  entitlementsInherit: assets/entitlements.mac.inherit.plist
   darkModeSupport: true
+
+afterSign: scripts/sign-nested-binaries.mjs
 
 dmg:
   background: null

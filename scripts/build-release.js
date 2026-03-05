@@ -9,11 +9,13 @@ const rootDir = path.resolve(__dirname, '..');
 const dryRun = process.argv.includes('--dry-run');
 
 const steps = [
+  'pnpm check:notarization-env',
   'pnpm lint',
   'pnpm typecheck',
   'pnpm test',
   'pnpm --filter @flowstate/desktop build',
   'pnpm --filter @flowstate/desktop package:mac',
+  'pnpm prepare:release-artifacts',
 ];
 
 function run(command) {
