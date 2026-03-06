@@ -21,7 +21,7 @@ import { useWorkflowsStore } from './stores/workflowsStore';
 import { providerDefinitions } from './data/providerData';
 import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
-import type { AuthStatus } from './types/electron';
+import type { AppUpdateStatus, AuthStatus } from './types/electron';
 
 export type AppPage = 'home' | 'chat' | 'tasks' | 'workflows' | 'integrations' | 'settings';
 
@@ -216,6 +216,7 @@ function App() {
   const previousAuthStatusesRef = useRef<Record<string, AuthStatus | undefined>>({});
   const [onboardingPendingIntegrationId, setOnboardingPendingIntegrationId] = useState<string | null>(null);
   const [recentlyConnectedAt, setRecentlyConnectedAt] = useState<Record<string, number>>({});
+  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
 
   useEffect(() => {
     const unsubscribe = useIntegrationsStore.subscribe((state) => {
@@ -528,6 +529,34 @@ function App() {
   }, [handleSelectConversation, handleSelectTaskRun, isOnboarding]);
 
   useEffect(() => {
+    if (!showMainShell) return;
+
+    let isCancelled = false;
+
+    const loadInitialStatus = async () => {
+      try {
+        const status = await window.flowstate.app.getUpdateStatus();
+        if (!isCancelled) {
+          setAppUpdateStatus(status);
+        }
+      } catch (error) {
+        console.error('Failed to load update status:', error);
+      }
+    };
+
+    void loadInitialStatus();
+
+    const unsubscribe = window.flowstate.app.onUpdateStatus((status) => {
+      setAppUpdateStatus(status);
+    });
+
+    return () => {
+      isCancelled = true;
+      unsubscribe();
+    };
+  }, [showMainShell]);
+
+  useEffect(() => {
     if (isOnboarding) return;
 
     const TIMELINE_REFRESH_DEBOUNCE_MS = 250;
@@ -601,6 +630,27 @@ function App() {
     }
   }, [isDesktop]);
 
+  const handleRetryUpdateCheck = useCallback(async () => {
+    try {
+      await window.flowstate.app.checkForUpdates();
+    } catch (error) {
+      console.error('Failed to retry update check:', error);
+    }
+  }, []);
+
+  const handleInstallUpdate = useCallback(async () => {
+    try {
+      await window.flowstate.app.installUpdate();
+    } catch (error) {
+      console.error('Failed to trigger update install:', error);
+    }
+  }, []);
+
+  const showUpdateBanner = useMemo(() => {
+    if (!appUpdateStatus) return false;
+    return appUpdateStatus.phase !== 'idle' && appUpdateStatus.phase !== 'not_available';
+  }, [appUpdateStatus]);
+
   return (
     <div className="size-full relative overflow-hidden">
       <div className="absolute inset-0 bg-background pointer-events-none" />
@@ -652,6 +702,35 @@ function App() {
         {showMainShell && openCodeStartupError && (!openCodeStatus?.running || !openCodeStatus?.healthy) ? (
           <div className="mx-4 mt-3 rounded-lg border border-semantic-denied/30 bg-semantic-denied/10 px-3 py-2 text-sm text-semantic-denied">
             OpenCode failed to start: {openCodeStartupError}
+          </div>
+        ) : null}
+
+        {showMainShell && showUpdateBanner && appUpdateStatus ? (
+          <div className="mx-4 mt-3 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm text-foreground">
+            <div className="flex flex-wrap items-center gap-3">
+              <span>{appUpdateStatus.message}</span>
+              {appUpdateStatus.phase === 'downloading' && typeof appUpdateStatus.progressPercent === 'number' ? (
+                <span className="text-xs text-muted-foreground">{Math.round(appUpdateStatus.progressPercent)}%</span>
+              ) : null}
+              {appUpdateStatus.phase === 'ready' ? (
+                <button
+                  type="button"
+                  className="fs-button-secondary text-xs px-3 py-1"
+                  onClick={handleInstallUpdate}
+                >
+                  Restart to update
+                </button>
+              ) : null}
+              {appUpdateStatus.canRetry && appUpdateStatus.phase !== 'ready' ? (
+                <button
+                  type="button"
+                  className="fs-button-secondary text-xs px-3 py-1"
+                  onClick={handleRetryUpdateCheck}
+                >
+                  Retry now
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
