@@ -1,9 +1,10 @@
 import type { BrowserWindow } from 'electron';
 import { app } from 'electron';
-import { autoUpdater, type AppUpdater } from 'electron-updater';
+import { autoUpdater, type AppUpdater, type UpdateInfo } from 'electron-updater';
 import type { FlowStateConfig } from './config-store.js';
 
 const DEFAULT_UPDATE_CHECK_INTERVAL_MINUTES = 60;
+const DEFAULT_UPDATE_TRACK: UpdateTrack = 'stable';
 const MIN_UPDATE_CHECK_INTERVAL_MINUTES = 5;
 const MAX_UPDATE_CHECK_INTERVAL_MINUTES = 24 * 60;
 const MAX_NETWORK_RETRY_ATTEMPTS = 3;
@@ -30,12 +31,14 @@ export interface AppUpdateStatus {
   totalBytes?: number;
   bytesPerSecond?: number;
   version?: string;
+  releaseNotes?: string;
   retryAttempt?: number;
   retryAtIso?: string;
   canRetry?: boolean;
 }
 
 type CheckReason = 'launch' | 'interval' | 'manual' | 'retry';
+export type UpdateTrack = 'stable' | 'beta';
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -48,6 +51,41 @@ const parseErrorMessage = (error: unknown): string => {
 
 const isLikelyNetworkError = (message: string): boolean => {
   return NETWORK_ERROR_PATTERN.test(message);
+};
+
+export const resolveUpdateTrack = (configured: unknown): UpdateTrack => {
+  if (configured === 'beta') {
+    return 'beta';
+  }
+  return DEFAULT_UPDATE_TRACK;
+};
+
+export const extractReleaseNotesFromUpdateInfo = (
+  info: Pick<UpdateInfo, 'releaseNotes'>,
+): string | undefined => {
+  const { releaseNotes } = info;
+  if (typeof releaseNotes === 'string') {
+    const normalized = releaseNotes.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  if (Array.isArray(releaseNotes)) {
+    const normalized = releaseNotes
+      .map((entry) => {
+        const note = typeof entry.note === 'string' ? entry.note.trim() : '';
+        if (!note) {
+          return '';
+        }
+        return entry.version ? `v${entry.version}\n${note}` : note;
+      })
+      .filter(Boolean)
+      .join('\n\n')
+      .trim();
+
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  return undefined;
 };
 
 const resolveConfiguredIntervalMinutes = (config: FlowStateConfig): number => {
@@ -114,6 +152,8 @@ export class AppUpdaterManager {
     if (!this.isEnabled()) {
       return;
     }
+
+    this.applyUpdateTrackFromConfig();
 
     if (this.checkIntervalTimer) {
       clearInterval(this.checkIntervalTimer);
@@ -192,10 +232,12 @@ export class AppUpdaterManager {
 
     this.updater.on('update-available', (info) => {
       this.retryAttempt = 0;
+      const releaseNotes = extractReleaseNotesFromUpdateInfo(info);
       this.emitStatus({
         phase: 'available',
         message: 'Update available. Downloading now...',
         version: info.version,
+        releaseNotes,
       });
     });
 
@@ -207,15 +249,19 @@ export class AppUpdaterManager {
         downloadedBytes: progress.transferred,
         totalBytes: progress.total,
         bytesPerSecond: progress.bytesPerSecond,
+        version: this.lastStatus.version,
+        releaseNotes: this.lastStatus.releaseNotes,
       });
     });
 
     this.updater.on('update-downloaded', (info) => {
       this.retryAttempt = 0;
+      const releaseNotes = extractReleaseNotesFromUpdateInfo(info);
       this.emitStatus({
         phase: 'ready',
         message: 'Update ready to install. Restart FlowState to finish updating.',
         version: info.version,
+        releaseNotes,
       });
     });
 
@@ -225,6 +271,7 @@ export class AppUpdaterManager {
         phase: 'not_available',
         message: 'FlowState is up to date.',
         version: info.version,
+        releaseNotes: undefined,
       });
     });
 
@@ -279,5 +326,17 @@ export class AppUpdaterManager {
     if (window?.webContents) {
       window.webContents.send('app:updateStatus', next);
     }
+  }
+
+  private applyUpdateTrackFromConfig(): void {
+    const track = resolveUpdateTrack(this.getConfig().preferences?.updates?.channel);
+    if (track === 'beta') {
+      this.updater.allowPrerelease = true;
+      this.updater.channel = 'beta';
+      return;
+    }
+
+    this.updater.allowPrerelease = false;
+    this.updater.channel = 'latest';
   }
 }

@@ -707,28 +707,39 @@ function App() {
 
         {showMainShell && showUpdateBanner && appUpdateStatus ? (
           <div className="mx-4 mt-3 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm text-foreground">
-            <div className="flex flex-wrap items-center gap-3">
-              <span>{appUpdateStatus.message}</span>
-              {appUpdateStatus.phase === 'downloading' && typeof appUpdateStatus.progressPercent === 'number' ? (
-                <span className="text-xs text-muted-foreground">{Math.round(appUpdateStatus.progressPercent)}%</span>
-              ) : null}
-              {appUpdateStatus.phase === 'ready' ? (
-                <button
-                  type="button"
-                  className="fs-button-secondary text-xs px-3 py-1"
-                  onClick={handleInstallUpdate}
-                >
-                  Restart to update
-                </button>
-              ) : null}
-              {appUpdateStatus.canRetry && appUpdateStatus.phase !== 'ready' ? (
-                <button
-                  type="button"
-                  className="fs-button-secondary text-xs px-3 py-1"
-                  onClick={handleRetryUpdateCheck}
-                >
-                  Retry now
-                </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <span>{appUpdateStatus.message}</span>
+                {appUpdateStatus.phase === 'downloading' && typeof appUpdateStatus.progressPercent === 'number' ? (
+                  <span className="text-xs text-muted-foreground">{Math.round(appUpdateStatus.progressPercent)}%</span>
+                ) : null}
+                {appUpdateStatus.phase === 'ready' ? (
+                  <button
+                    type="button"
+                    className="fs-button-secondary text-xs px-3 py-1"
+                    onClick={handleInstallUpdate}
+                  >
+                    Restart to update
+                  </button>
+                ) : null}
+                {appUpdateStatus.canRetry && appUpdateStatus.phase !== 'ready' ? (
+                  <button
+                    type="button"
+                    className="fs-button-secondary text-xs px-3 py-1"
+                    onClick={handleRetryUpdateCheck}
+                  >
+                    Retry now
+                  </button>
+                ) : null}
+              </div>
+
+              {appUpdateStatus.releaseNotes ? (
+                <div className="rounded-md border border-primary/20 bg-background/70 px-3 py-2">
+                  <p className="text-xs text-muted-foreground mb-1">Release notes</p>
+                  <p className="max-h-36 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed">
+                    {appUpdateStatus.releaseNotes}
+                  </p>
+                </div>
               ) : null}
             </div>
           </div>
