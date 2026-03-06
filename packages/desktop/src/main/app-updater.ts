@@ -40,6 +40,11 @@ export interface AppUpdateStatus {
 type CheckReason = 'launch' | 'interval' | 'manual' | 'retry';
 export type UpdateTrack = 'stable' | 'beta';
 
+export interface UpdaterTrackConfig {
+  channel: 'latest' | 'beta';
+  allowPrerelease: boolean;
+}
+
 const nowIso = (): string => new Date().toISOString();
 
 const parseErrorMessage = (error: unknown): string => {
@@ -58,6 +63,20 @@ export const resolveUpdateTrack = (configured: unknown): UpdateTrack => {
     return 'beta';
   }
   return DEFAULT_UPDATE_TRACK;
+};
+
+export const resolveUpdaterTrackConfig = (track: UpdateTrack): UpdaterTrackConfig => {
+  if (track === 'beta') {
+    return {
+      channel: 'beta',
+      allowPrerelease: true,
+    };
+  }
+
+  return {
+    channel: 'latest',
+    allowPrerelease: false,
+  };
 };
 
 export const extractReleaseNotesFromUpdateInfo = (
@@ -330,13 +349,8 @@ export class AppUpdaterManager {
 
   private applyUpdateTrackFromConfig(): void {
     const track = resolveUpdateTrack(this.getConfig().preferences?.updates?.channel);
-    if (track === 'beta') {
-      this.updater.allowPrerelease = true;
-      this.updater.channel = 'beta';
-      return;
-    }
-
-    this.updater.allowPrerelease = false;
-    this.updater.channel = 'latest';
+    const updaterTrackConfig = resolveUpdaterTrackConfig(track);
+    this.updater.allowPrerelease = updaterTrackConfig.allowPrerelease;
+    this.updater.channel = updaterTrackConfig.channel;
   }
 }
