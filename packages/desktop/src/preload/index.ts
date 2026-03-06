@@ -54,6 +54,16 @@ const flowstateAPI: FlowstateAPIDefinition = {
     showOpenFilesDialog: (options?: OpenFilesDialogOptions) =>
       ipcRenderer.invoke('app:showOpenFilesDialog', options),
     ensureFile: (filePath: string) => ipcRenderer.invoke('app:ensureFile', filePath),
+    getUpdateStatus: () => ipcRenderer.invoke('app:getUpdateStatus'),
+    checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+    installUpdate: () => ipcRenderer.invoke('app:installUpdate'),
+    onUpdateStatus: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: unknown) => {
+        callback(status as Parameters<typeof callback>[0]);
+      };
+      ipcRenderer.on('app:updateStatus', handler);
+      return () => ipcRenderer.removeListener('app:updateStatus', handler);
+    },
   },
 
   // Window controls (for custom title bar)

@@ -69,6 +69,7 @@ import { validateLocalStudyMaterialSource } from './study-material-source-valida
 import { classifyStudyMaterialFallback } from './study-material-fallback.js';
 import { evaluateStudyMaterialQualityGate } from './study-material-quality-gate.js';
 import { ensureOpencodeCliAvailable } from './opencode-cli.js';
+import { AppUpdaterManager } from './app-updater.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -292,6 +293,11 @@ const parseSupportedTerminalCommand = (command: string): string => {
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
+
+const appUpdater = new AppUpdaterManager(
+  () => mainWindow,
+  () => configStore.get(),
+);
 
 // Determine if we're in development mode
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -636,6 +642,8 @@ async function initialize(): Promise<void> {
     await appendStartupLog('Failed to start OpenCode', error);
     // Continue anyway - the app can still function, just without AI
   }
+
+  appUpdater.start();
 }
 
 // Create window when app is ready
@@ -662,6 +670,7 @@ app.on('window-all-closed', () => {
 
 // Clean up before quitting
 app.on('before-quit', async () => {
+  appUpdater.stop();
   await stopPendingAuthWatcher();
 });
 
@@ -686,6 +695,31 @@ ipcMain.handle('app:getInfo', () => {
  */
 ipcMain.handle('app:getTheme', () => {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+});
+
+ipcMain.handle('app:getUpdateStatus', () => {
+  return appUpdater.getStatus();
+});
+
+ipcMain.handle('app:checkForUpdates', async () => {
+  try {
+    const started = await appUpdater.checkForUpdates('manual');
+    return { success: true, started };
+  } catch (error) {
+    return {
+      success: false,
+      started: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle('app:installUpdate', () => {
+  const success = appUpdater.installDownloadedUpdate();
+  if (!success) {
+    return { success: false, error: 'No downloaded update is ready to install.' };
+  }
+  return { success: true };
 });
 
 /**
@@ -930,6 +964,7 @@ ipcMain.handle('config:get', async () => {
 
 ipcMain.handle('config:set', async (_event, config: Parameters<typeof configStore.update>[0]) => {
   await configStore.update(config);
+  appUpdater.refreshIntervalFromConfig();
   return configStore.get();
 });
 
@@ -1426,6 +1461,7 @@ ipcMain.handle('settings:get', async () => {
 
 ipcMain.handle('settings:update', async (_event, config: Parameters<typeof configStore.update>[0]) => {
   await configStore.update(config);
+  appUpdater.refreshIntervalFromConfig();
   return configStore.get();
 });
 
