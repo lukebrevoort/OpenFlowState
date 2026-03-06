@@ -77,6 +77,7 @@ export interface AppUpdateStatus {
   totalBytes?: number;
   bytesPerSecond?: number;
   version?: string;
+  releaseNotes?: string;
   retryAttempt?: number;
   retryAtIso?: string;
   canRetry?: boolean;
@@ -825,6 +826,7 @@ export interface FlowstateConfig {
     };
     updates?: {
       checkIntervalMinutes?: number;
+      channel?: 'stable' | 'beta';
     };
 
     /**

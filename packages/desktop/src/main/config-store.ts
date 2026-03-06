@@ -72,6 +72,7 @@ export interface StudyMaterialPreferences {
 
 export interface UpdatesPreferences {
   checkIntervalMinutes: number;
+  channel: 'stable' | 'beta';
 }
 
 /**
@@ -165,6 +166,7 @@ const DEFAULT_CONFIG: FlowStateConfig = {
     },
     updates: {
       checkIntervalMinutes: 60,
+      channel: 'stable',
     },
     studyMaterials: {
       externalKnowledgeAllowlistEnabled: false,
@@ -253,6 +255,7 @@ class ConfigStore {
             checkIntervalMinutes:
               loaded.preferences?.updates?.checkIntervalMinutes ??
               DEFAULT_CONFIG.preferences.updates!.checkIntervalMinutes,
+            channel: loaded.preferences?.updates?.channel ?? DEFAULT_CONFIG.preferences.updates!.channel,
           },
           studyMaterials: {
             externalKnowledgeAllowlistEnabled:
