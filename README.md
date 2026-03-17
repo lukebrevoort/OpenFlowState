@@ -1,8 +1,14 @@
-# FlowState 2.0
+# FlowState 2.0 - Phase 3 Relay Validation
 
 > **Open-source productivity orchestration platform built on [OpenCode](https://opencode.ai)**
 
 FlowState enables you to manage your entire digital life from one place. Connect your apps, describe what you want, and let FlowState handle the rest.
+
+## Current Project Phase
+
+- **Phase**: Phase 3 end-to-end validation
+- **Status**: In validation via local Cloudflare Worker relay
+- **Tracking**: Runner status updates and completion notifications are published through the local relay flow
 
 ## Core Philosophy
 
@@ -50,12 +56,12 @@ flowstate/
 
 ### Official MCPs
 
-| Integration | Description | Status |
-|-------------|-------------|--------|
-| Notion | Pages, databases, task management | 🚧 In Progress |
-| Gmail | Email reading, drafting, sending | 🚧 In Progress |
-| Google Calendar | Events, scheduling, conflicts | 🚧 In Progress |
-| System | Notifications, apps, automation | 🚧 In Progress |
+| Integration     | Description                       | Status         |
+| --------------- | --------------------------------- | -------------- |
+| Notion          | Pages, databases, task management | 🚧 In Progress |
+| Gmail           | Email reading, drafting, sending  | 🚧 In Progress |
+| Google Calendar | Events, scheduling, conflicts     | 🚧 In Progress |
+| System          | Notifications, apps, automation   | 🚧 In Progress |
 
 ### Adding Custom MCPs
 
@@ -85,13 +91,13 @@ The web dashboard runs on `http://localhost:3847` and provides:
 
 FlowState uses a primary orchestrator with specialized subagents:
 
-| Agent | Role |
-|-------|------|
-| `@flowstate` | Primary orchestrator, routes tasks |
-| `@scheduler` | Calendar optimization, scheduling |
-| `@organizer` | Notion organization, task management |
-| `@communicator` | Email drafting, inbox management |
-| `@executor` | System automation, shell commands |
+| Agent           | Role                                 |
+| --------------- | ------------------------------------ |
+| `@flowstate`    | Primary orchestrator, routes tasks   |
+| `@scheduler`    | Calendar optimization, scheduling    |
+| `@organizer`    | Notion organization, task management |
+| `@communicator` | Email drafting, inbox management     |
+| `@executor`     | System automation, shell commands    |
 
 ## Development
 
