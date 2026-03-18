@@ -26,7 +26,8 @@
     "gate:release": "node scripts/gate-release.js",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "forge:approval-smoke-3": "node -e \"process.exit(0)\""
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
