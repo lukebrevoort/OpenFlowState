@@ -1,65 +1,102 @@
 # FlowState 2.0
 
-> **Open-source productivity orchestration platform built on [OpenCode](https://opencode.ai)**
+> Open-source, model-agnostic productivity orchestration built on [OpenCode](https://opencode.ai)
 
-FlowState enables you to manage your entire digital life from one place. Connect your apps, describe what you want, and let FlowState handle the rest.
+FlowState is a local-first desktop app that helps you work across email,
+calendars, docs, and system tools from one place.
 
-## Core Philosophy
+## Current Project Phase
 
-1. **One Place, All Apps** - Stop bouncing between Notion, Gmail, Calendar, and your desktop
-2. **Progressive Autonomy** - Safe actions happen automatically; risky actions require approval
-3. **User-Controlled** - Your data and tokens stay on your machine
-4. **Extensible** - Power users can add custom MCPs and agents
-5. **Open Source** - MIT licensed, giving back to the community
+FlowState is in the post-Phase 8 / Phase 9 packaging hardening stage.
+
+- Desktop-first architecture is active (`packages/desktop`)
+- Core workflows and integrations are implemented and being hardened for release
+- Release tooling now includes packaging, smoke checks, contract tests,
+  and release gates
+
+See [`PROGRESS.md`](./PROGRESS.md) for the execution log and
+[`PLAN.md`](./PLAN.md) for architecture and roadmap details.
+
+## Product Direction
+
+1. **One Place, All Apps** - Work across Notion, Gmail, Calendar,
+   Canvas, and desktop automation
+2. **Progressive Autonomy** - Read/organize actions can run
+   automatically; write/send/delete actions require approval
+3. **Local-First Control** - Data, tokens, and runtime stay
+   on your machine
+4. **Model Agnostic** - Works with OpenCode-supported providers
+   (OpenAI, Anthropic, Google, Ollama, and more)
+5. **Extensible by Design** - Add custom MCP servers and workflow skills
 
 ## Quick Start
 
-```bash
-# Install dependencies
-pnpm install
+### Requirements
 
-# Start development
+- Node.js 20+
+- pnpm 9+
+- macOS (current MVP target)
+
+### Install
+
+```bash
+pnpm install
+```
+
+### Develop
+
+```bash
+# Run the full monorepo dev graph
 pnpm dev
 
-# Build all packages
+# Run desktop app flow directly
+pnpm dev:desktop
+```
+
+### Build and Test
+
+```bash
 pnpm build
+pnpm test
+pnpm typecheck
 ```
 
-## Project Structure
+## Repository Layout
 
-```
+```text
 flowstate/
 ├── packages/
-│   ├── core/                # Daemon, memory, auth systems
+│   ├── desktop/             # Electron + React desktop app
+│   ├── core/                # Shared core systems (auth, memory, notifications)
 │   ├── mcp-notion/          # Notion MCP server
 │   ├── mcp-gmail/           # Gmail MCP server
 │   ├── mcp-gcal/            # Google Calendar MCP server
 │   ├── mcp-system/          # System automation MCP server
-│   └── web-config/          # React web dashboard
-├── themes/
-│   └── flowstate.json       # OpenCode theme
-├── agents/
-│   ├── flowstate.md         # Primary orchestrator agent
-│   └── subagents/           # Specialized subagents
-├── opencode.json            # OpenCode configuration
-├── PLAN.md                  # Project plan
-└── PROGRESS.md              # Development progress
+│   ├── mcp-canvas/          # Canvas MCP server
+│   └── web-config/          # Legacy web config package (deprecated)
+├── workflows/               # Pre-built workflow skills
+├── agents/                  # Primary agent + subagents
+├── docs/release/            # Release hardening docs and runbooks
+├── PLAN.md                  # Architecture and roadmap
+├── PROGRESS.md              # Ongoing execution log
+└── README.md
 ```
 
 ## Integrations
 
-### Official MCPs
+### Built-In MCP Servers
 
-| Integration | Description | Status |
-|-------------|-------------|--------|
-| Notion | Pages, databases, task management | 🚧 In Progress |
-| Gmail | Email reading, drafting, sending | 🚧 In Progress |
-| Google Calendar | Events, scheduling, conflicts | 🚧 In Progress |
-| System | Notifications, apps, automation | 🚧 In Progress |
+| Integration | Capability Highlights | Status |
+| --- | --- | --- |
+| Notion | Pages, databases, task workflows | Active |
+| Gmail | Inbox read, draft, send, labeling | Active |
+| Google Calendar | Events, free/busy, conflict checks | Active |
+| System | Notifications, shell, app/window actions | Active |
+| Canvas | Courses, assignments, files, study-material flows | Active |
 
-### Adding Custom MCPs
+### Custom MCP Support
 
-FlowState supports any MCP server. Add to your `opencode.json`:
+FlowState can run additional local MCP servers through config.
 
 ```json
 {
@@ -73,46 +110,32 @@ FlowState supports any MCP server. Add to your `opencode.json`:
 }
 ```
 
-## Web Dashboard
+## Release and Validation Commands
 
-The web dashboard runs on `http://localhost:3847` and provides:
+For focused release validation and packaging checks:
 
-- **Integrations**: Connect and manage OAuth for your apps
-- **Preferences**: Configure timezone, working hours, LLM provider
-- **Agents**: View and configure FlowState agents
+```bash
+pnpm build:release
+pnpm smoke:dmg
+pnpm test:contracts
+pnpm test:packaged-e2e
+pnpm gate:release -- --dry-run
+```
+
+Supporting scripts are documented in [`docs/release/RELEASE_GATE_RUNBOOK.md`](./docs/release/RELEASE_GATE_RUNBOOK.md).
 
 ## Agents
 
-FlowState uses a primary orchestrator with specialized subagents:
+FlowState ships with a primary orchestrator and focused subagents:
 
 | Agent | Role |
-|-------|------|
-| `@flowstate` | Primary orchestrator, routes tasks |
-| `@scheduler` | Calendar optimization, scheduling |
-| `@organizer` | Notion organization, task management |
-| `@communicator` | Email drafting, inbox management |
-| `@executor` | System automation, shell commands |
-
-## Development
-
-See [PLAN.md](./PLAN.md) for full architecture details and [PROGRESS.md](./PROGRESS.md) for current status.
-
-### Requirements
-
-- Node.js 20+
-- pnpm 9+
-- macOS (for MVP - Windows support planned)
-
-### Testing
-
-```bash
-pnpm test
-```
+| --- | --- |
+| `@flowstate` | Primary orchestrator and task router |
+| `@scheduler` | Calendar planning and scheduling |
+| `@organizer` | Notion and task organization |
+| `@communicator` | Email composition and inbox workflows |
+| `@executor` | System automation and command execution |
 
 ## License
 
-MIT - See [LICENSE](./LICENSE) for details.
-
-## Acknowledgments
-
-Built on [OpenCode](https://opencode.ai) - thank you for the amazing platform!
+MIT - see [`LICENSE`](./LICENSE).
