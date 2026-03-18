@@ -4,6 +4,8 @@
 
 FlowState enables you to manage your entire digital life from one place. Connect your apps, describe what you want, and let FlowState handle the rest.
 
+Note: This README reflects the current MVP phase, so integrations marked "In Progress" are actively being built.
+
 ## Core Philosophy
 
 1. **One Place, All Apps** - Stop bouncing between Notion, Gmail, Calendar, and your desktop
