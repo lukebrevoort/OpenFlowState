@@ -69,6 +69,7 @@ import { validateLocalStudyMaterialSource } from './study-material-source-valida
 import { classifyStudyMaterialFallback } from './study-material-fallback.js';
 import { evaluateStudyMaterialQualityGate } from './study-material-quality-gate.js';
 import { ensureOpencodeCliAvailable } from './opencode-cli.js';
+import { createOtaUpdater, type OtaUpdateState } from './ota-updater.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -292,6 +293,12 @@ const parseSupportedTerminalCommand = (command: string): string => {
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
+
+const publishOtaUpdateState = (state: OtaUpdateState): void => {
+  mainWindow?.webContents.send('updates:stateChanged', state);
+};
+
+const otaUpdater = createOtaUpdater(publishOtaUpdateState);
 
 // Determine if we're in development mode
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -636,11 +643,19 @@ async function initialize(): Promise<void> {
     await appendStartupLog('Failed to start OpenCode', error);
     // Continue anyway - the app can still function, just without AI
   }
+
+  try {
+    await otaUpdater.checkForUpdates();
+    await appendStartupLog('OTA update check completed');
+  } catch (error) {
+    await appendStartupLog('OTA update check failed', error);
+  }
 }
 
 // Create window when app is ready
 app.whenReady().then(async () => {
   createWindow();
+  otaUpdater.initialize();
 
   // Initialize after window is created
   await initialize();
@@ -662,6 +677,7 @@ app.on('window-all-closed', () => {
 
 // Clean up before quitting
 app.on('before-quit', async () => {
+  otaUpdater.destroy();
   await stopPendingAuthWatcher();
 });
 
@@ -679,6 +695,56 @@ ipcMain.handle('app:getInfo', () => {
     platform: process.platform,
     isDev,
   };
+});
+
+ipcMain.handle('updates:getState', () => {
+  return otaUpdater.getState();
+});
+
+ipcMain.handle('updates:check', async () => {
+  try {
+    const state = await otaUpdater.checkForUpdates();
+    return { success: true, state };
+  } catch (error) {
+    return {
+      success: false,
+      state: otaUpdater.getState(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle('updates:download', async () => {
+  try {
+    const state = await otaUpdater.downloadUpdate();
+    return { success: true, state };
+  } catch (error) {
+    return {
+      success: false,
+      state: otaUpdater.getState(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+});
+
+ipcMain.handle('updates:defer', () => {
+  return {
+    success: true,
+    state: otaUpdater.deferUpdate(),
+  };
+});
+
+ipcMain.handle('updates:apply', () => {
+  try {
+    const state = otaUpdater.applyUpdateNow();
+    return { success: true, state };
+  } catch (error) {
+    return {
+      success: false,
+      state: otaUpdater.getState(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 });
 
 /**

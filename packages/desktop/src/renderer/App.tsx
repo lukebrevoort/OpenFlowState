@@ -21,7 +21,7 @@ import { useWorkflowsStore } from './stores/workflowsStore';
 import { providerDefinitions } from './data/providerData';
 import type { ProviderDefinition } from './data/providerData';
 import { getProviderAuthCommand, getProviderAuthUrl } from './lib/providerAuth';
-import type { AuthStatus } from './types/electron';
+import type { AuthStatus, OtaUpdateState } from './types/electron';
 
 export type AppPage = 'home' | 'chat' | 'tasks' | 'workflows' | 'integrations' | 'settings';
 
@@ -210,6 +210,9 @@ function App() {
   const [integrations, setIntegrations] = useState(
     useIntegrationsStore.getState().integrations,
   );
+  const [otaUpdateState, setOtaUpdateState] = useState<OtaUpdateState | null>(null);
+  const [otaActionPending, setOtaActionPending] = useState<'check' | 'download' | 'apply' | null>(null);
+  const [otaActionError, setOtaActionError] = useState<string | null>(null);
   const [authStatuses, setAuthStatuses] = useState<
     Record<string, AuthStatus | undefined>
   >({});
@@ -222,6 +225,36 @@ function App() {
       setIntegrations(state.integrations);
     });
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const updatesApi = window.flowstate?.updates;
+    if (!updatesApi) return;
+
+    let mounted = true;
+    updatesApi
+      .getState()
+      .then((state) => {
+        if (mounted) {
+          setOtaUpdateState(state);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load OTA update state:', error);
+      });
+
+    const unsubscribe = updatesApi.onStateChanged((state) => {
+      setOtaUpdateState(state);
+      setOtaActionPending(null);
+      if (state.stage !== 'error') {
+        setOtaActionError(null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -601,6 +634,96 @@ function App() {
     }
   }, [isDesktop]);
 
+  const handleUpdateNow = useCallback(async () => {
+    if (!otaUpdateState) return;
+    const updatesApi = window.flowstate?.updates;
+    if (!updatesApi) return;
+
+    try {
+      if (otaUpdateState.stage === 'downloaded') {
+        setOtaActionPending('apply');
+        const result = await updatesApi.apply();
+        if (!result.success) {
+          setOtaActionError(result.error ?? 'Failed to apply the update.');
+          setOtaActionPending(null);
+        }
+        return;
+      }
+
+      setOtaActionPending('download');
+      const result = await updatesApi.download();
+      if (!result.success) {
+        setOtaActionError(result.error ?? 'Failed to download the update.');
+        setOtaActionPending(null);
+      }
+    } catch (error) {
+      setOtaActionPending(null);
+      setOtaActionError(error instanceof Error ? error.message : String(error));
+    }
+  }, [otaUpdateState]);
+
+  const handleDeferUpdate = useCallback(async () => {
+    const updatesApi = window.flowstate?.updates;
+    if (!updatesApi) return;
+
+    try {
+      await updatesApi.defer();
+      setOtaActionError(null);
+    } catch (error) {
+      setOtaActionError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  const handleRetryUpdateCheck = useCallback(async () => {
+    const updatesApi = window.flowstate?.updates;
+    if (!updatesApi) return;
+
+    setOtaActionPending('check');
+    setOtaActionError(null);
+    try {
+      const result = await updatesApi.check();
+      if (!result.success) {
+        setOtaActionError(result.error ?? 'Failed to check for updates.');
+        setOtaActionPending(null);
+      }
+    } catch (error) {
+      setOtaActionPending(null);
+      setOtaActionError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  const shouldShowOtaBanner =
+    showMainShell &&
+    otaUpdateState !== null &&
+    ['available', 'deferred', 'downloading', 'downloaded', 'error'].includes(otaUpdateState.stage);
+
+  const otaVersionSummary = useMemo(() => {
+    if (!otaUpdateState) return null;
+    const available = otaUpdateState.downloadedVersion ?? otaUpdateState.availableVersion;
+    if (!available) {
+      return `Current version ${otaUpdateState.currentVersion}`;
+    }
+    return `Current ${otaUpdateState.currentVersion} -> Available ${available}`;
+  }, [otaUpdateState]);
+
+  const otaStatusMessage = useMemo(() => {
+    if (!otaUpdateState) return null;
+
+    switch (otaUpdateState.stage) {
+      case 'available':
+      case 'deferred':
+        return 'A new FlowState update is available.';
+      case 'downloading':
+        return `Downloading update (${otaUpdateState.downloadProgressPercent}%).`;
+      case 'downloaded':
+        return 'Update downloaded. Restart FlowState to finish installing.';
+      case 'error':
+        return otaUpdateState.errorMessage ?? 'Update failed. You are still on the current version.';
+      default:
+        return null;
+    }
+  }, [otaUpdateState]);
+
   return (
     <div className="size-full relative overflow-hidden">
       <div className="absolute inset-0 bg-background pointer-events-none" />
@@ -652,6 +775,81 @@ function App() {
         {showMainShell && openCodeStartupError && (!openCodeStatus?.running || !openCodeStatus?.healthy) ? (
           <div className="mx-4 mt-3 rounded-lg border border-semantic-denied/30 bg-semantic-denied/10 px-3 py-2 text-sm text-semantic-denied">
             OpenCode failed to start: {openCodeStartupError}
+          </div>
+        ) : null}
+
+        {shouldShowOtaBanner && otaUpdateState ? (
+          <div className="mx-4 mt-3 rounded-lg border border-primary/30 bg-primary/10 px-3 py-3 text-sm text-foreground">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="font-medium">{otaStatusMessage}</p>
+                <p className="text-xs text-muted-foreground">{otaVersionSummary}</p>
+                {otaActionError ? <p className="text-xs text-semantic-denied">{otaActionError}</p> : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {(otaUpdateState.stage === 'available' || otaUpdateState.stage === 'deferred') && (
+                  <>
+                    <button
+                      type="button"
+                      className="fs-button-secondary text-xs"
+                      onClick={handleDeferUpdate}
+                    >
+                      Later
+                    </button>
+                    <button
+                      type="button"
+                      className="fs-button-primary text-xs"
+                      onClick={handleUpdateNow}
+                      disabled={otaActionPending === 'download'}
+                    >
+                      {otaActionPending === 'download' ? 'Downloading...' : 'Update now'}
+                    </button>
+                  </>
+                )}
+
+                {otaUpdateState.stage === 'downloading' && (
+                  <button
+                    type="button"
+                    className="fs-button-secondary text-xs"
+                    onClick={handleDeferUpdate}
+                  >
+                    Install later
+                  </button>
+                )}
+
+                {otaUpdateState.stage === 'downloaded' && (
+                  <>
+                    <button
+                      type="button"
+                      className="fs-button-secondary text-xs"
+                      onClick={handleDeferUpdate}
+                    >
+                      Later
+                    </button>
+                    <button
+                      type="button"
+                      className="fs-button-primary text-xs"
+                      onClick={handleUpdateNow}
+                      disabled={otaActionPending === 'apply'}
+                    >
+                      {otaActionPending === 'apply' ? 'Restarting...' : 'Restart to update'}
+                    </button>
+                  </>
+                )}
+
+                {otaUpdateState.stage === 'error' && (
+                  <button
+                    type="button"
+                    className="fs-button-secondary text-xs"
+                    onClick={handleRetryUpdateCheck}
+                    disabled={otaActionPending === 'check'}
+                  >
+                    {otaActionPending === 'check' ? 'Checking...' : 'Retry'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         ) : null}
 

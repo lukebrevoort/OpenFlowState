@@ -10,6 +10,37 @@ export interface AppInfo {
   isDev: boolean;
 }
 
+export type OtaUpdateStage =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'deferred'
+  | 'up-to-date'
+  | 'error';
+
+export interface OtaUpdateState {
+  stage: OtaUpdateStage;
+  currentVersion: string;
+  availableVersion: string | null;
+  downloadedVersion: string | null;
+  downloadProgressPercent: number;
+  channel: string;
+  canAutoUpdate: boolean;
+  updateAvailable: boolean;
+  errorMessage: string | null;
+  lastCheckedAt: string | null;
+  disabledReason: string | null;
+}
+
+export interface OtaUpdateActionResult {
+  success: boolean;
+  state: OtaUpdateState;
+  error?: string;
+}
+
 export interface FileDialogFilter {
   name: string;
   extensions: string[];
@@ -532,6 +563,15 @@ export interface FlowstateAPI {
     showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
     showOpenFilesDialog: (options?: OpenFilesDialogOptions) => Promise<string[] | null>;
     ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  };
+
+  updates: {
+    getState: () => Promise<OtaUpdateState>;
+    check: () => Promise<OtaUpdateActionResult>;
+    download: () => Promise<OtaUpdateActionResult>;
+    apply: () => Promise<OtaUpdateActionResult>;
+    defer: () => Promise<OtaUpdateActionResult>;
+    onStateChanged: (callback: (state: OtaUpdateState) => void) => () => void;
   };
 
   window: {

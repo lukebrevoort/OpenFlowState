@@ -1,7 +1,17 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 1, 2026 (Bug fix: clear handoffTask on new session)
+> **Last Updated**: March 22, 2026 (FOR-140 OTA updates)
+
+---
+
+## Tasks Completed (Mar 22, 2026 - FOR-140 OTA Updates)
+
+- ✅ Added Electron OTA update orchestration in `packages/desktop/src/main/ota-updater.ts` using `electron-updater` with environment-driven feed URL and channel selection (stable/beta/alpha).
+- ✅ Wired update lifecycle IPC endpoints and renderer events in `packages/desktop/src/main/index.ts` + `packages/desktop/src/preload/index.ts` (`updates:getState/check/download/defer/apply`, `updates:stateChanged`).
+- ✅ Added in-app update prompt/banner with immediate update vs defer actions, download progress, restart-to-install flow, and retry handling in `packages/desktop/src/renderer/App.tsx`.
+- ✅ Added version visibility for current vs available update in Settings About section in `packages/desktop/src/renderer/components/SettingsPage.tsx`.
+- ✅ Added desktop dependency on `electron-updater` in `packages/desktop/package.json` and refreshed `pnpm-lock.yaml`.
 
 ---
 
