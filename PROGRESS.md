@@ -5,6 +5,14 @@
 
 ---
 
+## Tasks Completed (Mar 22, 2026 - FOR-142 Canvas submission status accuracy)
+
+- ✅ Fixed Canvas assignment status parsing to rely on per-user `submission` fields (`workflow_state` and `submitted_at`) instead of blindly trusting `has_submitted_submissions`.
+- ✅ Updated `canvas_list_assignments` to request submission details by default so status decisions are based on user-specific data.
+- ✅ Added regression tests for false-positive draft states and assignment-type-specific states (`online_quiz`, `online_upload`, `online_text_entry`).
+
+---
+
 ## Bug Fix (Mar 1, 2026 - Task Promoted Not Leaving)
 
 - ✅ Fixed stale `TaskHandoffCard` persisting across new sessions in ChatMode.
