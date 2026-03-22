@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { TimelineEvent } from "../types/electron";
 import { ActivityTimeline } from "../components/ActivityTimeline";
+import { ApprovalCard } from "../components/ApprovalCard";
 import { useTasksStore } from "../stores/tasksStore";
 import { useOpenCode } from "../hooks/useOpenCode";
 import { parseResponseHeader, getCleanContent } from "../lib/responseHeaders";
@@ -87,6 +88,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [runsPage, setRunsPage] = useState(1);
+  const [focusedApprovalRequestId, setFocusedApprovalRequestId] = useState<
+    string | null
+  >(null);
 
   const isRefreshing = isLoadingRuns || isLoadingTimeline || isLoadingArtifacts;
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -120,6 +124,25 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     reloadSelectedTimeline,
     reloadSelectedArtifacts,
   ]);
+
+  useEffect(() => {
+    const handleFocusApproval = (event: Event) => {
+      const customEvent = event as CustomEvent<{ requestId?: unknown }>;
+      const requestId =
+        typeof customEvent.detail?.requestId === "string"
+          ? customEvent.detail.requestId.trim()
+          : "";
+      setFocusedApprovalRequestId(requestId || null);
+    };
+
+    window.addEventListener("flowstate:approval-focus", handleFocusApproval);
+    return () => {
+      window.removeEventListener(
+        "flowstate:approval-focus",
+        handleFocusApproval,
+      );
+    };
+  }, []);
 
   const sortedRuns = useMemo(() => {
     const priority: Record<string, number> = {
@@ -257,6 +280,108 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
 
     return pending;
   }, [selectedTimeline]);
+
+  const pendingApprovals = useMemo(() => {
+    if (!selectedTimeline || selectedTimeline.length === 0) {
+      return { latest: null as null | TimelineEvent, count: 0 };
+    }
+
+    const responded = new Set<string>();
+    for (const event of selectedTimeline) {
+      if (event.kind !== "approval_response") continue;
+      const requestId = requestIdForEvent(event);
+      if (requestId) responded.add(requestId);
+    }
+
+    const pending: TimelineEvent[] = [];
+    for (const event of selectedTimeline) {
+      if (event.kind !== "approval_request") continue;
+      const requestId = requestIdForEvent(event);
+      if (requestId && responded.has(requestId)) continue;
+      pending.push(event);
+    }
+
+    if (pending.length === 0) {
+      return { latest: null as null | TimelineEvent, count: 0 };
+    }
+
+    const focused = focusedApprovalRequestId
+      ? pending.find((event) => requestIdForEvent(event) === focusedApprovalRequestId)
+      : null;
+
+    if (focused) {
+      return { latest: focused, count: pending.length };
+    }
+
+    let latest = pending[0]!;
+    for (let i = 1; i < pending.length; i += 1) {
+      if (pending[i]!.timestamp > latest.timestamp) {
+        latest = pending[i]!;
+      }
+    }
+
+    return { latest, count: pending.length };
+  }, [focusedApprovalRequestId, selectedTimeline]);
+
+  useEffect(() => {
+    if (!focusedApprovalRequestId) return;
+    if (pendingApprovals.latest) return;
+    setFocusedApprovalRequestId(null);
+  }, [focusedApprovalRequestId, pendingApprovals.latest]);
+
+  const approvalPayloadForEvent = (event: TimelineEvent) =>
+    isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
+
+  const normalizeApprovalErrorMessage = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Failed to process approval.";
+    const lowered = message.toLowerCase();
+
+    if (
+      lowered.includes("already") &&
+      (lowered.includes("processed") || lowered.includes("resolved"))
+    ) {
+      return "This approval has already been processed.";
+    }
+    if (
+      lowered.includes("expired") ||
+      lowered.includes("not found") ||
+      lowered.includes("unknown request")
+    ) {
+      return "This approval is no longer available (it may have expired).";
+    }
+    return message;
+  };
+
+  const replyToApproval = (requestId: string, mode: "once" | "always" | "deny") => {
+    if (!approvalsAvailable) {
+      return Promise.reject(
+        new Error(
+          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
+        ),
+      );
+    }
+
+    return window.flowstate.approvals
+      .reply(requestId, mode)
+      .then((result) => {
+        if (!result.success) {
+          throw new Error(result.error ?? "Failed to send approval response.");
+        }
+        return Promise.all([
+          reloadSelectedTimeline(),
+          reloadRuns({ silent: true }),
+          loadActiveRun({ silent: true }),
+        ]).then(() => undefined);
+      })
+      .catch((error) => {
+        throw new Error(normalizeApprovalErrorMessage(error));
+      });
+  };
 
   // Determine if user can respond - use header-based detection when available
   const canRespond = useMemo(() => {
@@ -665,6 +790,23 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                         Respond
                       </button>
                     )}
+                    {pendingApprovals.latest && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const node = document.getElementById(
+                            "task-approval-interface",
+                          );
+                          node?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          });
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#D4A574]/50 bg-[#D4A574]/10 px-3 py-2 text-xs text-[#C87137] transition-all duration-300 hover:bg-[#D4A574]/20"
+                      >
+                        View approval
+                      </button>
+                    )}
                     {canMarkComplete && (
                       <button
                         type="button"
@@ -726,6 +868,84 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                     </button>
                   </div>
                 </div>
+
+                {pendingApprovals.latest && (
+                  <div
+                    id="task-approval-interface"
+                    className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h3 className="text-sm font-semibold text-foreground">
+                        Approval Required
+                      </h3>
+                      <span className="text-[11px] text-muted-foreground">
+                        {pendingApprovals.count > 1
+                          ? `${pendingApprovals.count} approvals pending - showing latest.`
+                          : "Approval pending."}
+                      </span>
+                    </div>
+
+                    <ApprovalCard
+                      title={
+                        approvalPayloadForEvent(pendingApprovals.latest)?.title ??
+                        pendingApprovals.latest.title
+                      }
+                      summary={
+                        approvalPayloadForEvent(pendingApprovals.latest)?.summary ??
+                        pendingApprovals.latest.detail ??
+                        "This action requires your approval."
+                      }
+                      body={
+                        approvalPayloadForEvent(pendingApprovals.latest)?.body ?? ""
+                      }
+                      primaryActionLabel={
+                        approvalPayloadForEvent(pendingApprovals.latest)
+                          ?.approveLabel
+                      }
+                      alwaysApproveLabel={
+                        approvalPayloadForEvent(pendingApprovals.latest)
+                          ?.alwaysApproveLabel
+                      }
+                      denyLabel={
+                        approvalPayloadForEvent(pendingApprovals.latest)?.denyLabel
+                      }
+                      onApprove={() => {
+                        const requestId = requestIdForEvent(
+                          pendingApprovals.latest!,
+                        );
+                        if (!requestId) {
+                          throw new Error("Approval request is missing an id.");
+                        }
+                        return replyToApproval(requestId, "once");
+                      }}
+                      onAlwaysApprove={() => {
+                        const requestId = requestIdForEvent(
+                          pendingApprovals.latest!,
+                        );
+                        if (!requestId) {
+                          throw new Error("Approval request is missing an id.");
+                        }
+                        return replyToApproval(requestId, "always");
+                      }}
+                      onDeny={() => {
+                        const requestId = requestIdForEvent(
+                          pendingApprovals.latest!,
+                        );
+                        if (!requestId) {
+                          throw new Error("Approval request is missing an id.");
+                        }
+                        return replyToApproval(requestId, "deny");
+                      }}
+                    />
+                  </div>
+                )}
+
+                {selectedBlockingKind === "permission" && !pendingApprovals.latest && (
+                  <div className="rounded-2xl border border-[#D4A574]/30 bg-[#D4A574]/10 p-4 text-sm text-[#7A4D22]">
+                    This approval is no longer actionable. It may have already
+                    been processed or expired.
+                  </div>
+                )}
 
                 {selectedWorkflow && (
                   <div className="bg-card/70 border border-border rounded-2xl p-5 shadow-sm backdrop-blur-xl overflow-hidden">
@@ -816,77 +1036,26 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                   onApprove={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    if (!approvalsAvailable) {
-                      return Promise.reject(
-                        new Error(
-                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
-                        ),
-                      );
-                    }
-                    return window.flowstate.approvals
-                      .reply(requestId, "once")
-                      .then((result) => {
-                        if (!result.success) {
-                          throw new Error(
-                            result.error ?? "Failed to approve request",
-                          );
-                        }
-                        return reloadSelectedTimeline();
-                      })
-                      .catch((err) => {
-                        console.error("Failed to approve request", err);
-                        throw err;
-                      });
+                    return replyToApproval(requestId, "once").catch((err) => {
+                      console.error("Failed to approve request", err);
+                      throw err;
+                    });
                   }}
                   onAlwaysApprove={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    if (!approvalsAvailable) {
-                      return Promise.reject(
-                        new Error(
-                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
-                        ),
-                      );
-                    }
-                    return window.flowstate.approvals
-                      .reply(requestId, "always")
-                      .then((result) => {
-                        if (!result.success) {
-                          throw new Error(
-                            result.error ?? "Failed to always-approve request",
-                          );
-                        }
-                        return reloadSelectedTimeline();
-                      })
-                      .catch((err) => {
-                        console.error("Failed to always-approve request", err);
-                        throw err;
-                      });
+                    return replyToApproval(requestId, "always").catch((err) => {
+                      console.error("Failed to always-approve request", err);
+                      throw err;
+                    });
                   }}
                   onDeny={(event) => {
                     const requestId = requestIdForEvent(event);
                     if (!requestId) return;
-                    if (!approvalsAvailable) {
-                      return Promise.reject(
-                        new Error(
-                          "Approvals bridge unavailable — restart FlowState to reload the preload API.",
-                        ),
-                      );
-                    }
-                    return window.flowstate.approvals
-                      .reply(requestId, "deny")
-                      .then((result) => {
-                        if (!result.success) {
-                          throw new Error(
-                            result.error ?? "Failed to deny request",
-                          );
-                        }
-                        return reloadSelectedTimeline();
-                      })
-                      .catch((err) => {
-                        console.error("Failed to deny request", err);
-                        throw err;
-                      });
+                    return replyToApproval(requestId, "deny").catch((err) => {
+                      console.error("Failed to deny request", err);
+                      throw err;
+                    });
                   }}
                 />
 

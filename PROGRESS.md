@@ -1,7 +1,15 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 1, 2026 (Bug fix: clear handoffTask on new session)
+> **Last Updated**: March 22, 2026 (FOR-144 approval flow UI hardening)
+
+---
+
+## Tasks Completed (Mar 22, 2026 - FOR-144 Approval Flow UI Hardening)
+
+- ✅ Added a dedicated approval interface in Tasks view so pending approvals are always visible with actionable approve/always approve/deny controls.
+- ✅ Added direct notification-to-approval focus wiring (`notifications:approvalClick` -> `flowstate:approval-focus`) so approval notifications open the relevant task and surface the correct pending request context.
+- ✅ Added explicit fallback state messaging when a task is blocked for approval but no actionable request remains (already processed/expired), plus friendlier stale/expired error copy.
 
 ---
 

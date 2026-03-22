@@ -512,6 +512,15 @@ function App() {
     return window.flowstate.notifications.onApprovalClick((event) => {
       const sessionId = typeof event?.sessionId === 'string' ? event.sessionId : '';
       const taskRunId = typeof event?.taskRunId === 'string' ? event.taskRunId : '';
+      const requestId = typeof event?.requestId === 'string' ? event.requestId : '';
+
+      if (requestId) {
+        window.dispatchEvent(
+          new CustomEvent('flowstate:approval-focus', {
+            detail: { requestId, taskRunId: taskRunId || undefined },
+          }),
+        );
+      }
 
       if (taskRunId) {
         handleSelectTaskRun(taskRunId);
