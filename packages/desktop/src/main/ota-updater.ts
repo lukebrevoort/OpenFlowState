@@ -225,7 +225,15 @@ class OtaUpdater {
       downloadProgressPercent: this.state.downloadProgressPercent,
     });
 
-    await autoUpdater.downloadUpdate();
+    try {
+      await autoUpdater.downloadUpdate();
+    } catch (error) {
+      this.setState({
+        stage: 'error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        lastCheckedAt: toIsoNow(),
+      });
+    }
     return this.getState();
   }
 
