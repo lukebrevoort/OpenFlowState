@@ -104,13 +104,31 @@ class OtaUpdater {
       return this.getState();
     }
 
+    let validatedFeedUrl: string;
+    try {
+      const parsed = new URL(feedUrl);
+      if (parsed.protocol !== 'https:') {
+        throw new Error('FLOWSTATE_UPDATE_FEED_URL must use https protocol');
+      }
+      validatedFeedUrl = parsed.toString();
+    } catch {
+      this.setState({
+        stage: 'disabled',
+        canAutoUpdate: false,
+        updateAvailable: false,
+        disabledReason:
+          'FLOWSTATE_UPDATE_FEED_URL must be a valid HTTPS URL to enable OTA updates.',
+      });
+      return this.getState();
+    }
+
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = this.state.channel !== 'latest';
     autoUpdater.allowDowngrade = false;
     autoUpdater.setFeedURL({
       provider: 'generic',
-      url: feedUrl,
+      url: validatedFeedUrl,
       channel: this.state.channel,
     });
 
