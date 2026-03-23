@@ -645,10 +645,18 @@ async function initialize(): Promise<void> {
   }
 
   try {
-    await otaUpdater.checkForUpdates();
-    await appendStartupLog('OTA update check completed');
+    // Run OTA update check in the background so it doesn't block app startup
+    void otaUpdater
+      .checkForUpdates()
+      .then(() => {
+        // Fire-and-forget logging; no need to block initialize() on this
+        void appendStartupLog('OTA update check completed');
+      })
+      .catch((error) => {
+        void appendStartupLog('OTA update check failed', error);
+      });
   } catch (error) {
-    await appendStartupLog('OTA update check failed', error);
+    await appendStartupLog('Failed to start OTA update check', error);
   }
 }
 
