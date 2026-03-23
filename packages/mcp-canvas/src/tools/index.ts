@@ -104,6 +104,37 @@ const formatDate = (dateStr: string | null): string => {
   });
 };
 
+const SUBMITTED_WORKFLOW_STATES = new Set(['submitted', 'graded', 'pending_review', 'complete']);
+const NOT_SUBMITTED_WORKFLOW_STATES = new Set(['unsubmitted', 'untaken', 'deleted']);
+
+const hasValidSubmittedTimestamp = (submittedAt: string | null | undefined): boolean => {
+  if (typeof submittedAt !== 'string' || submittedAt.trim() === '') return false;
+  return !Number.isNaN(Date.parse(submittedAt));
+};
+
+const isAssignmentSubmitted = (assignment: canvasApi.CanvasAssignment): boolean => {
+  const submission = assignment.submission;
+
+  if (!submission) {
+    return assignment.has_submitted_submissions;
+  }
+
+  const workflowState = submission.workflow_state?.trim().toLowerCase();
+  if (workflowState && NOT_SUBMITTED_WORKFLOW_STATES.has(workflowState)) {
+    return false;
+  }
+
+  if (hasValidSubmittedTimestamp(submission.submitted_at)) {
+    return true;
+  }
+
+  if (workflowState && SUBMITTED_WORKFLOW_STATES.has(workflowState)) {
+    return true;
+  }
+
+  return false;
+};
+
 // Tool definitions with annotations for better LLM understanding
 const CANVAS_TOOLS = [
   // ========== READ OPERATIONS (All read-only, safe to auto-execute) ==========
@@ -520,11 +551,12 @@ export function registerTools(server: Server): void {
         }
 
         case 'canvas_list_assignments': {
+          const includeSubmission = args?.includeSubmission !== false;
           const assignments = await canvasApi.getAssignments(
             args?.courseId as number,
             {
               orderBy: args?.orderBy as 'due_at' | 'name' | 'position' | undefined,
-              includeSubmission: args?.includeSubmission as boolean | undefined,
+              includeSubmission,
             }
           );
           
@@ -534,7 +566,7 @@ export function registerTools(server: Server): void {
             dueDate: formatDate(a.due_at),
             points: a.points_possible,
             submissionTypes: a.submission_types.join(', '),
-            submitted: a.has_submitted_submissions,
+            submitted: isAssignmentSubmitted(a),
             url: a.html_url,
           }));
           

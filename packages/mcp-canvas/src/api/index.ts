@@ -647,6 +647,10 @@ export interface CanvasAssignment {
   course_id: number;
   submission_types: string[];
   has_submitted_submissions: boolean;
+  submission?: {
+    submitted_at?: string | null;
+    workflow_state?: string | null;
+  };
   html_url: string;
   created_at: string;
   updated_at: string;
