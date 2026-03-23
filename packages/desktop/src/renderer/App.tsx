@@ -695,7 +695,7 @@ function App() {
   const shouldShowOtaBanner =
     showMainShell &&
     otaUpdateState !== null &&
-    ['available', 'deferred', 'downloading', 'downloaded', 'error'].includes(otaUpdateState.stage);
+    ['available', 'downloading', 'downloaded', 'error'].includes(otaUpdateState.stage);
 
   const otaVersionSummary = useMemo(() => {
     if (!otaUpdateState) return null;
