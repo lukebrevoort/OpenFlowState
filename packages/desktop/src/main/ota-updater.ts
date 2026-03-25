@@ -1,30 +1,8 @@
 import { app } from 'electron';
 import { autoUpdater, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater';
+import type { OtaUpdateState } from '../shared/ota-types';
 
-export type OtaUpdateStage =
-  | 'disabled'
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'downloading'
-  | 'downloaded'
-  | 'deferred'
-  | 'up-to-date'
-  | 'error';
-
-export interface OtaUpdateState {
-  stage: OtaUpdateStage;
-  currentVersion: string;
-  availableVersion: string | null;
-  downloadedVersion: string | null;
-  downloadProgressPercent: number;
-  channel: string;
-  canAutoUpdate: boolean;
-  updateAvailable: boolean;
-  errorMessage: string | null;
-  lastCheckedAt: string | null;
-  disabledReason: string | null;
-}
+export type { OtaUpdateStage, OtaUpdateState } from '../shared/ota-types';
 
 type SendState = (state: OtaUpdateState) => void;
 
@@ -59,6 +37,7 @@ const normalizeUpdateVersion = (value: UpdateInfo | UpdateDownloadedEvent | null
 class OtaUpdater {
   private initialized = false;
   private checkTimer: NodeJS.Timeout | null = null;
+  private deferredVersion: string | null = null;
 
   private state: OtaUpdateState = {
     stage: 'idle',
@@ -134,17 +113,23 @@ class OtaUpdater {
 
     autoUpdater.on('checking-for-update', () => {
       this.setState({
-        stage: 'checking',
+        stage: this.isCurrentUpdateDeferred() ? 'deferred' : 'checking',
         errorMessage: null,
       });
     });
 
     autoUpdater.on('update-available', (info) => {
+      const version = normalizeUpdateVersion(info);
+      const isDeferred = this.isDeferredVersion(version);
+      if (!isDeferred) {
+        this.deferredVersion = null;
+      }
+
       this.setState({
-        stage: 'available',
-        availableVersion: normalizeUpdateVersion(info),
-        downloadedVersion: null,
-        downloadProgressPercent: 0,
+        stage: isDeferred ? 'deferred' : 'available',
+        availableVersion: version,
+        downloadedVersion: isDeferred && this.state.downloadedVersion === version ? this.state.downloadedVersion : null,
+        downloadProgressPercent: isDeferred ? this.state.downloadProgressPercent : 0,
         updateAvailable: true,
         errorMessage: null,
         lastCheckedAt: toIsoNow(),
@@ -152,6 +137,7 @@ class OtaUpdater {
     });
 
     autoUpdater.on('update-not-available', () => {
+      this.deferredVersion = null;
       this.setState({
         stage: 'up-to-date',
         availableVersion: null,
@@ -165,7 +151,7 @@ class OtaUpdater {
 
     autoUpdater.on('download-progress', (progress) => {
       this.setState({
-        stage: 'downloading',
+        stage: this.isCurrentUpdateDeferred() ? 'deferred' : 'downloading',
         updateAvailable: true,
         errorMessage: null,
         downloadProgressPercent: Number.isFinite(progress.percent)
@@ -175,10 +161,16 @@ class OtaUpdater {
     });
 
     autoUpdater.on('update-downloaded', (info) => {
+      const version = normalizeUpdateVersion(info);
+      const isDeferred = this.isDeferredVersion(version);
+      if (!isDeferred) {
+        this.deferredVersion = null;
+      }
+
       this.setState({
-        stage: 'downloaded',
-        downloadedVersion: normalizeUpdateVersion(info),
-        availableVersion: normalizeUpdateVersion(info),
+        stage: isDeferred ? 'deferred' : 'downloaded',
+        downloadedVersion: version,
+        availableVersion: version,
         updateAvailable: true,
         errorMessage: null,
         downloadProgressPercent: 100,
@@ -236,6 +228,8 @@ class OtaUpdater {
       return this.getState();
     }
 
+    this.deferredVersion = null;
+
     this.setState({
       stage: 'downloading',
       errorMessage: null,
@@ -259,6 +253,8 @@ class OtaUpdater {
     if (!this.state.updateAvailable) {
       return this.getState();
     }
+
+    this.deferredVersion = this.state.downloadedVersion ?? this.state.availableVersion;
 
     this.setState({
       stage: 'deferred',
@@ -292,6 +288,14 @@ class OtaUpdater {
         });
       });
     }, checkInterval);
+  }
+
+  private isCurrentUpdateDeferred(): boolean {
+    return this.isDeferredVersion(this.state.downloadedVersion ?? this.state.availableVersion);
+  }
+
+  private isDeferredVersion(version: string | null): boolean {
+    return version !== null && version === this.deferredVersion;
   }
 
   private setState(patch: Partial<OtaUpdateState>): void {

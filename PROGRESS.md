@@ -1,7 +1,15 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 22, 2026 (FOR-140 OTA updates)
+> **Last Updated**: March 25, 2026 (OTA deferral persistence)
+
+---
+
+## Tasks Completed (Mar 25, 2026 - OTA Deferral Persistence)
+
+- ✅ Made OTA deferral sticky in `packages/desktop/src/main/ota-updater.ts` by tracking the deferred version and preserving `stage: 'deferred'` across `checking-for-update`, `update-available`, `download-progress`, and `update-downloaded` events for the same release.
+- ✅ Added regression coverage in `packages/desktop/src/main/ota-updater.test.ts` for channel derivation, enabled/disabled initialization paths, updater error handling, repeated update announcements, deferred download progress/completion, and deferral reset when a newer version appears.
+- ✅ Extracted shared OTA updater state types into `packages/desktop/src/shared/ota-types.d.ts` so the main process and renderer declarations reference a single source of truth.
 
 ---
 
