@@ -58,6 +58,9 @@ const deriveProgress = (events: TimelineEvent[]) => {
 function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const runs = useTasksStore((state) => state.runs);
   const selectedRunId = useTasksStore((state) => state.selectedRunId);
+  const focusedApprovalRequestId = useTasksStore(
+    (state) => state.focusedApprovalRequestId,
+  );
   const selectedTimeline = useTasksStore((state) => state.selectedTimeline);
   const selectedWorkflow = useTasksStore((state) => state.selectedWorkflow);
   const selectedArtifacts = useTasksStore((state) => state.selectedArtifacts);
@@ -69,6 +72,9 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const reloadRuns = useTasksStore((state) => state.reloadRuns);
   const loadActiveRun = useTasksStore((state) => state.loadActiveRun);
   const selectRun = useTasksStore((state) => state.selectRun);
+  const setFocusedApprovalRequestId = useTasksStore(
+    (state) => state.setFocusedApprovalRequestId,
+  );
   const reloadSelectedTimeline = useTasksStore(
     (state) => state.reloadSelectedTimeline,
   );
@@ -88,9 +94,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
   const [isSendingReply, setIsSendingReply] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [runsPage, setRunsPage] = useState(1);
-  const [focusedApprovalRequestId, setFocusedApprovalRequestId] = useState<
-    string | null
-  >(null);
 
   const isRefreshing = isLoadingRuns || isLoadingTimeline || isLoadingArtifacts;
   const approvalsAvailable = Boolean(window.flowstate?.approvals?.reply);
@@ -124,25 +127,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     reloadSelectedTimeline,
     reloadSelectedArtifacts,
   ]);
-
-  useEffect(() => {
-    const handleFocusApproval = (event: Event) => {
-      const customEvent = event as CustomEvent<{ requestId?: unknown }>;
-      const requestId =
-        typeof customEvent.detail?.requestId === "string"
-          ? customEvent.detail.requestId.trim()
-          : "";
-      setFocusedApprovalRequestId(requestId || null);
-    };
-
-    window.addEventListener("flowstate:approval-focus", handleFocusApproval);
-    return () => {
-      window.removeEventListener(
-        "flowstate:approval-focus",
-        handleFocusApproval,
-      );
-    };
-  }, []);
 
   const sortedRuns = useMemo(() => {
     const priority: Record<string, number> = {
@@ -327,7 +311,11 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     if (!focusedApprovalRequestId) return;
     if (pendingApprovals.latest) return;
     setFocusedApprovalRequestId(null);
-  }, [focusedApprovalRequestId, pendingApprovals.latest]);
+  }, [
+    focusedApprovalRequestId,
+    pendingApprovals.latest,
+    setFocusedApprovalRequestId,
+  ]);
 
   const approvalPayloadForEvent = (event: TimelineEvent) =>
     isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;
