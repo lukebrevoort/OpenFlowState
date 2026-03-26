@@ -243,28 +243,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     return null;
   }, [selectedRun, selectedTimeline, workflowArtifacts]);
 
-  const pendingApprovalCount = useMemo(() => {
-    if (!selectedTimeline || selectedTimeline.length === 0) return 0;
-
-    const responded = new Set<string>();
-    for (const event of selectedTimeline) {
-      if (event.kind !== "approval_response") continue;
-      const id = requestIdForEvent(event);
-      if (id) responded.add(id);
-    }
-
-    let pending = 0;
-    for (const event of selectedTimeline) {
-      if (event.kind !== "approval_request") continue;
-      const id = requestIdForEvent(event);
-      if (!id || !responded.has(id)) {
-        pending += 1;
-      }
-    }
-
-    return pending;
-  }, [selectedTimeline]);
-
   const pendingApprovals = useMemo(() => {
     if (!selectedTimeline || selectedTimeline.length === 0) {
       return { latest: null as null | TimelineEvent, count: 0 };
@@ -317,6 +295,8 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     pendingApprovals.latest,
     setFocusedApprovalRequestId,
   ]);
+
+  const pendingApprovalCount = pendingApprovals.count;
 
   const approvalPayloadForEvent = (event: TimelineEvent) =>
     isApprovalPayloadInline(event.payloadInline) ? event.payloadInline : undefined;

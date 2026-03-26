@@ -18,6 +18,7 @@
 - ✅ Moved approval focus targeting from a transient `window` event into `useTasksStore`, so notification clicks persist the intended `requestId` even before `TasksMode` mounts.
 - ✅ Updated `App.tsx` to write the focus target into the tasks store before navigating/selecting the run, preventing missed focus when the user is not already on the Tasks page.
 - ✅ Updated `TasksMode.tsx` to read and clear the persisted focus target from the store instead of relying on a mount-time event listener.
+- ✅ Reduced duplicate pending-approval scans in `TasksMode.tsx` by deriving `pendingApprovalCount` from shared `pendingApprovals` state, keeping count and selection logic consistent.
 
 ---
 
