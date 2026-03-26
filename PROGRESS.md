@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 1, 2026 (Bug fix: clear handoffTask on new session)
+> **Last Updated**: March 6, 2026 (FOR-87 OTA updates part 1)
 
 ---
 
@@ -26,6 +26,17 @@
 Phase 8 execution is complete, including implementation and verification through `phase-8.full.verify-batch-6`.
 
 Phase 9 packaging hardening is complete through `phase.9.8_demo-release-readiness` (lean path).
+
+---
+
+## Tasks Completed (Mar 6, 2026 - FOR-87 OTA Updates Part 1)
+
+- ✅ Configured desktop builder publish target to GitHub Releases in `packages/desktop/electron-builder.yml` and enabled update feed generation (`generateUpdatesFilesForAllChannels`) so `latest-mac.yml` is produced with DMG/ZIP release artifacts.
+- ✅ Added `electron-updater` dependency and implemented main-process OTA lifecycle manager in `packages/desktop/src/main/app-updater.ts`.
+- ✅ Wired updater startup + IPC in `packages/desktop/src/main/index.ts` for launch checks, interval checks, manual retries, and restart-to-install.
+- ✅ Added renderer API/type surfaces (`packages/desktop/src/preload/index.ts`, `packages/desktop/src/renderer/types/electron.d.ts`) and surfaced update lifecycle states in-app via banner in `packages/desktop/src/renderer/App.tsx`.
+- ✅ Added configurable update check interval in settings + persisted config schema support (`packages/desktop/src/renderer/components/SettingsPage.tsx`, `packages/desktop/src/main/config-store.ts`).
+- ✅ Extended CI release automation with a post-gate publish job in `.github/workflows/release-gate.yml` and added `package:mac:publish` script in `packages/desktop/package.json` to publish signed/notarized artifacts + feed metadata to GitHub Releases.
 
 ---
 

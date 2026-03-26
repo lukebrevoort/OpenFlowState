@@ -6,6 +6,8 @@ directories:
   output: out
   buildResources: assets
 
+generateUpdatesFilesForAllChannels: true
+
 files:
   - dist/**/*
   - assets/**/*
@@ -111,5 +113,7 @@ linux:
   icon: assets/flowstate-main-logo.png
   category: Office
 
-# Auto-update configuration (future)
-publish: null
+publish:
+  provider: github
+  owner: lukebrevoort
+  repo: OpenFlowState

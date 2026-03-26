@@ -194,6 +194,11 @@ export function SettingsPage() {
   );
   const perCourseRetentionEnabled =
     studyMaterialPreferences?.retention?.perCourseRetentionEnabled ?? true;
+  const updateCheckIntervalMinutes = Math.max(
+    5,
+    Math.min(1440, config?.preferences?.updates?.checkIntervalMinutes ?? 60)
+  );
+  const updateChannel = config?.preferences?.updates?.channel === "beta" ? "beta" : "stable";
 
   const updateStudyMaterialPreferences = async (
     patch: Partial<
@@ -330,6 +335,41 @@ export function SettingsPage() {
       });
     } catch (error) {
       console.error("Failed to update approval notifications", error);
+    }
+  };
+
+  const handleUpdateCheckIntervalChange = async (value: number) => {
+    if (!config) return;
+    const next = Math.max(5, Math.min(1440, Math.trunc(value)));
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          updates: {
+            checkIntervalMinutes: next,
+            channel: config.preferences.updates?.channel === "beta" ? "beta" : "stable",
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update app update check interval", error);
+    }
+  };
+
+  const handleUpdateChannelChange = async (value: "stable" | "beta") => {
+    if (!config) return;
+    try {
+      await updateConfig({
+        preferences: {
+          ...config.preferences,
+          updates: {
+            checkIntervalMinutes: config.preferences.updates?.checkIntervalMinutes ?? 60,
+            channel: value,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Failed to update app update channel", error);
     }
   };
 
@@ -593,6 +633,51 @@ export function SettingsPage() {
                   <option value="ja">日本語</option>
                   <option value="zh">中文</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+                  <RotateCcw className="w-4 h-4 text-muted-foreground" />
+                  Update channel
+                </label>
+                <select
+                  value={updateChannel}
+                  onChange={(event) => {
+                    void handleUpdateChannelChange(event.target.value as "stable" | "beta");
+                  }}
+                  className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  disabled={!config}
+                >
+                  <option value="stable">Stable (recommended)</option>
+                  <option value="beta">Beta (pre-release builds)</option>
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Beta channel opts this device into pre-release updates.
+                </p>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  Update check interval (minutes)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={1440}
+                  step={1}
+                  value={updateCheckIntervalMinutes}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (!Number.isFinite(parsed)) return;
+                    void handleUpdateCheckIntervalChange(parsed);
+                  }}
+                  className="w-full px-4 py-2 rounded-lg bg-input-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  disabled={!config}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  FlowState checks for app updates on launch and at this interval.
+                </p>
               </div>
             </div>
           </div>

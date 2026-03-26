@@ -58,6 +58,31 @@ export interface OpenCodeEvent {
   data: unknown;
 }
 
+export type AppUpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'retrying'
+  | 'not_available'
+  | 'error';
+
+export interface AppUpdateStatus {
+  phase: AppUpdatePhase;
+  message: string;
+  timestamp: string;
+  progressPercent?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  bytesPerSecond?: number;
+  version?: string;
+  releaseNotes?: string;
+  retryAttempt?: number;
+  retryAtIso?: string;
+  canRetry?: boolean;
+}
+
 export interface IpcError {
   code: 'NOT_IMPLEMENTED' | 'INVALID_REQUEST' | 'UNAVAILABLE' | 'UNKNOWN';
   message: string;
@@ -532,6 +557,10 @@ export interface FlowstateAPI {
     showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
     showOpenFilesDialog: (options?: OpenFilesDialogOptions) => Promise<string[] | null>;
     ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+    getUpdateStatus: () => Promise<AppUpdateStatus>;
+    checkForUpdates: () => Promise<{ success: boolean; started: boolean; error?: string }>;
+    installUpdate: () => Promise<{ success: boolean; error?: string }>;
+    onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => () => void;
   };
 
   window: {
@@ -794,6 +823,10 @@ export interface FlowstateConfig {
     notifications: {
       approvals: boolean;
       taskComplete: boolean;
+    };
+    updates?: {
+      checkIntervalMinutes?: number;
+      channel?: 'stable' | 'beta';
     };
 
     /**

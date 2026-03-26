@@ -70,6 +70,11 @@ export interface StudyMaterialPreferences {
   retention: StudyMaterialRetentionPreferences;
 }
 
+export interface UpdatesPreferences {
+  checkIntervalMinutes: number;
+  channel: 'stable' | 'beta';
+}
+
 /**
  * User preferences
  */
@@ -77,6 +82,7 @@ export interface UserPreferences {
   timezone: string;
   workingHours: WorkingHours;
   notifications: NotificationPreferences;
+  updates?: UpdatesPreferences;
 
   /**
    * When true/false, overrides system prefers-reduced-motion.
@@ -157,6 +163,10 @@ const DEFAULT_CONFIG: FlowStateConfig = {
     notifications: {
       approvals: true,
       taskComplete: true,
+    },
+    updates: {
+      checkIntervalMinutes: 60,
+      channel: 'stable',
     },
     studyMaterials: {
       externalKnowledgeAllowlistEnabled: false,
@@ -240,6 +250,12 @@ class ConfigStore {
           workingHours: {
             ...DEFAULT_CONFIG.preferences.workingHours,
             ...loaded.preferences?.workingHours,
+          },
+          updates: {
+            checkIntervalMinutes:
+              loaded.preferences?.updates?.checkIntervalMinutes ??
+              DEFAULT_CONFIG.preferences.updates!.checkIntervalMinutes,
+            channel: loaded.preferences?.updates?.channel ?? DEFAULT_CONFIG.preferences.updates!.channel,
           },
           studyMaterials: {
             externalKnowledgeAllowlistEnabled:
