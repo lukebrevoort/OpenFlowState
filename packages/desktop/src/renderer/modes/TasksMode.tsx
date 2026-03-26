@@ -281,7 +281,8 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
     for (const event of selectedTimeline) {
       if (event.kind !== "approval_request") continue;
       const requestId = requestIdForEvent(event);
-      if (requestId && responded.has(requestId)) continue;
+      // Only treat approval requests with a valid requestId that has not been responded to as pending.
+      if (!requestId || responded.has(requestId)) continue;
       pending.push(event);
     }
 
