@@ -1,7 +1,7 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 25, 2026 (approval notification focus persistence fix)
+> **Last Updated**: March 27, 2026 (approval pending filtering hardening)
 
 ---
 
@@ -19,6 +19,7 @@
 - ✅ Updated `App.tsx` to write the focus target into the tasks store before navigating/selecting the run, preventing missed focus when the user is not already on the Tasks page.
 - ✅ Updated `TasksMode.tsx` to read and clear the persisted focus target from the store instead of relying on a mount-time event listener.
 - ✅ Reduced duplicate pending-approval scans in `TasksMode.tsx` by deriving `pendingApprovalCount` from shared `pendingApprovals` state, keeping count and selection logic consistent.
+- ✅ Hardened pending approval derivation to ignore approval requests missing `requestId`, preventing non-actionable `ApprovalCard` renders that would fail on action click.
 
 ---
 
