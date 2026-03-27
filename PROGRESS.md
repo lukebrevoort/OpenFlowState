@@ -1,7 +1,15 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 25, 2026 (OTA deferral persistence)
+> **Last Updated**: March 27, 2026 (OTA e2e CI coverage)
+
+---
+
+## Tasks Completed (Mar 27, 2026 - OTA e2e CI Coverage)
+
+- ✅ Added OTA lifecycle end-to-end regression tests in `packages/desktop/src/main/ota-updater-e2e.test.ts` to verify check, defer, download, apply, and failure fallback flows against mocked updater events.
+- ✅ Extended packaged e2e runner in `scripts/test-packaged-e2e.js` to include OTA e2e coverage in release-gate e2e execution.
+- ✅ Added explicit CI execution of OTA e2e test in `.github/workflows/release-gate.yml` so pull-request CI validates OTA behavior without waiting for manual full-release runs.
 
 ---
 

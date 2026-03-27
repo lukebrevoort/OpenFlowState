@@ -46,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run OTA update e2e tests
+        run: pnpm --filter @flowstate/desktop exec vitest run src/main/ota-updater-e2e.test.ts
+
       - name: Run release gate (dry-run)
         if: github.event_name != 'workflow_dispatch' || inputs.full_release == 'false'
         run: pnpm gate:release -- --dry-run
