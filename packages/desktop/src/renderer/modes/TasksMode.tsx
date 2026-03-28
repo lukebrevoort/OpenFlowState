@@ -1002,30 +1002,6 @@ function TasksMode({ onOpenChat }: { onOpenChat?: () => void }) {
                       ? "Loading activity..."
                       : "No activity yet"
                   }
-                  onApprove={(event) => {
-                    const requestId = requestIdForEvent(event);
-                    if (!requestId) return;
-                    return replyToApproval(requestId, "once").catch((err) => {
-                      console.error("Failed to approve request", err);
-                      throw err;
-                    });
-                  }}
-                  onAlwaysApprove={(event) => {
-                    const requestId = requestIdForEvent(event);
-                    if (!requestId) return;
-                    return replyToApproval(requestId, "always").catch((err) => {
-                      console.error("Failed to always-approve request", err);
-                      throw err;
-                    });
-                  }}
-                  onDeny={(event) => {
-                    const requestId = requestIdForEvent(event);
-                    if (!requestId) return;
-                    return replyToApproval(requestId, "deny").catch((err) => {
-                      console.error("Failed to deny request", err);
-                      throw err;
-                    });
-                  }}
                 />
 
                 {pendingApprovalCount > 0 && (
