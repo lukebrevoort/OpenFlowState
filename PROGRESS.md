@@ -747,6 +747,29 @@ packages/desktop/src/
 
 ---
 
+## Tasks Completed (Mar 28, 2026 - Desktop Dev Startup Fix for Worktrees)
+**Timestamp**: Mar 28, 2026 13:40
+
+**ISSUE DIAGNOSED**
+- `pnpm dev:desktop` launched Electron, but OpenCode and approvals/task stores failed to initialize with `better-sqlite3` `NODE_MODULE_VERSION` mismatch (`141` vs Electron-required `119`).
+
+**ROOT CAUSE**
+- Native module `better-sqlite3` was built against host Node ABI (Node v25 in this environment) instead of Electron's ABI.
+- Worktree startup path did not enforce an Electron native rebuild before launching desktop dev.
+
+**TASKS COMPLETED**
+- ✅ Added `packages/desktop` script: `rebuild:native` (`electron-rebuild -f -w better-sqlite3`).
+- ✅ Updated root `predev:desktop` to run `pnpm --filter @flowstate/desktop rebuild:native` before MCP package builds.
+- ✅ Re-ran `pnpm dev:desktop` and confirmed OpenCode server initializes successfully in this worktree.
+
+**IN PROGRESS**
+- [ ] Manual validation of UI hardening approval flow now that desktop startup is stable.
+
+**BLOCKERS**
+- None
+
+---
+
 ## Tasks Completed (Feb 7, 2026 - Phase 5 & 5.5 Status Update)
 **Timestamp**: Feb 7, 2026 21:15
 

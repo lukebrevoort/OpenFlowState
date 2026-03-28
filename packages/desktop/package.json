@@ -8,6 +8,7 @@
   "main": "dist/main/index.js",
   "type": "module",
   "scripts": {
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\"",
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:preload": "tsc -p tsconfig.preload.json --watch",
