@@ -1,7 +1,26 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 1, 2026 (Bug fix: clear handoffTask on new session)
+> **Last Updated**: March 28, 2026 (approval UX consolidation in Tasks timeline)
+
+---
+
+## Tasks Completed (Mar 22, 2026 - FOR-144 Approval Flow UI Hardening)
+
+- ✅ Added a dedicated approval interface in Tasks view so pending approvals are always visible with actionable approve/always approve/deny controls.
+- ✅ Added direct notification-to-approval focus wiring (`notifications:approvalClick` -> `flowstate:approval-focus`) so approval notifications open the relevant task and surface the correct pending request context.
+- ✅ Added explicit fallback state messaging when a task is blocked for approval but no actionable request remains (already processed/expired), plus friendlier stale/expired error copy.
+
+---
+
+## Bug Fix (Mar 25, 2026 - Approval Notification Focus Persistence)
+
+- ✅ Moved approval focus targeting from a transient `window` event into `useTasksStore`, so notification clicks persist the intended `requestId` even before `TasksMode` mounts.
+- ✅ Updated `App.tsx` to write the focus target into the tasks store before navigating/selecting the run, preventing missed focus when the user is not already on the Tasks page.
+- ✅ Updated `TasksMode.tsx` to read and clear the persisted focus target from the store instead of relying on a mount-time event listener.
+- ✅ Reduced duplicate pending-approval scans in `TasksMode.tsx` by deriving `pendingApprovalCount` from shared `pendingApprovals` state, keeping count and selection logic consistent.
+- ✅ Hardened pending approval derivation to ignore approval requests missing `requestId`, preventing non-actionable `ApprovalCard` renders that would fail on action click.
+- ✅ Removed timeline-level approval action handlers in `TasksMode.tsx` so approvals are completed through the dedicated approval interface only, avoiding duplicate approval affordances in the same view.
 
 ---
 

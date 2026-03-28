@@ -21,6 +21,7 @@ type TasksState = {
   runs: TaskRun[];
   activeRun: TaskRun | null;
   selectedRunId: string | null;
+  focusedApprovalRequestId: string | null;
   selectedTimeline: TimelineEvent[];
   selectedWorkflow: WorkflowRunMetadata | null;
   selectedArtifacts: WorkflowArtifact[] | null;
@@ -33,6 +34,7 @@ type TasksState = {
   reloadRuns: (opts?: { silent?: boolean }) => Promise<void>;
   loadActiveRun: (opts?: { silent?: boolean }) => Promise<void>;
   selectRun: (id: string) => Promise<void>;
+  setFocusedApprovalRequestId: (requestId: string | null) => void;
   reloadSelectedTimeline: (opts?: { silent?: boolean }) => Promise<void>;
   reloadSelectedArtifacts: (opts?: { silent?: boolean }) => Promise<void>;
   cancelRun: (id: string) => Promise<boolean>;
@@ -73,6 +75,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   runs: [],
   activeRun: null,
   selectedRunId: null,
+  focusedApprovalRequestId: null,
   selectedTimeline: [],
   selectedWorkflow: null,
   selectedArtifacts: null,
@@ -153,6 +156,11 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     });
     await get().reloadSelectedTimeline();
     await get().reloadSelectedArtifacts();
+  },
+
+  setFocusedApprovalRequestId: (requestId) => {
+    const nextRequestId = requestId?.trim() || null;
+    set({ focusedApprovalRequestId: nextRequestId });
   },
 
   reloadSelectedTimeline: async (opts) => {
