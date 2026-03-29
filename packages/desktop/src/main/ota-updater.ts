@@ -1,8 +1,6 @@
 import { app } from 'electron';
-import electronUpdater, { type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater';
+import { autoUpdater, type UpdateDownloadedEvent, type UpdateInfo } from 'electron-updater';
 import type { OtaUpdateState } from '../shared/ota-types';
-
-const { autoUpdater } = electronUpdater;
 
 export type { OtaUpdateStage, OtaUpdateState } from '../shared/ota-types';
 
