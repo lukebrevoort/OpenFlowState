@@ -1,34 +1,33 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 28, 2026 (approval UX consolidation in Tasks timeline)
+> **Last Updated**: March 27, 2026 (OTA e2e CI coverage)
 
 ---
 
-## Tasks Completed (Mar 22, 2026 - FOR-144 Approval Flow UI Hardening)
+## Tasks Completed (Mar 27, 2026 - OTA e2e CI Coverage)
 
-- ✅ Added a dedicated approval interface in Tasks view so pending approvals are always visible with actionable approve/always approve/deny controls.
-- ✅ Added direct notification-to-approval focus wiring (`notifications:approvalClick` -> `flowstate:approval-focus`) so approval notifications open the relevant task and surface the correct pending request context.
-- ✅ Added explicit fallback state messaging when a task is blocked for approval but no actionable request remains (already processed/expired), plus friendlier stale/expired error copy.
-
----
-
-## Bug Fix (Mar 25, 2026 - Approval Notification Focus Persistence)
-
-- ✅ Moved approval focus targeting from a transient `window` event into `useTasksStore`, so notification clicks persist the intended `requestId` even before `TasksMode` mounts.
-- ✅ Updated `App.tsx` to write the focus target into the tasks store before navigating/selecting the run, preventing missed focus when the user is not already on the Tasks page.
-- ✅ Updated `TasksMode.tsx` to read and clear the persisted focus target from the store instead of relying on a mount-time event listener.
-- ✅ Reduced duplicate pending-approval scans in `TasksMode.tsx` by deriving `pendingApprovalCount` from shared `pendingApprovals` state, keeping count and selection logic consistent.
-- ✅ Hardened pending approval derivation to ignore approval requests missing `requestId`, preventing non-actionable `ApprovalCard` renders that would fail on action click.
-- ✅ Removed timeline-level approval action handlers in `TasksMode.tsx` so approvals are completed through the dedicated approval interface only, avoiding duplicate approval affordances in the same view.
+- ✅ Added OTA lifecycle end-to-end regression tests in `packages/desktop/src/main/ota-updater-e2e.test.ts` to verify check, defer, download, apply, and failure fallback flows against mocked updater events.
+- ✅ Extended packaged e2e runner in `scripts/test-packaged-e2e.js` to include OTA e2e coverage in release-gate e2e execution.
+- ✅ Added explicit CI execution of OTA e2e test in `.github/workflows/release-gate.yml` so pull-request CI validates OTA behavior without waiting for manual full-release runs.
 
 ---
 
-## Tasks Completed (Mar 22, 2026 - FOR-142 Canvas submission status accuracy)
+## Tasks Completed (Mar 25, 2026 - OTA Deferral Persistence)
 
-- ✅ Fixed Canvas assignment status parsing to rely on per-user `submission` fields (`workflow_state` and `submitted_at`) instead of blindly trusting `has_submitted_submissions`.
-- ✅ Updated `canvas_list_assignments` to request submission details by default so status decisions are based on user-specific data.
-- ✅ Added regression tests for false-positive draft states and assignment-type-specific states (`online_quiz`, `online_upload`, `online_text_entry`).
+- ✅ Made OTA deferral sticky in `packages/desktop/src/main/ota-updater.ts` by tracking the deferred version and preserving `stage: 'deferred'` across `checking-for-update`, `update-available`, `download-progress`, and `update-downloaded` events for the same release.
+- ✅ Added regression coverage in `packages/desktop/src/main/ota-updater.test.ts` for channel derivation, enabled/disabled initialization paths, updater error handling, repeated update announcements, deferred download progress/completion, and deferral reset when a newer version appears.
+- ✅ Extracted shared OTA updater state types into `packages/desktop/src/shared/ota-types.d.ts` so the main process and renderer declarations reference a single source of truth.
+
+---
+
+## Tasks Completed (Mar 22, 2026 - FOR-140 OTA Updates)
+
+- ✅ Added Electron OTA update orchestration in `packages/desktop/src/main/ota-updater.ts` using `electron-updater` with environment-driven feed URL and channel selection (stable/beta/alpha).
+- ✅ Wired update lifecycle IPC endpoints and renderer events in `packages/desktop/src/main/index.ts` + `packages/desktop/src/preload/index.ts` (`updates:getState/check/download/defer/apply`, `updates:stateChanged`).
+- ✅ Added in-app update prompt/banner with immediate update vs defer actions, download progress, restart-to-install flow, and retry handling in `packages/desktop/src/renderer/App.tsx`.
+- ✅ Added version visibility for current vs available update in Settings About section in `packages/desktop/src/renderer/components/SettingsPage.tsx`.
+- ✅ Added desktop dependency on `electron-updater` in `packages/desktop/package.json` and refreshed `pnpm-lock.yaml`.
 
 ---
 

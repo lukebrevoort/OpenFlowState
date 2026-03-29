@@ -3,11 +3,21 @@
  * This is exposed to the renderer process via contextBridge
  */
 
+import type { OtaUpdateStage, OtaUpdateState } from '../../shared/ota-types';
+
+export type { OtaUpdateStage, OtaUpdateState };
+
 export interface AppInfo {
   name: string;
   version: string;
   platform: string;
   isDev: boolean;
+}
+
+export interface OtaUpdateActionResult {
+  success: boolean;
+  state: OtaUpdateState;
+  error?: string;
 }
 
 export interface FileDialogFilter {
@@ -532,6 +542,15 @@ export interface FlowstateAPI {
     showOpenDialog: (options?: { title?: string }) => Promise<string | null>;
     showOpenFilesDialog: (options?: OpenFilesDialogOptions) => Promise<string[] | null>;
     ensureFile: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  };
+
+  updates: {
+    getState: () => Promise<OtaUpdateState>;
+    check: () => Promise<OtaUpdateActionResult>;
+    download: () => Promise<OtaUpdateActionResult>;
+    apply: () => Promise<OtaUpdateActionResult>;
+    defer: () => Promise<OtaUpdateActionResult>;
+    onStateChanged: (callback: (state: OtaUpdateState) => void) => () => void;
   };
 
   window: {

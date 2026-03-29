@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Clock, Palette, Cpu, Globe, Shield, Bell, RotateCcw, BookOpen, BarChart3, Download } from "lucide-react";
 import { useConfig } from "../hooks/useConfig";
-import type { FlowstateConfig, WorkflowDefinition } from "../types/electron";
+import type { AppInfo, FlowstateConfig, OtaUpdateState, WorkflowDefinition } from "../types/electron";
 
 const STUDY_METRICS_RECENT_LIMIT = 12;
 
@@ -38,6 +38,8 @@ export function SettingsPage() {
   const [studyMetrics, setStudyMetrics] = useState<StudyMaterialMetrics | null>(null);
   const [studyMetricsLoading, setStudyMetricsLoading] = useState(false);
   const [studyMetricsError, setStudyMetricsError] = useState<string | null>(null);
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [updateState, setUpdateState] = useState<OtaUpdateState | null>(null);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -417,6 +419,41 @@ export function SettingsPage() {
 
   useEffect(() => {
     loadStudyMaterialMetrics().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    window.flowstate.settings
+      .getAppInfo()
+      .then((info) => {
+        if (mounted) {
+          setAppInfo(info);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load app info", error);
+      });
+
+    window.flowstate.updates
+      .getState()
+      .then((state) => {
+        if (mounted) {
+          setUpdateState(state);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load OTA state", error);
+      });
+
+    const unsubscribe = window.flowstate.updates.onStateChanged((state) => {
+      setUpdateState(state);
+    });
+
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const exportStudyMetricsJson = () => {
@@ -1111,7 +1148,15 @@ export function SettingsPage() {
           <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-6 shadow-sm">
             <h3 className="text-xl text-foreground mb-4">About FlowState</h3>
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p>Version 1.0.0</p>
+              <p>Version {appInfo?.version ?? "Unknown"}</p>
+              {updateState?.availableVersion ? (
+                <p>
+                  Update available: {updateState.availableVersion} ({updateState.stage === "downloaded" ? "Downloaded" : "Pending"})
+                </p>
+              ) : null}
+              {updateState?.lastCheckedAt ? (
+                <p>Last checked: {new Date(updateState.lastCheckedAt).toLocaleString()}</p>
+              ) : null}
               <p>© 2026 FlowState. All rights reserved.</p>
               <div className="flex gap-4 mt-4">
                 <a href="#" className="text-primary hover:underline">

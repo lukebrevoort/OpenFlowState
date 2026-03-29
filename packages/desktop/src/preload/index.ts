@@ -15,6 +15,7 @@ import type {
   TimelineEventEnvelope,
   OAuthSuccessEvent,
   OAuthErrorEvent,
+  OtaUpdateState,
   ApiTokenSuccessEvent,
   FlowstateConfig,
   ClientCredentials,
@@ -54,6 +55,19 @@ const flowstateAPI: FlowstateAPIDefinition = {
     showOpenFilesDialog: (options?: OpenFilesDialogOptions) =>
       ipcRenderer.invoke('app:showOpenFilesDialog', options),
     ensureFile: (filePath: string) => ipcRenderer.invoke('app:ensureFile', filePath),
+  },
+
+  updates: {
+    getState: () => ipcRenderer.invoke('updates:getState'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    apply: () => ipcRenderer.invoke('updates:apply'),
+    defer: () => ipcRenderer.invoke('updates:defer'),
+    onStateChanged: (callback: (state: OtaUpdateState) => void): Unsubscribe => {
+      const handler = (_event: Electron.IpcRendererEvent, state: OtaUpdateState) => callback(state);
+      ipcRenderer.on('updates:stateChanged', handler);
+      return () => ipcRenderer.removeListener('updates:stateChanged', handler);
+    },
   },
 
   // Window controls (for custom title bar)

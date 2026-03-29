@@ -9,7 +9,7 @@ const rootDir = path.resolve(__dirname, '..');
 const dryRun = process.argv.includes('--dry-run');
 
 const command =
-  'pnpm --filter @flowstate/desktop exec vitest run src/main/phase7-happy-path.test.ts src/main/study-material-e2e.test.ts';
+  'pnpm --filter @flowstate/desktop exec vitest run src/main/phase7-happy-path.test.ts src/main/study-material-e2e.test.ts src/main/ota-updater-e2e.test.ts';
 
 function run(step) {
   return new Promise((resolve, reject) => {
