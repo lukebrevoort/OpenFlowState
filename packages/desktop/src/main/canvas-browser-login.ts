@@ -4,6 +4,29 @@ import { loadChromiumRuntime } from './playwright-runtime.js';
 
 const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '');
 
+const removeFileIfExists = async (targetPath: string): Promise<void> => {
+  try {
+    await fs.unlink(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+};
+
+const persistStorageStateAtomically = async (context: any, storageStatePath: string): Promise<void> => {
+  const tempPath = `${storageStatePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    await context.storageState({ path: tempPath });
+    await removeFileIfExists(storageStatePath);
+    await fs.rename(tempPath, storageStatePath);
+  } catch (error) {
+    await removeFileIfExists(tempPath).catch(() => undefined);
+    throw error;
+  }
+};
+
 export async function runCanvasBrowserLogin(options: {
   canvasApiUrl: string;
   storageStatePath: string;
@@ -34,9 +57,11 @@ export async function runCanvasBrowserLogin(options: {
     if (confirmationFilePath) {
       console.error(`[canvas-login] Waiting for confirmation file: ${confirmationFilePath}`);
       const started = Date.now();
+      let confirmationDetected = false;
       while (Date.now() - started < timeoutMs) {
         try {
           await fs.stat(confirmationFilePath);
+          confirmationDetected = true;
           break;
         } catch {
           // keep waiting
@@ -46,6 +71,10 @@ export async function runCanvasBrowserLogin(options: {
 
       if (Date.now() - started >= timeoutMs) {
         throw new Error(`Timed out waiting for user confirmation file: ${confirmationFilePath}`);
+      }
+
+      if (confirmationDetected) {
+        await removeFileIfExists(confirmationFilePath);
       }
     }
 
@@ -61,7 +90,7 @@ export async function runCanvasBrowserLogin(options: {
         lastStatus = response.status();
         if (response.ok()) {
           const user = await response.json();
-          await context.storageState({ path: storageStatePath });
+          await persistStorageStateAtomically(context, storageStatePath);
           return {
             storageStatePath,
             userId: typeof user?.id === 'number' ? user.id : undefined,

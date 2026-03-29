@@ -4,6 +4,29 @@ import { loadChromiumRuntime } from './playwright-runtime.js';
 
 const DEFAULT_OUTLOOK_MAILBOX_URL = 'https://outlook.office.com/mail/';
 
+const removeFileIfExists = async (targetPath: string): Promise<void> => {
+  try {
+    await fs.unlink(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+};
+
+const persistStorageStateAtomically = async (context: any, storageStatePath: string): Promise<void> => {
+  const tempPath = `${storageStatePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    await context.storageState({ path: tempPath });
+    await removeFileIfExists(storageStatePath);
+    await fs.rename(tempPath, storageStatePath);
+  } catch (error) {
+    await removeFileIfExists(tempPath).catch(() => undefined);
+    throw error;
+  }
+};
+
 export type OutlookInboxMessage = {
   subject: string;
   sender?: string;
@@ -433,9 +456,11 @@ export async function runOutlookBrowserLogin(options: {
 
     if (confirmationFilePath) {
       const started = Date.now();
+      let confirmationDetected = false;
       while (Date.now() - started < timeoutMs) {
         try {
           await fs.stat(confirmationFilePath);
+          confirmationDetected = true;
           break;
         } catch {
           // keep waiting
@@ -445,6 +470,10 @@ export async function runOutlookBrowserLogin(options: {
 
       if (Date.now() - started >= timeoutMs) {
         throw new Error(`Timed out waiting for user confirmation file: ${confirmationFilePath}`);
+      }
+
+      if (confirmationDetected) {
+        await removeFileIfExists(confirmationFilePath);
       }
     }
 
@@ -458,7 +487,7 @@ export async function runOutlookBrowserLogin(options: {
 
     const resolvedMailboxUrl = deriveMailboxUrlFromCurrentPage(currentUrl, mailboxUrl);
 
-    await context.storageState({ path: storageStatePath });
+    await persistStorageStateAtomically(context, storageStatePath);
     return { storageStatePath, mailboxUrl: resolvedMailboxUrl };
   } finally {
     await context.close().catch(() => undefined);
