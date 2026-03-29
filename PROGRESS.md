@@ -1,7 +1,15 @@
 # FlowState 2.0 - Progress Tracker
 
 > **Purpose**: Track development progress, decisions made, and blockers encountered.  
-> **Last Updated**: March 27, 2026 (OTA e2e CI coverage)
+> **Last Updated**: March 29, 2026 (FOR-175 token/session file cleanup)
+
+---
+
+## Tasks Completed (Mar 29, 2026 - FOR-175 Canvas/Outlook Token Session Cleanup)
+
+- ✅ Updated Canvas and Outlook browser-login storage persistence to write via temp-file + rename, while removing any existing target file first to prevent stale token/session artifacts on re-authentication.
+- ✅ Added confirmation marker cleanup for both Canvas and Outlook browser login flows so `.ready-*` re-auth files are removed after they are consumed.
+- ✅ Normalized Canvas pending-auth file handling to a stable `canvas-browser.json` path and remove legacy `canvas-browser-<timestamp>.json` files to prevent duplicate/orphaned auth payloads.
 
 ---
 

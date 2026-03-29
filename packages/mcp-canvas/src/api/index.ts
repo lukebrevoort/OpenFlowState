@@ -48,6 +48,53 @@ const summarizeBodyForError = (body: string, maxChars = 600): string => {
 
 const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/$/, '');
 
+const removeFileIfExists = async (targetPath: string): Promise<void> => {
+  try {
+    await fs.unlink(targetPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+};
+
+const persistStorageStateAtomically = async (context: any, storageStatePath: string): Promise<void> => {
+  const tempPath = `${storageStatePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    await context.storageState({ path: tempPath });
+    await removeFileIfExists(storageStatePath);
+    await fs.rename(tempPath, storageStatePath);
+  } catch (error) {
+    await removeFileIfExists(tempPath).catch(() => undefined);
+    throw error;
+  }
+};
+
+const cleanupLegacyPendingCanvasAuthFiles = async (pendingAuthDir: string): Promise<void> => {
+  const files = await fs.readdir(pendingAuthDir);
+  await Promise.all(
+    files
+      .filter((fileName) => /^canvas-browser-\d+\.json$/.test(fileName))
+      .map((fileName) => removeFileIfExists(path.join(pendingAuthDir, fileName)))
+  );
+};
+
+const writePendingCanvasAuthFile = async (
+  pendingAuthDir: string,
+  payload: Record<string, unknown>
+): Promise<string> => {
+  const pendingAuthFile = path.join(pendingAuthDir, 'canvas-browser.json');
+  const tempPath = `${pendingAuthFile}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  await cleanupLegacyPendingCanvasAuthFiles(pendingAuthDir);
+  await fs.writeFile(tempPath, JSON.stringify(payload), 'utf8');
+  await removeFileIfExists(pendingAuthFile);
+  await fs.rename(tempPath, pendingAuthFile);
+
+  return pendingAuthFile;
+};
+
 const getCanvasBaseUrl = () => {
   const baseUrl = process.env.CANVAS_API_URL || process.env.CANVAS_BASE_URL;
   if (!baseUrl) {
@@ -530,9 +577,11 @@ export async function browserLoginWithPlaywright(options?: {
         `[mcp-canvas] Waiting for confirmation file: ${confirmationFilePath}`
       );
       const started = Date.now();
+      let confirmationDetected = false;
       while (Date.now() - started < timeoutMs) {
         try {
           await fs.stat(confirmationFilePath);
+          confirmationDetected = true;
           break;
         } catch {
           // keep waiting
@@ -544,6 +593,10 @@ export async function browserLoginWithPlaywright(options?: {
         throw new Error(
           `Timed out waiting for user confirmation file: ${confirmationFilePath}`
         );
+      }
+
+      if (confirmationDetected) {
+        await removeFileIfExists(confirmationFilePath);
       }
     }
 
@@ -559,18 +612,15 @@ export async function browserLoginWithPlaywright(options?: {
         lastStatus = response.status();
         if (response.ok()) {
           const user = await response.json();
-          await context.storageState({ path: storageStatePath });
+          await persistStorageStateAtomically(context, storageStatePath);
 
           // Write pending auth file for desktop to pick up and persist
           const flowstateDataDir = process.env.FLOWSTATE_DATA_DIR;
           if (flowstateDataDir) {
             const pendingAuthDir = path.join(flowstateDataDir, 'pending-auth');
-            const pendingAuthFile = path.join(pendingAuthDir, `canvas-browser-${Date.now()}.json`);
             try {
               await fs.mkdir(pendingAuthDir, { recursive: true });
-              await fs.writeFile(
-                pendingAuthFile,
-                JSON.stringify({
+              const pendingAuthFile = await writePendingCanvasAuthFile(pendingAuthDir, {
                   service: 'canvas',
                   canvasApiUrl: baseUrl,
                   canvasAuthMode: 'browser',
@@ -578,9 +628,7 @@ export async function browserLoginWithPlaywright(options?: {
                   timestamp: new Date().toISOString(),
                   userId: typeof user?.id === 'number' ? user.id : undefined,
                   userName: typeof user?.name === 'string' ? user.name : undefined,
-                }),
-                'utf8'
-              );
+                });
               console.error(`[mcp-canvas] Wrote pending auth file: ${pendingAuthFile}`);
             } catch (err) {
               console.error('[mcp-canvas] Failed to write pending auth file:', err);
