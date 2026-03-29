@@ -543,8 +543,14 @@ function App() {
     if (!window.flowstate?.notifications?.onApprovalClick) return;
 
     return window.flowstate.notifications.onApprovalClick((event) => {
+      const tasks = useTasksStore.getState();
       const sessionId = typeof event?.sessionId === 'string' ? event.sessionId : '';
       const taskRunId = typeof event?.taskRunId === 'string' ? event.taskRunId : '';
+      const requestId = typeof event?.requestId === 'string' ? event.requestId : '';
+
+      if (requestId) {
+        tasks.setFocusedApprovalRequestId(requestId);
+      }
 
       if (taskRunId) {
         handleSelectTaskRun(taskRunId);

@@ -346,6 +346,108 @@ describe('Tool Definition Validation', () => {
   });
 });
 
+describe('Canvas assignment submission status detection', () => {
+  it('defaults to include submission details for accurate status checks', async () => {
+    const api = await import('../api/index.js');
+    const getAssignmentsSpy = vi.spyOn(api, 'getAssignments').mockResolvedValue([
+      {
+        id: 10,
+        name: 'Draft file upload',
+        due_at: '2026-03-30T23:59:00Z',
+        points_possible: 100,
+        submission_types: ['online_upload'],
+        has_submitted_submissions: true,
+        submission: {
+          workflow_state: 'unsubmitted',
+          submitted_at: null,
+        },
+        html_url: 'https://canvas.example.com/courses/1/assignments/10',
+      } as any,
+    ]);
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: {
+        name: 'canvas_list_assignments',
+        arguments: { courseId: 1 },
+      },
+    });
+
+    expect(getAssignmentsSpy).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ includeSubmission: true })
+    );
+
+    const payload = result?.content?.[0]?.text?.split('\n\n')[1] ?? '[]';
+    const parsed = JSON.parse(payload);
+    expect(parsed[0].submitted).toBe(false);
+  });
+
+  it('handles assignment-type-specific submission states', async () => {
+    const api = await import('../api/index.js');
+    vi.spyOn(api, 'getAssignments').mockResolvedValue([
+      {
+        id: 21,
+        name: 'Quiz 3',
+        due_at: '2026-03-21T15:00:00Z',
+        points_possible: 20,
+        submission_types: ['online_quiz'],
+        has_submitted_submissions: true,
+        submission: {
+          workflow_state: 'untaken',
+          submitted_at: null,
+        },
+        html_url: 'https://canvas.example.com/courses/1/assignments/21',
+      },
+      {
+        id: 22,
+        name: 'Lab Report Upload',
+        due_at: '2026-03-22T15:00:00Z',
+        points_possible: 50,
+        submission_types: ['online_upload'],
+        has_submitted_submissions: false,
+        submission: {
+          workflow_state: 'submitted',
+          submitted_at: '2026-03-20T04:00:00Z',
+        },
+        html_url: 'https://canvas.example.com/courses/1/assignments/22',
+      },
+      {
+        id: 23,
+        name: 'Reflection',
+        due_at: '2026-03-23T15:00:00Z',
+        points_possible: 15,
+        submission_types: ['online_text_entry'],
+        has_submitted_submissions: false,
+        submission: {
+          workflow_state: 'pending_review',
+          submitted_at: null,
+        },
+        html_url: 'https://canvas.example.com/courses/1/assignments/23',
+      },
+    ] as any);
+
+    const { callToolHandler } = await setupToolHandlers();
+    const result = await callToolHandler?.({
+      params: {
+        name: 'canvas_list_assignments',
+        arguments: { courseId: 1, includeSubmission: true },
+      },
+    });
+
+    const payload = result?.content?.[0]?.text?.split('\n\n')[1] ?? '[]';
+    const parsed = JSON.parse(payload);
+
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 21, submitted: false }),
+        expect.objectContaining({ id: 22, submitted: true }),
+        expect.objectContaining({ id: 23, submitted: true }),
+      ])
+    );
+  });
+});
+
 describe('Canvas pagination', () => {
   it('follows next links and aggregates results', async () => {
     process.env.CANVAS_API_URL = 'https://canvas.example.com';
