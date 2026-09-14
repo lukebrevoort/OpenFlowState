@@ -14,6 +14,11 @@ on:
           - 'false'
           - 'true'
 
+# New commits supersede checks for the same pull request or branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   release-gate:
     runs-on: macos-latest
@@ -64,3 +69,4 @@ jobs:
           name: release-gate-artifacts
           path: .opencode/artifacts
           if-no-files-found: warn
+          retention-days: 7
