@@ -5,6 +5,13 @@
 
 ---
 
+## CI usage controls (September 2026)
+
+- Superseded PR release-gate runs cancel automatically; manual release runs remain independent.
+- Gate artifacts expire after seven days. Test commands and the release timeout are preserved.
+
+---
+
 ## Tasks Completed (Mar 29, 2026 - FOR-175 Canvas/Outlook Token Session Cleanup)
 
 - ✅ Updated Canvas and Outlook browser-login storage persistence to write via temp-file + rename, while removing any existing target file first to prevent stale token/session artifacts on re-authentication.
